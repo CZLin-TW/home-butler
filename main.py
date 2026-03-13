@@ -129,7 +129,7 @@ def ask_claude(user_id, user_message):
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
-    print(f"Claude raw response: {text}")
+    print(f"[DEBUG] raw: {repr(text)}")
     return text.strip()
 
 def get_user_name(user_id):
@@ -381,7 +381,7 @@ async def callback(request: Request):
 def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text
-    
+
     try:
         log_message(user_id, text)
         user_name = get_user_name(user_id)
