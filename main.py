@@ -32,6 +32,8 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，專門幫助管理家庭食品
 
 今天的日期是 {today}。
 
+如果對話有上下文，請根據上下文推斷使用者的意思。例如剛才提到牛奶，使用者說「這個我喝掉了」，應推斷為刪除牛奶。
+
 請只回傳 JSON，不要有其他文字。範例：
 {{"action": "add", "name": "牛奶", "quantity": 2, "unit": "瓶", "expiry": "2026-03-25"}}
 {{"action": "delete", "name": "牛奶"}}
@@ -52,17 +54,30 @@ def log_message(user_id, message):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([now, user_id, message])
 
-def ask_claude(user_message):
+def save_conversation(user_id, role, content):
+    sheet = get_sheet("對話暫存")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sheet.append_row([user_id, role, content, now])
+
+def get_recent_conversation(user_id, limit=6):
+    sheet = get_sheet("對話暫存")
+    records = sheet.get_all_records()
+    user_records = [r for r in records if r.get("Line User ID") == user_id]
+    recent = user_records[-limit:]
+    return [{"role": r["角色"], "content": r["內容"]} for r in recent]
+
+def ask_claude(user_id, user_message):
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = SYSTEM_PROMPT.format(today=today)
+    history = get_recent_conversation(user_id)
+    messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=500,
         system=prompt,
-        messages=[{"role": "user", "content": user_message}]
+        messages=messages
     )
     text = response.content[0].text.strip()
-    # 移除可能的 markdown code block
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -134,7 +149,7 @@ def handle_message(event):
     user_name = get_user_name(user_id)
 
     try:
-        result = ask_claude(text)
+        result = ask_claude(user_id, text)
         data = json.loads(result)
         action = data.get("action")
 
@@ -150,6 +165,9 @@ def handle_message(event):
             reply = "抱歉，我不太理解您的意思。"
     except Exception as e:
         reply = f"系統錯誤：{str(e)}"
+
+    save_conversation(user_id, "user", text)
+    save_conversation(user_id, "assistant", reply)
 
     line_bot_api.reply_message(
         event.reply_token,
