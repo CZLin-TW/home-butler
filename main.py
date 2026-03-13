@@ -386,8 +386,14 @@ def handle_message(event):
     try:
         result = ask_claude(user_id, text)
         parsed = json.loads(result)
-        actions = parsed.get("actions", [])
-        claude_reply = parsed.get("reply", "")
+        if isinstance(parsed, list):
+            # 舊格式：直接是陣列
+            actions = parsed
+            claude_reply = ""
+        else:
+            # 新格式：{"actions": [...], "reply": "..."}
+            actions = parsed.get("actions", [])
+            claude_reply = parsed.get("reply", "")
 
         results = []
         for data in actions:
