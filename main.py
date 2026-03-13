@@ -61,7 +61,13 @@ def ask_claude(user_message):
         system=prompt,
         messages=[{"role": "user", "content": user_message}]
     )
-    return response.content[0].text
+    text = response.content[0].text.strip()
+    # 移除可能的 markdown code block
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()
 
 def handle_add(data, user_name):
     sheet = get_sheet("食品庫存")
