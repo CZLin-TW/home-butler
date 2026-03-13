@@ -28,7 +28,8 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存
 - add_food：新增食品（需要 name, quantity, unit, expiry）
 - delete_food：刪除食品（需要 name）
 - query_food：查詢食品庫存（不需要額外欄位）
-- add_todo：新增待辦事項（需要 item, date, time（選填）, person（選填））
+- add_todo：新增待辦事項（需要 item, date，選填：time, person, type）
+  type 預設為「公開」，若使用者說「私人」或「只提醒我」則填「私人」
 - delete_todo：刪除待辦事項（需要 item）
 - query_todo：查詢待辦事項（不需要額外欄位）
 - unclear：語意不清，需要反問（需要 message）
@@ -142,17 +143,20 @@ def handle_query():
 def handle_add_todo(data, user_name):
     sheet = get_sheet("待辦事項")
     person = data.get("person", user_name)
+    todo_type = data.get("type", "公開")
     sheet.append_row([
         data.get("item", ""),
         data.get("date", ""),
         data.get("time", ""),
         person,
-        "待辦"
+        "待辦",
+        todo_type
     ])
     date_str = data.get("date", "")
     time_str = data.get("time", "")
     time_part = f" {time_str}" if time_str else ""
-    return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）"
+    type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
+    return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
 
 def handle_delete_todo(data):
     sheet = get_sheet("待辦事項")
@@ -209,26 +213,70 @@ async def notify():
             elif days_left <= 7:
                 this_week.append(label)
 
-        if not expired and not soon and not this_week:
-            return {"status": "no expiring items"}
-
-        lines = []
-        if expired:
-            lines.append("🔴 今天到期：" + "、".join(expired))
-        if soon:
-            lines.append("🟡 3天內到期：" + "、".join(soon))
-        if this_week:
-            lines.append("🟢 本週到期：" + "、".join(this_week))
-
-        message = "\n".join(lines)
-
         members_sheet = get_sheet("家庭成員")
         members = members_sheet.get_all_records()
-        for member in members:
-            if member.get("狀態") == "啟用":
-                user_id = member.get("Line User ID")
-                if user_id:
-                    line_bot_api.push_message(user_id, TextSendMessage(text=message))
+
+        # 食品推播
+        food_lines = []
+        if expired:
+            food_lines.append("🔴 今天到期：" + "、".join(expired))
+        if soon:
+            food_lines.append("🟡 3天內到期：" + "、".join(soon))
+        if this_week:
+            food_lines.append("🟢 本週到期：" + "、".join(this_week))
+
+        if food_lines:
+            food_message = "\n".join(food_lines)
+            for member in members:
+                if member.get("狀態") == "啟用":
+                    user_id = member.get("Line User ID")
+                    if user_id:
+                        line_bot_api.push_message(user_id, TextSendMessage(text=food_message))
+
+        # 待辦推播
+        todo_sheet = get_sheet("待辦事項")
+        todo_records = todo_sheet.get_all_records()
+
+        todo_lines_public = []
+        todo_private = {}
+
+        for r in todo_records:
+            if r.get("狀態") != "待辦":
+                continue
+            date_str = r.get("日期", "")
+            if not date_str:
+                continue
+            try:
+                todo_date = datetime.strptime(str(date_str), "%Y-%m-%d").date()
+            except:
+                continue
+            days_left = (todo_date - today).days
+            if 0 <= days_left <= 7:
+                time_part = f" {r['時間']}" if r.get("時間") else ""
+                label = f"• {r['事項']}（{date_str}{time_part}）"
+                if r.get("類型") == "私人":
+                    person = r.get("負責人", "")
+                    if person not in todo_private:
+                        todo_private[person] = []
+                    todo_private[person].append(label)
+                else:
+                    todo_lines_public.append(label)
+
+        if todo_lines_public:
+            todo_message = "📋 本週待辦：\n" + "\n".join(todo_lines_public)
+            for member in members:
+                if member.get("狀態") == "啟用":
+                    user_id = member.get("Line User ID")
+                    if user_id:
+                        line_bot_api.push_message(user_id, TextSendMessage(text=todo_message))
+
+        for person_name, items in todo_private.items():
+            todo_message = "🔒 您的私人待辦：\n" + "\n".join(items)
+            for member in members:
+                if member.get("狀態") == "啟用" and member.get("名稱") == person_name:
+                    user_id = member.get("Line User ID")
+                    if user_id:
+                        line_bot_api.push_message(user_id, TextSendMessage(text=todo_message))
 
         return {"status": "ok"}
     except Exception as e:
