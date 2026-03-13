@@ -120,7 +120,7 @@ def ask_claude(user_id, user_message):
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=500,
+        max_tokens=1000,
         system=prompt,
         messages=messages
     )
