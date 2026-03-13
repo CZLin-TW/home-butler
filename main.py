@@ -54,7 +54,7 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存
 - 待辦事項的 time 格式為 HH:MM，若未指定則留空
 - 如果對話有上下文，請根據上下文推斷使用者的意思
 
-請只回傳 JSON 陣列，不要有其他文字。範例：
+你必須永遠只回傳 JSON 陣列，絕對不可以回傳其他任何文字、說明或確認訊息。範例：
 [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}]
 [{{"action": "delete_food", "name": "牛奶"}}]
 [{{"action": "query_food"}}]
@@ -110,17 +110,14 @@ def ask_claude(user_id, user_message):
     family_info = get_family_members_info()
     prompt = SYSTEM_PROMPT.format(today=today, now_time=now_time, family_info=family_info)
     history = get_recent_conversation(user_id)
-    messages = history + [
-    {"role": "user", "content": user_message},
-    {"role": "assistant", "content": "["}  # 強制 Claude 從 [ 開始回答
-]
+    messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=500,
         system=prompt,
         messages=messages
     )
-    text = "[" + response.content[0].text.strip()
+    text = response.content[0].text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
