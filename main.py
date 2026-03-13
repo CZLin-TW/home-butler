@@ -197,7 +197,7 @@ def handle_delete_todo(data):
             return f"✅ 已標記「{data.get('item')}」為已完成"
     return f"❌ 找不到「{data.get('item')}」"
 
-def handle_query_todo():
+def handle_query_todo(user_name):
     sheet = get_sheet("待辦事項")
     records = sheet.get_all_records()
     valid = [r for r in records if r.get("狀態") == "待辦"]
@@ -205,8 +205,15 @@ def handle_query_todo():
         return "目前沒有待辦事項"
     lines = []
     for r in valid:
+        todo_type = r.get("類型", "公開")
+        person = r.get("負責人", "")
+        # 私人：只顯示自己的；公開：全部顯示
+        if todo_type == "私人" and person != user_name:
+            continue
         time_part = f" {r['時間']}" if r.get("時間") else ""
         lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
+    if not lines:
+        return "目前沒有待辦事項"
     return "待辦事項：\n" + "\n".join(lines)
 
 @app.get("/")
@@ -392,7 +399,7 @@ def handle_message(event):
             elif action == "delete_todo":
                 replies.append(handle_delete_todo(data))
             elif action == "query_todo":
-                replies.append(handle_query_todo())
+                replies.append(handle_query_todo(user_name))
             elif action == "unclear":
                 replies.append(data.get("message", "請問您的意思是？"))
             else:
