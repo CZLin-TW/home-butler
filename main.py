@@ -22,7 +22,7 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 SYSTEM_PROMPT = """你是一個家庭 AI 管家，專門幫助管理家庭食品庫存。
 
-當使用者傳訊息給你，請分析內容並回傳 JSON 格式的指令。
+當使用者傳訊息給你，請分析內容並回傳 JSON 陣列格式的指令，可以一次包含多個動作。
 
 可能的 action：
 - add：新增食品（需要 name, quantity, unit, expiry）
@@ -32,13 +32,17 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，專門幫助管理家庭食品
 
 今天的日期是 {today}。
 
-如果對話有上下文，請根據上下文推斷使用者的意思。例如剛才提到牛奶，使用者說「這個我喝掉了」，應推斷為刪除牛奶。
+規則：
+- 數量若未指定，預設為 1
+- 單位若未指定，預設為「個」
+- 可以一次新增多個品項
+- 如果對話有上下文，請根據上下文推斷使用者的意思
 
-請只回傳 JSON，不要有其他文字。範例：
-{{"action": "add", "name": "牛奶", "quantity": 2, "unit": "瓶", "expiry": "2026-03-25"}}
-{{"action": "delete", "name": "牛奶"}}
-{{"action": "query"}}
-{{"action": "unclear", "message": "請問是哪個品項喝完了？"}}
+請只回傳 JSON 陣列，不要有其他文字。範例：
+[{{"action": "add", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}, {{"action": "add", "name": "豆漿", "quantity": 1, "unit": "瓶", "expiry": "2026-03-18"}}]
+[{{"action": "delete", "name": "牛奶"}}]
+[{{"action": "query"}}]
+[{{"action": "unclear", "message": "請問是哪個品項喝完了？"}}]
 """
 
 def get_sheet(name):
@@ -150,19 +154,25 @@ def handle_message(event):
 
     try:
         result = ask_claude(user_id, text)
-        data = json.loads(result)
-        action = data.get("action")
+        actions = json.loads(result)
+        if not isinstance(actions, list):
+            actions = [actions]
 
-        if action == "add":
-            reply = handle_add(data, user_name)
-        elif action == "delete":
-            reply = handle_delete(data)
-        elif action == "query":
-            reply = handle_query()
-        elif action == "unclear":
-            reply = data.get("message", "請問您的意思是？")
-        else:
-            reply = "抱歉，我不太理解您的意思。"
+        replies = []
+        for data in actions:
+            action = data.get("action")
+            if action == "add":
+                replies.append(handle_add(data, user_name))
+            elif action == "delete":
+                replies.append(handle_delete(data))
+            elif action == "query":
+                replies.append(handle_query())
+            elif action == "unclear":
+                replies.append(data.get("message", "請問您的意思是？"))
+            else:
+                replies.append("抱歉，我不太理解您的意思。")
+
+        reply = "\n".join(replies)
     except Exception as e:
         reply = f"系統錯誤：{str(e)}"
 
