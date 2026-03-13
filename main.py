@@ -110,7 +110,10 @@ def ask_claude(user_id, user_message):
     family_info = get_family_members_info()
     prompt = SYSTEM_PROMPT.format(today=today, now_time=now_time, family_info=family_info)
     history = get_recent_conversation(user_id)
-    messages = history + [{"role": "user", "content": user_message}]
+    messages = history + [
+    {"role": "user", "content": user_message},
+    {"role": "assistant", "content": "["}  # 強制 Claude 從 [ 開始回答
+]
     response = claude.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=500,
