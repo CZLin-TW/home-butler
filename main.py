@@ -216,7 +216,7 @@ def handle_query_todo(user_name):
         return "目前沒有待辦事項"
     return "待辦事項：\n" + "\n".join(lines)
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
 
