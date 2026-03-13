@@ -131,6 +131,61 @@ def get_user_name(user_id):
         pass
     return user_id
 
+@app.post("/notify")
+async def notify():
+    try:
+        sheet = get_sheet("食品庫存")
+        records = sheet.get_all_records()
+        today = datetime.now().date()
+
+        expired = []
+        soon = []
+        this_week = []
+
+        for r in records:
+            if r.get("狀態") != "有效":
+                continue
+            expiry_str = r.get("過期日", "")
+            if not expiry_str:
+                continue
+            try:
+                expiry = datetime.strptime(str(expiry_str), "%Y-%m-%d").date()
+            except:
+                continue
+            days_left = (expiry - today).days
+            label = f"{r['品名']}（{expiry_str}）"
+            if days_left <= 0:
+                expired.append(label)
+            elif days_left <= 3:
+                soon.append(label)
+            elif days_left <= 7:
+                this_week.append(label)
+
+        if not expired and not soon and not this_week:
+            return {"status": "no expiring items"}
+
+        lines = []
+        if expired:
+            lines.append("🔴 今天到期：" + "、".join(expired))
+        if soon:
+            lines.append("🟡 3天內到期：" + "、".join(soon))
+        if this_week:
+            lines.append("🟢 本週到期：" + "、".join(this_week))
+
+        message = "\n".join(lines)
+
+        members_sheet = get_sheet("家庭成員")
+        members = members_sheet.get_all_records()
+        for member in members:
+            if member.get("狀態") == "啟用":
+                user_id = member.get("Line User ID")
+                if user_id:
+                    line_bot_api.push_message(user_id, TextSendMessage(text=message))
+
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
 @app.get("/")
 def root():
     return {"status": "ok"}
