@@ -22,6 +22,10 @@ claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存和待辦事項。
 
+家庭成員：{family_info}
+發訊息的人說「我」時，程式會自動填入正確名稱，不需要你處理。
+當提到稱謂時（例如「老婆」、「爸爸」），請根據上方家庭成員資料判斷對應的名稱填入 person 欄位。
+
 當使用者傳訊息給你，請分析內容並回傳 JSON 陣列格式的指令，可以一次包含多個動作。
 
 可能的 action：
@@ -85,7 +89,8 @@ def get_recent_conversation(user_id, limit=6):
 
 def ask_claude(user_id, user_message):
     today = datetime.now().strftime("%Y-%m-%d")
-    prompt = SYSTEM_PROMPT.format(today=today)
+    family_info = get_family_members_info()
+    prompt = SYSTEM_PROMPT.format(today=today, family_info=family_info)
     history = get_recent_conversation(user_id)
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
@@ -112,6 +117,18 @@ def get_user_name(user_id):
         pass
     return user_id
 
+def get_family_members_info():
+    try:
+        sheet = get_sheet("家庭成員")
+        records = sheet.get_all_records()
+        members = []
+        for row in records:
+            if row.get("狀態") == "啟用":
+                members.append(f"{row.get('名稱')}（稱謂：{row.get('稱謂', '')}）")
+        return "、".join(members)
+    except:
+        return ""
+    
 def handle_add(data, user_name):
     sheet = get_sheet("食品庫存")
     today = datetime.now().strftime("%Y-%m-%d")
