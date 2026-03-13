@@ -129,6 +129,7 @@ def ask_claude(user_id, user_message):
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
+    print(f"Claude raw response: {text}")
     return text.strip()
 
 def get_user_name(user_id):
