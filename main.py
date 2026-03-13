@@ -29,7 +29,11 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存
 - delete_food：刪除食品（需要 name）
 - query_food：查詢食品庫存（不需要額外欄位）
 - add_todo：新增待辦事項（需要 item, date，選填：time, person, type）
-  type 預設為「公開」，若使用者說「私人」或「只提醒我」則填「私人」
+  type 規則：
+  - 使用者說「提醒我」、「我要」或未指定負責人 → 填「私人」
+  - 使用者說「提醒大家」、「提醒全家」或明確說「公開」 → 填「公開」
+  - 預設為「私人」
+  person 填負責人名稱，若使用者說「我」或未指定，則留空（程式會自動填入）
 - delete_todo：刪除待辦事項（需要 item）
 - query_todo：查詢待辦事項（不需要額外欄位）
 - unclear：語意不清，需要反問（需要 message）
@@ -142,7 +146,7 @@ def handle_query():
 
 def handle_add_todo(data, user_name):
     sheet = get_sheet("待辦事項")
-    person = data.get("person", user_name)
+    person = data.get("person") or user_name
     todo_type = data.get("type", "公開")
     sheet.append_row([
         data.get("item", ""),
