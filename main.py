@@ -4,6 +4,7 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import pytz
 import os
 import json
 import anthropic
@@ -19,6 +20,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+TZ = pytz.timezone('Asia/Taipei')
 
 SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存和待辦事項。
 
@@ -62,6 +64,9 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存
 [{{"action": "unclear", "message": "請問是哪個品項喝完了？"}}]
 """
 
+def now_taipei():
+    return datetime.now(TZ)
+
 def get_sheet(name):
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = json.loads(GOOGLE_CREDENTIALS)
@@ -72,12 +77,12 @@ def get_sheet(name):
 
 def log_message(user_id, message):
     sheet = get_sheet("訊息紀錄")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([now, user_id, message])
 
 def save_conversation(user_id, role, content):
     sheet = get_sheet("對話暫存")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([user_id, role, content, now])
 
 def get_recent_conversation(user_id, limit=6):
@@ -87,9 +92,21 @@ def get_recent_conversation(user_id, limit=6):
     recent = user_records[-limit:]
     return [{"role": r["角色"], "content": r["內容"]} for r in recent]
 
+def get_family_members_info():
+    try:
+        sheet = get_sheet("家庭成員")
+        records = sheet.get_all_records()
+        members = []
+        for row in records:
+            if row.get("狀態") == "啟用":
+                members.append(f"{row.get('名稱')}（稱謂：{row.get('稱謂', '')}）")
+        return "、".join(members)
+    except:
+        return ""
+
 def ask_claude(user_id, user_message):
-    today = datetime.now().strftime("%Y-%m-%d")
-    now_time = datetime.now().strftime("%H:%M")
+    today = now_taipei().strftime("%Y-%m-%d")
+    now_time = now_taipei().strftime("%H:%M")
     family_info = get_family_members_info()
     prompt = SYSTEM_PROMPT.format(today=today, now_time=now_time, family_info=family_info)
     history = get_recent_conversation(user_id)
@@ -118,21 +135,9 @@ def get_user_name(user_id):
         pass
     return user_id
 
-def get_family_members_info():
-    try:
-        sheet = get_sheet("家庭成員")
-        records = sheet.get_all_records()
-        members = []
-        for row in records:
-            if row.get("狀態") == "啟用":
-                members.append(f"{row.get('名稱')}（稱謂：{row.get('稱謂', '')}）")
-        return "、".join(members)
-    except:
-        return ""
-    
 def handle_add(data, user_name):
     sheet = get_sheet("食品庫存")
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_taipei().strftime("%Y-%m-%d")
     sheet.append_row([
         data.get("name", ""),
         data.get("quantity", 1),
@@ -210,7 +215,7 @@ async def notify():
     try:
         sheet = get_sheet("食品庫存")
         records = sheet.get_all_records()
-        today = datetime.now().date()
+        today = now_taipei().date()
 
         expired = []
         soon = []
@@ -238,7 +243,6 @@ async def notify():
         members_sheet = get_sheet("家庭成員")
         members = members_sheet.get_all_records()
 
-        # 食品推播
         food_lines = []
         if expired:
             food_lines.append("🔴 今天到期：" + "、".join(expired))
@@ -255,7 +259,6 @@ async def notify():
                     if user_id:
                         line_bot_api.push_message(user_id, TextSendMessage(text=food_message))
 
-        # 待辦推播
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
 
@@ -308,7 +311,7 @@ async def notify():
 async def notify_realtime():
     try:
         from datetime import timedelta
-        now = datetime.now()
+        now = now_taipei()
         window_start = now
         window_end = now + timedelta(minutes=15)
 
@@ -325,7 +328,7 @@ async def notify_realtime():
             if not date_str or not time_str:
                 continue
             try:
-                todo_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                todo_dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
             except:
                 continue
             if window_start <= todo_dt <= window_end:
@@ -348,7 +351,7 @@ async def notify_realtime():
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-    
+
 @app.post("/callback")
 async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
