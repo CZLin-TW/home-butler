@@ -416,7 +416,7 @@ def handle_message(event):
         else:
             reply = claude_reply if claude_reply else "\n".join(results)
     except json.JSONDecodeError:
-        reply = f"抱歉，請再說清楚一點。（解析失敗：{result[:50]}）"
+        reply = f"解析失敗：{result[:100]}"
     except Exception as e:
         reply = f"系統錯誤：{str(e)}"
 
