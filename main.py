@@ -42,7 +42,7 @@ SYSTEM_PROMPT = """你是一個家庭 AI 管家，幫助管理家庭食品庫存
 - query_todo：查詢待辦事項（不需要額外欄位）
 - unclear：語意不清，需要反問（需要 message）
 
-今天的日期是 {today}。
+今天的日期是 {today}，現在時間是 {now_time}。
 
 規則：
 - 食品數量若未指定，預設為 1
@@ -89,8 +89,9 @@ def get_recent_conversation(user_id, limit=6):
 
 def ask_claude(user_id, user_message):
     today = datetime.now().strftime("%Y-%m-%d")
+    now_time = datetime.now().strftime("%H:%M")
     family_info = get_family_members_info()
-    prompt = SYSTEM_PROMPT.format(today=today, family_info=family_info)
+    prompt = SYSTEM_PROMPT.format(today=today, now_time=now_time, family_info=family_info)
     history = get_recent_conversation(user_id)
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
