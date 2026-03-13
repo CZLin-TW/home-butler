@@ -381,10 +381,10 @@ async def callback(request: Request):
 def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text
-    log_message(user_id, text)
-    user_name = get_user_name(user_id)
-
+    
     try:
+        log_message(user_id, text)
+        user_name = get_user_name(user_id)
         result = ask_claude(user_id, text)
         parsed = json.loads(result)
         if isinstance(parsed, list):
