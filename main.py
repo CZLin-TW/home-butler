@@ -173,6 +173,8 @@ def handle_message(event):
                 replies.append("抱歉，我不太理解您的意思。")
 
         reply = "\n".join(replies)
+    except json.JSONDecodeError:
+        reply = "抱歉，請再說清楚一點，例如「新增鮮奶 1罐 3/23到期」"
     except Exception as e:
         reply = f"系統錯誤：{str(e)}"
 
