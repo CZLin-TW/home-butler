@@ -115,7 +115,7 @@ def ask_claude(user_id, user_message):
     {"role": "assistant", "content": "["}  # 強制 Claude 從 [ 開始回答
 ]
     response = claude.messages.create(
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-4-6",
         max_tokens=500,
         system=prompt,
         messages=messages
