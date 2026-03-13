@@ -303,6 +303,51 @@ async def notify():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.post("/notify_realtime")
+async def notify_realtime():
+    try:
+        from datetime import timedelta
+        now = datetime.now()
+        window_start = now
+        window_end = now + timedelta(minutes=15)
+
+        todo_sheet = get_sheet("待辦事項")
+        todo_records = todo_sheet.get_all_records()
+        members_sheet = get_sheet("家庭成員")
+        members = members_sheet.get_all_records()
+
+        for r in todo_records:
+            if r.get("狀態") != "待辦":
+                continue
+            date_str = r.get("日期", "")
+            time_str = r.get("時間", "")
+            if not date_str or not time_str:
+                continue
+            try:
+                todo_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            except:
+                continue
+            if window_start <= todo_dt <= window_end:
+                message = f"⏰ 提醒：{r['事項']}（{time_str}）"
+                person = r.get("負責人", "")
+                todo_type = r.get("類型", "公開")
+                if todo_type == "私人":
+                    for member in members:
+                        if member.get("狀態") == "啟用" and member.get("名稱") == person:
+                            user_id = member.get("Line User ID")
+                            if user_id:
+                                line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                else:
+                    for member in members:
+                        if member.get("狀態") == "啟用":
+                            user_id = member.get("Line User ID")
+                            if user_id:
+                                line_bot_api.push_message(user_id, TextSendMessage(text=message))
+
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
 @app.post("/callback")
 async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
