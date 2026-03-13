@@ -5,19 +5,22 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import os
+import json
 
 app = FastAPI()
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
+GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 def get_sheet():
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+    creds_dict = json.loads(GOOGLE_CREDENTIALS)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
     return spreadsheet.worksheet("訊息紀錄")
