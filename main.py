@@ -120,7 +120,7 @@ def ask_claude(user_id, user_message):
         system=prompt,
         messages=messages
     )
-    text = response.content[0].text.strip()
+    text = "[" + response.content[0].text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
