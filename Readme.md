@@ -2,7 +2,7 @@
 
 ## 系統架構
 - **介面**：Line Bot（Messaging API）
-- **大腦**：Claude API（claude-sonnet-4-5）
+- **大腦**：Claude API（claude-sonnet-4-6）
 - **資料庫**：Google Sheets
 - **Server**：Render.com（Python + FastAPI）
 - **排程**：Google Apps Script（每日推播 + 即時提醒）
@@ -125,11 +125,21 @@ git push
 |------|------|------|--------|--------|--------|------|
 - 狀態值：有效 / 已消耗
 
+**食品封存**
+| 品名 | 數量 | 單位 | 過期日 | 新增日 | 新增者 | 狀態 |
+|------|------|------|--------|--------|--------|------|
+- 已消耗的食品自動移至此分頁，Claude 不會讀取
+
 **待辦事項**
 | 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 |
 |------|------|------|--------|------|------|
 - 狀態值：待辦 / 已完成
 - 類型值：公開 / 私人
+
+**待辦封存**
+| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 |
+|------|------|------|--------|------|------|
+- 已完成的待辦自動移至此分頁，Claude 不會讀取
 
 **家庭成員**
 | 名稱 | Line User ID | 狀態 | 稱謂 |
@@ -146,7 +156,12 @@ git push
 | Line User ID | 角色 | 內容 | 時間 |
 |-------------|------|------|------|
 - 角色值：user / assistant
-- 每位用戶取最近 6 則帶入 Claude API
+- 每位用戶取最近 6 則帶入 Claude API，超過自動移至對話封存
+
+**對話封存**
+| Line User ID | 角色 | 內容 | 時間 |
+|-------------|------|------|------|
+- 超過 6 則的舊對話自動移至此分頁，Claude 不會讀取
 
 ---
 
@@ -182,6 +197,7 @@ git push
 1. 新增 HTTP monitor
 2. URL 填 `https://你的服務名稱.onrender.com`
 3. 間隔設 5 分鐘
+4. Monitor Type 保持 HTTP(s)（免費方案預設 HEAD，Server 已支援）
 
 ---
 
@@ -221,6 +237,16 @@ function sendRealtimeNotification() {
 
 ---
 
+### 十、取得家庭成員 Line User ID
+
+每位家庭成員：
+1. 掃 QR Code 加管家好友
+2. 傳任何一則訊息
+3. 從「訊息紀錄」分頁複製 User ID（U 開頭）
+4. 填入「家庭成員」分頁
+
+---
+
 ## Render 環境變數
 
 | 變數名稱 | 說明 |
@@ -237,29 +263,50 @@ function sendRealtimeNotification() {
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| / | GET | 健康檢查 |
+| / | GET / HEAD | 健康檢查 |
 | /callback | POST | Line Webhook 接收訊息 |
 | /notify | POST | GAS 呼叫，觸發每日推播 |
-| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒 |
+| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒（提前 20 分鐘區間） |
 
 ---
 
 ## Claude API 支援的 action
 
-| action | 說明 | 必要欄位 |
-|--------|------|----------|
+### 食品庫存
+
+| action | 說明 | 欄位 |
+|--------|------|------|
 | add_food | 新增食品 | name, quantity, unit, expiry |
-| delete_food | 刪除食品 | name |
+| delete_food | 食品全部用完，移至封存 | name |
+| modify_food | 修改食品資料 | name，選填：new_name, quantity, expiry |
 | query_food | 查詢食品庫存 | 無 |
-| add_todo | 新增待辦 | item, date（選填：time, person, type） |
-| delete_todo | 刪除待辦 | item |
-| query_todo | 查詢待辦 | 無 |
-| unclear | 語意不清反問 | message |
+
+### 待辦事項
+
+| action | 說明 | 欄位 |
+|--------|------|------|
+| add_todo | 新增待辦 | item, date，選填：time, person, type |
+| modify_todo | 修改待辦 | item，選填：new_item, date, time, person, type |
+| delete_todo | 標記完成，移至封存 | item |
+| query_todo | 查詢待辦（只顯示自己的私人 + 所有公開） | 無 |
+| unclear | 語意不清時反問 | message |
 
 type 規則：
 - 使用者說「提醒我」、「我要」或未指定負責人 → 私人
 - 使用者說「提醒大家」、「提醒全家」或明確說「公開」 → 公開
 - 預設為私人
+
+---
+
+## 資料封存機制
+
+| 分頁 | 觸發條件 | 封存至 |
+|------|----------|--------|
+| 食品庫存 | delete_food 或 modify_food 數量歸零 | 食品封存 |
+| 待辦事項 | delete_todo | 待辦封存 |
+| 對話暫存 | 同一用戶超過 6 則 | 對話封存 |
+
+封存分頁 Claude 不會讀取，只作為歷史紀錄保存。
 
 ---
 
@@ -274,7 +321,7 @@ type 規則：
 4. 更新 /notify 端點加入新的推播邏輯
 
 **費用控管**：
-- Claude API 按用量計費，每月約 NT$10~16
+- Claude API 按用量計費，每月約 NT$10~20
 - 建議在 Anthropic Console 設定 monthly spend limit $5
 - Render、GAS、UptimeRobot 免費方案即可
 
