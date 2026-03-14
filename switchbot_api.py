@@ -162,9 +162,21 @@ def get_hub_sensor(device_id):
 
 # ── 高階封裝：DIY IR 設備控制 ──
 
-def ir_custom_button(device_id, button_name):
+# 會被映射到標準 turnOn/turnOff 的按鈕名稱
+IR_POWER_ON_NAMES = {"電源", "開", "開機", "turn on", "turnon", "power on", "on"}
+IR_POWER_OFF_NAMES = {"關", "關機", "turn off", "turnoff", "power off", "off"}
+
+def ir_control(device_id, button_name):
     """
-    觸發 DIY IR 設備的自訂按鈕
-    button_name 必須與 SwitchBot App 裡設定的按鈕名稱完全一致
+    控制 DIY IR 設備
+    - 開/關類按鈕 → 使用標準 turnOn/turnOff（commandType: command）
+    - 其他自訂按鈕 → 使用 customize 模式
     """
-    return send_command(device_id, button_name, "default", "customize")
+    lower = button_name.lower().strip()
+
+    if lower in IR_POWER_ON_NAMES or button_name in IR_POWER_ON_NAMES:
+        return send_command(device_id, "turnOn", "default", "command")
+    elif lower in IR_POWER_OFF_NAMES or button_name in IR_POWER_OFF_NAMES:
+        return send_command(device_id, "turnOff", "default", "command")
+    else:
+        return send_command(device_id, button_name, "default", "customize")
