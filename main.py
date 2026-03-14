@@ -59,13 +59,21 @@ action 定義：
 - 有上下文先用上下文推斷，無上下文用語意推斷，真的模糊才反問
 - modify_todo 不要用 delete+add 替代
 
+回覆風格：
+- 適度使用 emoji 讓回覆活潑（🥛🥚📋🌡️ 等），但不要每句都加
+- 查詢庫存或待辦時，reply 裡直接整理清單，並主動補充貼心提醒（快過期的品項提醒趕快吃、今天的待辦提醒注意時間等）
+- 偶爾可以幽默一下，但不要刻意搞笑
+- 回覆要像一個專業又有溫度的管家，不要像機器人
+
 範例：
-{{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25。"}}
+{{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25 🥛"}}
 {{"actions": [{{"action": "delete_food", "name": "牛奶"}}], "reply": "了解，牛奶已移除。"}}
-{{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00"}}], "reply": "好的，4/24 下午 2 點看牙醫已記下。"}}
-{{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "on", "temperature": 26}}], "reply": "好的，冷氣已開啟，26 度。"}}
-{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "開"}}], "reply": "好的，電風扇已開啟。"}}
-{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "風速+"}}], "reply": "好的，風速已調高。"}}
+{{"actions": [{{"action": "query_food"}}], "reply": "目前庫存如下：\\n🥛 鮮奶 1瓶（3/23）\\n🧃 豆漿 1瓶（3/20）\\n🍰 草莓生乳捲 1個（3/17）\\n\\n⚠️ 草莓生乳捲後天就到期囉，建議盡快享用！"}}
+{{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00"}}], "reply": "好的，4/24 下午 2 點看牙醫已記下 🦷"}}
+{{"actions": [{{"action": "query_todo"}}], "reply": "📋 您的待辦事項：\\n• 預約貼隔熱紙（3/16）\\n• 剪頭髮（3/16）\\n• 舊物資回收諮詢（3/16 10:00）\\n• 買開飲機（3/19）\\n• 看牙醫（4/24 14:00）\\n\\n今天有三件事要忙，別忘了 10 點的回收諮詢！"}}
+{{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "on", "temperature": 26}}], "reply": "好的，冷氣已開啟，26 度 ❄️"}}
+{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "開"}}], "reply": "好的，電風扇已開啟 🌀"}}
+{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "風速+"}}], "reply": "好的，風速已調高 💨"}}
 {{"actions": [{{"action": "query_sensor", "device_name": "Hub 2"}}], "reply": "為您查詢溫濕度。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 """
@@ -824,12 +832,18 @@ def handle_message(event):
                 # 如果有設備控制失敗（❌），優先顯示實際結果而非 Claude 的預設回覆
                 has_error = any("❌" in r for r in results if r)
 
-                if has_query:
+                # 需要即時數據的查詢（感應器、設備列表），用程式結果
+                realtime_queries = {"query_sensor", "query_devices"}
+                has_realtime = any(d.get("action") in realtime_queries for d in actions)
+
+                if has_error:
                     reply = "\n".join(results)
-                elif has_error:
+                elif has_realtime:
                     reply = "\n".join(results)
+                elif claude_reply:
+                    reply = claude_reply
                 else:
-                    reply = claude_reply if claude_reply else "\n".join(results)
+                    reply = "\n".join(results)
 
         print(f"[7] reply={reply}")
 
