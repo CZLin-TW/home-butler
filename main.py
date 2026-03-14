@@ -97,8 +97,27 @@ def log_message(user_id, message):
 
 def save_conversation(user_id, role, content):
     sheet = get_sheet("對話暫存")
+    archive = get_sheet("對話封存")
     now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([user_id, role, content, now])
+    
+    # 取得該 user 的所有紀錄
+    records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
+    user_rows = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
+    
+    # 超過 6 則就把最舊的移到封存
+    while len(user_rows) > 6:
+        oldest_index, oldest_row = user_rows.pop(0)
+        archive.append_row([
+            oldest_row.get("Line User ID"),
+            oldest_row.get("角色"),
+            oldest_row.get("內容"),
+            oldest_row.get("時間")
+        ])
+        sheet.delete_rows(oldest_index + 2)
+        # 重新取得紀錄，因為刪除後 index 會變
+        records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
+        user_rows = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
 
 def get_recent_conversation(user_id, limit=6):
     sheet = get_sheet("對話暫存")
@@ -411,7 +430,7 @@ async def notify_realtime():
         from datetime import timedelta
         now = now_taipei()
         window_start = now
-        window_end = now + timedelta(minutes=15)
+        window_end = now + timedelta(minutes=20)
 
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
