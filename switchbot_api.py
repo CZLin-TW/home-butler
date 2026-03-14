@@ -158,3 +158,13 @@ def get_hub_sensor(device_id):
         "temperature": status.get("temperature"),
         "humidity": status.get("humidity"),
     }
+
+
+# ── 高階封裝：DIY IR 設備控制 ──
+
+def ir_custom_button(device_id, button_name):
+    """
+    觸發 DIY IR 設備的自訂按鈕
+    button_name 必須與 SwitchBot App 裡設定的按鈕名稱完全一致
+    """
+    return send_command(device_id, button_name, "default", "customize")
