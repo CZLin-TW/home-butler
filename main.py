@@ -153,9 +153,26 @@ def save_conversation(user_id, role, content):
 def get_recent_conversation(user_id, limit=6):
     sheet = get_sheet("對話暫存")
     records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
-    user_records = [r for r in records if r.get("Line User ID") == user_id]
+    user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
-    return [{"role": r["角色"], "content": r["內容"]} for r in recent]
+
+    # 自動清理：超過 limit 的舊紀錄搬到封存
+    if len(user_records) > limit:
+        old_records = user_records[:-limit]
+        try:
+            archive = get_sheet("對話封存")
+            # 從後往前刪，避免 index 位移
+            rows_to_delete = []
+            for i, r in old_records:
+                archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
+                rows_to_delete.append(i + 2)  # +2 因為 header + 0-indexed
+            for row_num in sorted(rows_to_delete, reverse=True):
+                sheet.delete_rows(row_num)
+            print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
+        except Exception as e:
+            print(f"[CLEANUP ERROR] {e}")
+
+    return [{"role": r["角色"], "content": r["內容"]} for _, r in recent]
 
 def get_family_members_info():
     try:
