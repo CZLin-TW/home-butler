@@ -107,12 +107,10 @@ def save_conversation(user_id, role, content):
     archive = get_sheet("對話封存")
     now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
     sheet.append_row([user_id, role, content, now])
-    
-    # 取得該 user 的所有紀錄
+
     records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
     user_rows = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
-    
-    # 超過 6 則就把最舊的移到封存
+
     while len(user_rows) > 6:
         oldest_index, oldest_row = user_rows.pop(0)
         archive.append_row([
@@ -122,7 +120,6 @@ def save_conversation(user_id, role, content):
             oldest_row.get("時間")
         ])
         sheet.delete_rows(oldest_index + 2)
-        # 重新取得紀錄，因為刪除後 index 會變
         records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
         user_rows = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
 
@@ -267,7 +264,7 @@ def handle_query():
     if not valid:
         return "目前庫存是空的"
     lines = [f"• {r['品名']} {r['數量']}{r['單位']}（{r['過期日']}）" for r in valid]
-    return "目前庫存：\n" + "\n".join(lines)
+    return "\n".join(lines)
 
 def handle_add_todo(data, user_name):
     sheet = get_sheet("待辦事項")
@@ -324,7 +321,7 @@ def handle_query_todo(user_name, filter=None):
     records = sheet.get_all_records()
     valid = [r for r in records if r.get("狀態") == "待辦"]
     if not valid:
-        return "目前沒有待辦事項"
+        return "今天沒有待辦事項" if filter == "today" else "目前沒有待辦事項"
     today = now_taipei().strftime("%Y-%m-%d")
     lines = []
     for r in valid:
@@ -513,12 +510,8 @@ def handle_message(event):
         parsed = json.loads(result)
         print(f"[5] parsed type={type(parsed)}, value={parsed}")
 
-        if isinstance(parsed, list):
-            actions = parsed
-            claude_reply = ""
-        else:
-            actions = parsed.get("actions", [])
-            claude_reply = parsed.get("reply", "")
+        actions = parsed.get("actions", [])
+        claude_reply = parsed.get("reply", "")
 
         print(f"[6] actions={actions}, claude_reply={claude_reply}")
 
