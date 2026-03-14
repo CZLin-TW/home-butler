@@ -94,7 +94,7 @@ def save_conversation(user_id, role, content):
 
 def get_recent_conversation(user_id, limit=6):
     sheet = get_sheet("對話暫存")
-    records = sheet.get_all_records()
+    records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
     user_records = [r for r in records if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
     return [{"role": r["角色"], "content": r["內容"]} for r in recent]
