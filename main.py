@@ -549,6 +549,33 @@ def list_switchbot_devices():
 
     return {"status": "ok", "設備數量": len(devices), "設備列表": devices}
 
+@app.get("/switchbot/test/{device_id}/{button_name}")
+def test_switchbot_command(device_id: str, button_name: str):
+    """
+    測試用：直接對指定設備送出 IR 按鈕指令
+    範例：/switchbot/test/02-202509241953-60857229/電源
+    """
+    print(f"[TEST] device_id={device_id}, button={button_name}")
+
+    # 先試 customize（DIY IR 按鈕）
+    result = switchbot_api.send_command(device_id, button_name, "default", "customize")
+    print(f"[TEST] customize result: {result}")
+
+    return {
+        "status": "ok" if result.get("success") else "error",
+        "device_id": device_id,
+        "button": button_name,
+        "command_type": "customize",
+        "result": result
+    }
+
+@app.get("/switchbot/test_turnon/{device_id}")
+def test_switchbot_turnon(device_id: str):
+    """測試用：對設備送 turnOn 指令"""
+    result = switchbot_api.send_command(device_id, "turnOn", "default", "command")
+    print(f"[TEST] turnOn result: {result}")
+    return {"status": "ok" if result.get("success") else "error", "result": result}
+
 @app.post("/notify")
 async def notify():
     try:
