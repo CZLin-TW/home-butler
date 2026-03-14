@@ -7,6 +7,7 @@
 - **Server**：Render.com（Python + FastAPI）
 - **排程**：Google Apps Script（每日推播 + 即時提醒）
 - **防冷啟動**：UptimeRobot（每 5 分鐘 ping）
+- **智能居家**：SwitchBot API v1.1（冷氣 IR 控制 + Hub 溫濕度 + DIY IR 設備）
 
 ---
 
@@ -54,18 +55,7 @@ code .
 ```
 python -m venv venv
 venv\Scripts\activate
-pip install fastapi uvicorn line-bot-sdk gspread google-auth anthropic pytz
-```
-
-建立 `requirements.txt`：
-```
-fastapi
-uvicorn
-line-bot-sdk
-gspread
-google-auth
-anthropic
-pytz
+pip install fastapi uvicorn line-bot-sdk gspread google-auth anthropic pytz httpx
 ```
 
 建立 `.gitignore`：
@@ -104,7 +94,7 @@ git push -u origin main
    - Instance Type: **Free**
 4. 環境變數填入（見下方環境變數說明）
 5. 部署完成後把 Webhook URL 填回 Line：
-   - `https://你的服務名稱.onrender.com/callback`
+   - `https://home-butler.onrender.com/callback`
    - 開啟 Use Webhook
 
 每次修改程式後執行以下指令，Render 會自動重新部署：
@@ -163,6 +153,14 @@ git push
 |-------------|------|------|------|
 - 超過 6 則的舊對話自動移至此分頁，Claude 不會讀取
 
+**智能居家**
+| 名稱 | 類型 | 位置 | Device ID | 狀態 | 按鈕 |
+|------|------|------|-----------|------|------|
+- 類型值：冷氣 / 感應器 / IR
+- 狀態值：啟用 / 停用
+- 按鈕欄：僅 IR 設備需要填寫，逗號分隔（例如「電源,風速+,風速-,擺頭」）
+- Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
+
 ---
 
 ### 六、Google Cloud 設定
@@ -191,23 +189,37 @@ git push
 
 ---
 
-### 八、防冷啟動
+### 八、SwitchBot 智能居家設定
+
+1. 打開 SwitchBot App → 個人 → 偏好設定 → 關於 → 連點 App 版本 10 次 → 開發者選項
+2. 複製 Token 和 Secret Key
+3. 在 Render.com 新增環境變數 `SWITCHBOT_TOKEN` 和 `SWITCHBOT_SECRET`
+4. 部署後瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices` 取得 Device ID
+5. 在 Google Sheets「智能居家」分頁填入設備資料
+
+冷氣（IR 虛擬設備）的 Device ID 通常是 `02-` 開頭，Hub 的 Device ID 是 MAC 地址格式。
+
+DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指令，其他自訂按鈕使用 customize 模式，程式會自動判斷。
+
+---
+
+### 九、防冷啟動
 
 前往 https://uptimerobot.com 註冊免費帳號：
 1. 新增 HTTP monitor
-2. URL 填 `https://你的服務名稱.onrender.com`
+2. URL 填 `https://home-butler.onrender.com`
 3. 間隔設 5 分鐘
 4. Monitor Type 保持 HTTP(s)（免費方案預設 HEAD，Server 已支援）
 
 ---
 
-### 九、每日推播 + 即時提醒（Google Apps Script）
+### 十、每日推播 + 即時提醒（Google Apps Script）
 
 前往 https://script.google.com 建立新專案「家庭管家推播」，貼入：
 
 ```javascript
 function sendDailyNotification() {
-  var url = "https://你的服務名稱.onrender.com/notify";
+  var url = "https://home-butler.onrender.com/notify";
   var options = {
     method: "post",
     contentType: "application/json",
@@ -219,7 +231,7 @@ function sendDailyNotification() {
 }
 
 function sendRealtimeNotification() {
-  var url = "https://你的服務名稱.onrender.com/notify_realtime";
+  var url = "https://home-butler.onrender.com/notify_realtime";
   var options = {
     method: "post",
     contentType: "application/json",
@@ -237,7 +249,7 @@ function sendRealtimeNotification() {
 
 ---
 
-### 十、取得家庭成員 Line User ID
+### 十一、取得家庭成員 Line User ID
 
 每位家庭成員：
 1. 掃 QR Code 加管家好友
@@ -256,6 +268,8 @@ function sendRealtimeNotification() {
 | SPREADSHEET_ID | Google Sheets 的試算表 ID（網址中間那串） |
 | GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） |
 | ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） |
+| SWITCHBOT_TOKEN | SwitchBot 開發者 Token |
+| SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key |
 
 ---
 
@@ -263,10 +277,13 @@ function sendRealtimeNotification() {
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| / | GET / HEAD | 健康檢查 |
+| / | GET / HEAD | 健康檢查（UptimeRobot 用） |
 | /callback | POST | Line Webhook 接收訊息 |
-| /notify | POST | GAS 呼叫，觸發每日推播 |
-| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒（提前 20 分鐘區間） |
+| /notify | POST | GAS 呼叫，觸發每日推播（食品過期 + 待辦 + 溫濕度） |
+| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒 |
+| /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
+| /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
+| /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
 
 ---
 
@@ -278,7 +295,7 @@ function sendRealtimeNotification() {
 |--------|------|------|
 | add_food | 新增食品 | name, quantity, unit, expiry |
 | delete_food | 食品全部用完，移至封存 | name |
-| modify_food | 修改食品資料 | name，選填：new_name, quantity, expiry |
+| modify_food | 修改食品數量 | name, quantity |
 | query_food | 查詢食品庫存 | 無 |
 
 ### 待辦事項
@@ -286,15 +303,36 @@ function sendRealtimeNotification() {
 | action | 說明 | 欄位 |
 |--------|------|------|
 | add_todo | 新增待辦 | item, date，選填：time, person, type |
-| modify_todo | 修改待辦 | item，選填：new_item, date, time, person, type |
+| modify_todo | 修改待辦 | item，選填：date, time, person, type |
 | delete_todo | 標記完成，移至封存 | item |
 | query_todo | 查詢待辦（只顯示自己的私人 + 所有公開） | 無 |
+
+### 智能居家
+
+| action | 說明 | 欄位 |
+|--------|------|------|
+| control_ac | 控制冷氣（IR） | device_name，選填：power, temperature, mode, fan_speed |
+| control_ir | 控制 DIY IR 設備 | device_name, button（開/關自動轉 turnOn/turnOff） |
+| query_sensor | 查詢溫濕度感應器 | device_name |
+| query_devices | 列出所有已設定設備 | 無 |
+
+### 其他
+
+| action | 說明 | 欄位 |
+|--------|------|------|
 | unclear | 語意不清時反問 | message |
 
-type 規則：
-- 使用者說「提醒我」、「我要」或未指定負責人 → 私人
-- 使用者說「提醒大家」、「提醒全家」或明確說「公開」 → 公開
-- 預設為私人
+---
+
+## 回覆邏輯
+
+| 情境 | 回覆來源 |
+|------|---------|
+| 食品 / 待辦的查詢與操作 | Claude 的 reply（有溫度的管家語氣） |
+| 溫濕度查詢、設備列表 | 程式的即時數據結果 |
+| 設備控制成功 | Claude 的 reply |
+| 設備控制失敗（❌） | 程式的實際錯誤訊息 |
+| Claude 回傳異常 | 友善的錯誤提示，不顯示 traceback |
 
 ---
 
@@ -310,9 +348,18 @@ type 規則：
 
 ---
 
+## 效能優化
+
+- **Google Sheets 快取**：get_sheet() 快取已認證的 spreadsheet 物件 60 秒，避免每次都重新 OAuth
+- **背景寫入**：log_message（訊息紀錄）和 save_conversation（對話暫存）在背景 thread 執行
+- **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
+- **精簡 SYSTEM_PROMPT**：減少 token 數，加速 Claude 回應
+
+---
+
 ## 後續維護
 
-**調整 Bot 行為**：修改 main.py 裡的 SYSTEM_PROMPT，用中文描述你要的行為，push 後自動重新部署。
+**調整 Bot 行為**：修改 main.py 裡的 SYSTEM_PROMPT，push 後自動重新部署。
 
 **新增功能**：
 1. Google Sheets 新增對應分頁
@@ -320,9 +367,15 @@ type 規則：
 3. 在 main.py 加入對應的 handle 函數
 4. 更新 /notify 端點加入新的推播邏輯
 
+**新增 SwitchBot 設備**：
+1. 在 SwitchBot App 新增設備
+2. 瀏覽器打開 /switchbot/devices 取得 Device ID
+3. 填入 Google Sheets「智能居家」分頁
+4. 若是新設備類型，需在 switchbot_api.py 新增控制函數並更新 SYSTEM_PROMPT
+
 **費用控管**：
 - Claude API 按用量計費，每月約 NT$10~20
 - 建議在 Anthropic Console 設定 monthly spend limit $5
-- Render、GAS、UptimeRobot 免費方案即可
+- Render、GAS、UptimeRobot、SwitchBot API 均為免費方案
 
-**開新對話時**：把 README.md 和 main.py 的內容一起貼給 AI，即可完整接手這個專案。
+**開新對話時**：把 README.md、main.py、switchbot_api.py 的內容一起貼給 AI，即可完整接手這個專案。

@@ -13,7 +13,6 @@ import base64
 import uuid
 import httpx
 import os
-import json
 
 SWITCHBOT_TOKEN = os.environ.get("SWITCHBOT_TOKEN", "")
 SWITCHBOT_SECRET = os.environ.get("SWITCHBOT_SECRET", "")

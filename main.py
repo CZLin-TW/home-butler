@@ -3,12 +3,13 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import os
 import json
 import traceback
 import time
+import threading
 import anthropic
 import switchbot_api
 
@@ -81,11 +82,7 @@ action 定義：
 def now_taipei():
     return datetime.now(TZ)
 
-import threading
-
 # ── Google Sheets 快取 ──
-_sheets_cache = {}
-_sheets_cache_lock = threading.Lock()
 _sheets_cache_ttl = 60  # 秒
 
 def _get_client():
@@ -700,7 +697,6 @@ async def notify():
 @app.post("/notify_realtime")
 async def notify_realtime():
     try:
-        from datetime import timedelta
         now = now_taipei()
         window_start = now
         window_end = now + timedelta(minutes=15)
@@ -766,7 +762,7 @@ def handle_message(event):
         user_name = get_user_name(user_id)
         print(f"[2] user_name={user_name}")
         result = ask_claude(user_id, text)
-        print(f"[4] result={repr(result)}")
+        print(f"[3] result={repr(result)}")
 
         # 防護：Claude 回傳空字串或非 JSON
         if not result or not result.strip():
@@ -785,7 +781,7 @@ def handle_message(event):
                 parsed = None
 
             if parsed is not None:
-                print(f"[5] parsed type={type(parsed)}, value={parsed}")
+                print(f"[4] parsed type={type(parsed)}, value={parsed}")
 
                 if isinstance(parsed, list):
                     actions = parsed
@@ -794,7 +790,7 @@ def handle_message(event):
                     actions = parsed.get("actions", [])
                     claude_reply = parsed.get("reply", "")
 
-                print(f"[6] actions={actions}, claude_reply={claude_reply}")
+                print(f"[5] actions={actions}, claude_reply={claude_reply}")
 
                 results = []
                 for data in actions:
@@ -826,9 +822,6 @@ def handle_message(event):
                     elif action == "unclear":
                         pass
 
-                query_actions = {"query_food", "query_todo", "query_sensor", "query_devices"}
-                has_query = any(d.get("action") in query_actions for d in actions)
-
                 # 如果有設備控制失敗（❌），優先顯示實際結果而非 Claude 的預設回覆
                 has_error = any("❌" in r for r in results if r)
 
@@ -845,7 +838,7 @@ def handle_message(event):
                 else:
                     reply = "\n".join(results)
 
-        print(f"[7] reply={reply}")
+        print(f"[6] reply={reply}")
 
     except Exception as e:
         print(f"[ERROR] {traceback.format_exc()}")
