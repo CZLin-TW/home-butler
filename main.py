@@ -464,6 +464,32 @@ def handle_query_devices():
 def root():
     return {"status": "ok"}
 
+@app.get("/switchbot/devices")
+def list_switchbot_devices():
+    """瀏覽器打開即可查看 SwitchBot 帳號下所有設備與 Device ID"""
+    result = switchbot_api.get_devices()
+    if "error" in result:
+        return {"status": "error", "message": result["error"]}
+
+    devices = []
+    for d in result.get("physical", []):
+        devices.append({
+            "名稱": d.get("deviceName", ""),
+            "類型": d.get("deviceType", ""),
+            "Device ID": d.get("deviceId", ""),
+            "分類": "物理設備",
+        })
+    for d in result.get("infrared", []):
+        devices.append({
+            "名稱": d.get("deviceName", ""),
+            "類型": d.get("remoteType", ""),
+            "Device ID": d.get("deviceId", ""),
+            "Hub ID": d.get("hubDeviceId", ""),
+            "分類": "紅外線虛擬設備（IR）",
+        })
+
+    return {"status": "ok", "設備數量": len(devices), "設備列表": devices}
+
 @app.post("/notify")
 async def notify():
     try:
