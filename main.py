@@ -8,6 +8,7 @@ import pytz
 import os
 import json
 import traceback
+import time
 import anthropic
 import switchbot_api
 
@@ -24,126 +25,91 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 TZ = pytz.timezone('Asia/Taipei')
 
-SYSTEM_PROMPT = """你是這個家庭的專屬管家，負責管理食品庫存、待辦事項，以及智能居家設備控制。
-你說話有禮、簡潔、帶有一點管家的從容感，偶爾會貼心提醒或關心，但不會囉嗦。
-回覆確認動作時，用自然的語氣說明，而不是只有 ✅ 加一句話。
-例如「好的，牛奶已為您登記，過期日 3/25。」而非「✅ 已新增牛奶，過期日 2026-03-25」。
+SYSTEM_PROMPT = """你是家庭專屬管家，管理食品庫存、待辦事項和智能居家設備。
+語氣有禮簡潔，帶管家從容感。回覆用自然語氣，如「好的，牛奶已登記，過期日 3/25。」
 
 家庭成員：{family_info}
-發訊息的人說「我」時，程式會自動填入正確名稱，不需要你處理。
-當提到稱謂時（例如「老婆」、「爸爸」），請根據上方家庭成員資料判斷對應的名稱填入 person 欄位。
+「我」由程式自動填入。稱謂（老婆、爸爸等）請根據家庭成員資料對應 person。
 
-目前食品庫存：{food_info}
-目前待辦事項：{todo_info}
+目前庫存：{food_info}
+目前待辦：{todo_info}
+智能設備：{device_info}
+IR 按鈕：{ir_device_info}
+今天 {today}，現在 {now_time}。
 
-═══ 智能居家設備 ═══
-可控制的設備：{device_info}
+永遠只回傳 JSON：{{"actions": [...], "reply": "回覆文字"}}
 
-當使用者傳訊息給你，請分析內容並回傳 JSON 物件，可以一次包含多個動作。
-
-可能的 action：
-- add_food：新增食品（需要 name, quantity, unit, expiry）
-- delete_food：食品全部用完時刪除（需要 name）
-- modify_food：修改食品數量（需要 name, quantity）；數量變為 0 時程式會自動標記已消耗
-  使用時機：「吃掉幾個」、「還剩幾個」、「改成幾個」等調整數量的情境
-  quantity 填更新後的數量，請根據目前食品庫存自行計算
-- query_food：查詢食品庫存（不需要額外欄位）
-- add_todo：新增待辦事項（需要 item, date，選填：time, person, type）
-  type 規則：
-  - 使用者說「提醒我」、「我要」或未指定負責人 → 填「私人」
-  - 使用者說「提醒大家」、「提醒全家」或明確說「公開」 → 填「公開」
-  - 預設為「私人」
-  person 填負責人名稱，若使用者說「我」或未指定，則留空（程式會自動填入）
-- modify_todo：修改待辦事項（需要 item，選填：date, time, person, type，只填要修改的欄位）
-- delete_todo：刪除待辦事項（需要 item）
-- query_todo：查詢待辦事項（不需要額外欄位）
-
-═══ 智能居家 action ═══
-- control_ac：控制冷氣（需要 device_name，選填：power, temperature, mode, fan_speed）
-  power: "on" 或 "off"
-  temperature: 16~30（整數）
-  mode: "cool"（冷氣）、"heat"（暖氣）、"dry"（除濕）、"fan"（送風）、"auto"（自動）
-  fan_speed: "auto"（自動）、"low"（低）、"medium"（中）、"high"（高）
-  範例情境：
-  - 「開冷氣」→ power="on"，其他用預設
-  - 「冷氣 26 度」→ power="on", temperature=26
-  - 「關冷氣」→ power="off"
-  - 「冷氣調到 24 度送風」→ power="on", temperature=24, mode="fan"
-  - 「冷氣除濕模式」→ power="on", mode="dry"
-  - 「冷氣風量調大」→ fan_speed="high"
-  如果使用者只說溫度或模式但沒說開，請預設 power="on"
-  device_name 請填設備的友善名稱（例如「客廳冷氣」），程式會自動查找對應的 device ID
-
-- query_sensor：查詢感應器數據（需要 device_name）
-  回傳溫度和濕度
-  device_name 請填設備的友善名稱（例如「客廳 Hub」）
-
-- control_ir：控制 DIY 紅外線設備（需要 device_name, button）
-  用於電風扇、喇叭、電視等透過 IR 學習的設備
-  device_name 請填設備的友善名稱（例如「電風扇」）
-  button 請填按鈕名稱
-  開機時 button 填「開」，關機時 button 填「關」
-  其他功能按鈕（如風速+、風速-、擺頭）填實際按鈕名稱，必須與設備支援的按鈕完全一致
-  可用的設備與按鈕：{ir_device_info}
-  範例情境：
-  - 「開電風扇」→ device_name="電風扇", button="開"
-  - 「關電風扇」→ device_name="電風扇", button="關"
-  - 「風扇風速大一點」→ device_name="電風扇", button="風速+"
-  - 「風扇風速小一點」→ device_name="電風扇", button="風速-"
-  如果使用者只有一個同類型設備，不需要指定名稱直接控制
-
-- query_devices：查詢所有可控制的設備列表（不需要額外欄位）
-
-- unclear：語意不清，需要反問（需要 message）
-
-今天的日期是 {today}，現在時間是 {now_time}。
+action 定義：
+- add_food：name, quantity(預設1), unit(預設「個」), expiry(YYYY-MM-DD)
+- delete_food：name
+- modify_food：name, quantity(更新後數量，自行計算)
+- query_food：無參數
+- add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人)
+- modify_todo：item, 只填要改的欄位(date/time/person/type)
+- delete_todo：item
+- query_todo：無參數
+- control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。唯一一台冷氣時可省略 device_name
+- query_sensor：device_name。唯一感應器時可省略
+- control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）。唯一設備時可省略 device_name
+- query_devices：無參數
+- unclear：message(反問內容)
 
 規則：
-- 食品數量若未指定，預設為 1
-- 食品單位若未指定，預設為「個」
-- 可以一次新增多個品項
-- 待辦事項的 date 格式為 YYYY-MM-DD
-- 待辦事項的 time 格式為 HH:MM，若未指定則留空
-- 如果對話有上下文，請根據上下文推斷使用者的意思
-- 修改待辦事項時，使用 modify_todo 而不是 delete_todo + add_todo，只填要修改的欄位
-- 控制冷氣時，如果使用者沒指定特定設備但只有一台冷氣，直接控制那台
-- 查詢溫濕度時，如果使用者沒指定特定設備但只有一個感應器，直接查詢那個
-
-你必須永遠只回傳 JSON 物件，絕對不可以回傳其他任何文字、說明或確認訊息。格式如下：
-{{"actions": [...], "reply": "用管家語氣寫給使用者看的回覆，自然、簡潔、有禮"}}
+- 可一次多個 action
+- 有上下文先用上下文推斷，無上下文用語意推斷，真的模糊才反問
+- modify_todo 不要用 delete+add 替代
 
 範例：
-{{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已為您登記，過期日 3 月 25 日。"}}
-{{"actions": [{{"action": "delete_food", "name": "牛奶"}}], "reply": "了解，牛奶已從庫存中移除。"}}
-{{"actions": [{{"action": "modify_food", "name": "橘子", "quantity": 2}}], "reply": "好的，橘子已更新為 2 個。"}}
-{{"actions": [{{"action": "query_food"}}], "reply": "為您查詢目前庫存。"}}
-{{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00", "person": "爸爸"}}], "reply": "好的，4 月 24 日下午 2 點看牙醫已為您記下。"}}
-{{"actions": [{{"action": "modify_todo", "item": "看牙醫", "date": "2026-04-25"}}], "reply": "好的，看牙醫已改到 4 月 25 日。"}}
-{{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "on", "temperature": 26, "mode": "cool", "fan_speed": "auto"}}], "reply": "好的，客廳冷氣已開啟，設定 26 度冷氣模式。"}}
-{{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "off"}}], "reply": "好的，冷氣已為您關閉。"}}
-{{"actions": [{{"action": "query_sensor", "device_name": "客廳 Hub"}}], "reply": "為您查詢目前室內溫濕度。"}}
+{{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25。"}}
+{{"actions": [{{"action": "delete_food", "name": "牛奶"}}], "reply": "了解，牛奶已移除。"}}
+{{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00"}}], "reply": "好的，4/24 下午 2 點看牙醫已記下。"}}
+{{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "on", "temperature": 26}}], "reply": "好的，冷氣已開啟，26 度。"}}
 {{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "開"}}], "reply": "好的，電風扇已開啟。"}}
-{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "關"}}], "reply": "好的，電風扇已關閉。"}}
-{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "風速+"}}], "reply": "好的，電風扇風速已調高。"}}
-{{"actions": [{{"action": "query_devices"}}], "reply": "為您列出目前可控制的設備。"}}
-{{"actions": [{{"action": "unclear", "message": "請問是哪個品項喝完了？"}}], "reply": "請問是哪個品項喝完了？"}}
+{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "風速+"}}], "reply": "好的，風速已調高。"}}
+{{"actions": [{{"action": "query_sensor", "device_name": "Hub 2"}}], "reply": "為您查詢溫濕度。"}}
+{{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 """
 
 def now_taipei():
     return datetime.now(TZ)
 
-def get_sheet(name):
+import threading
+
+# ── Google Sheets 快取 ──
+_sheets_cache = {}
+_sheets_cache_lock = threading.Lock()
+_sheets_cache_ttl = 60  # 秒
+
+def _get_client():
+    """取得已認證的 gspread client（快取 spreadsheet 物件）"""
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = json.loads(GOOGLE_CREDENTIALS)
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
-    return spreadsheet.worksheet(name)
+    return client.open_by_key(SPREADSHEET_ID)
+
+_spreadsheet = None
+_spreadsheet_time = 0
+
+def get_sheet(name):
+    global _spreadsheet, _spreadsheet_time
+    now = time.time()
+    # 每 60 秒重新認證一次，其他時候重用
+    if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
+        _spreadsheet = _get_client()
+        _spreadsheet_time = now
+    return _spreadsheet.worksheet(name)
 
 def log_message(user_id, message):
-    sheet = get_sheet("訊息紀錄")
-    now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
-    sheet.append_row([now, user_id, message])
+    """背景執行，不阻塞主流程"""
+    def _log():
+        try:
+            sheet = get_sheet("訊息紀錄")
+            now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
+            sheet.append_row([now, user_id, message])
+        except Exception as e:
+            print(f"[LOG ERROR] {e}")
+    threading.Thread(target=_log, daemon=True).start()
 
 def save_conversation(user_id, role, content):
     sheet = get_sheet("對話暫存")
@@ -789,9 +755,8 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
         log_message(user_id, text)
-        print(f"[2] log_message done")
         user_name = get_user_name(user_id)
-        print(f"[3] user_name={user_name}")
+        print(f"[2] user_name={user_name}")
         result = ask_claude(user_id, text)
         print(f"[4] result={repr(result)}")
 
@@ -872,10 +837,17 @@ def handle_message(event):
         print(f"[ERROR] {traceback.format_exc()}")
         reply = "抱歉，系統暫時出了點問題，請稍後再試。"
 
-    save_conversation(user_id, "user", text)
-    save_conversation(user_id, "assistant", reply)
-
+    # 先回覆使用者，再存對話（使用者體感更快）
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply)
     )
+
+    # 背景存對話紀錄
+    def _save():
+        try:
+            save_conversation(user_id, "user", text)
+            save_conversation(user_id, "assistant", reply)
+        except Exception as e:
+            print(f"[SAVE ERROR] {e}")
+    threading.Thread(target=_save, daemon=True).start()
