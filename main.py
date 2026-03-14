@@ -198,21 +198,31 @@ def handle_add(data, user_name):
 
 def handle_delete(data):
     sheet = get_sheet("食品庫存")
+    archive = get_sheet("食品封存")
     records = sheet.get_all_records()
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
-            sheet.update_cell(i + 2, 7, "已消耗")
+            archive.append_row([
+                row.get("品名"), row.get("數量"), row.get("單位"),
+                row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
+            ])
+            sheet.delete_rows(i + 2)
             return f"✅ 已標記 {data.get('name')} 為已消耗"
     return f"❌ 找不到 {data.get('name')}"
 
 def handle_modify(data):
     sheet = get_sheet("食品庫存")
+    archive = get_sheet("食品封存")
     records = sheet.get_all_records()
     new_quantity = int(data.get("quantity", 0))
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
             if new_quantity <= 0:
-                sheet.update_cell(i + 2, 7, "已消耗")
+                archive.append_row([
+                    row.get("品名"), row.get("數量"), row.get("單位"),
+                    row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
+                ])
+                sheet.delete_rows(i + 2)
                 return f"✅ {data.get('name')} 已全部消耗"
             else:
                 sheet.update_cell(i + 2, 2, new_quantity)
@@ -264,10 +274,15 @@ def handle_modify_todo(data):
 
 def handle_delete_todo(data):
     sheet = get_sheet("待辦事項")
+    archive = get_sheet("待辦封存")
     records = sheet.get_all_records()
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
-            sheet.update_cell(i + 2, 5, "已完成")
+            archive.append_row([
+                row.get("事項"), row.get("日期"), row.get("時間"),
+                row.get("負責人"), "已完成", row.get("類型")
+            ])
+            sheet.delete_rows(i + 2)
             return f"✅ 已標記「{data.get('item')}」為已完成"
     return f"❌ 找不到「{data.get('item')}」"
 
