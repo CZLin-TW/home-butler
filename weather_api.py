@@ -67,8 +67,18 @@ def _fetch_forecast(data_id, location_name=None):
         if not location_array:
             return {"error": f"找不到「{location_name or '該地區'}」的預報資料"}
 
+        # 如果有指定 locationName，驗證回傳的是否匹配
+        if location_name:
+            matched = [loc for loc in location_array if loc.get("LocationName") == location_name]
+            if matched:
+                target_loc = matched[0]
+            else:
+                return {"error": f"找不到「{location_name}」的預報資料"}
+        else:
+            target_loc = location_array[0]
+
         return {
-            "data": location_array[0],
+            "data": target_loc,
             "city": locations_list[0].get("LocationsName", ""),
         }
 
