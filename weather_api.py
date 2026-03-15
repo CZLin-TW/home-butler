@@ -205,22 +205,22 @@ def get_weather_summary(date_str="today", location=None):
     elements = loc_data.get("WeatherElement", [])
 
     # 天氣現象（Wx）
-    wx_values = _collect_day(_parse_element(elements, "Wx"), target_date)
+    wx_values = _collect_day(_parse_element(elements, "天氣現象"), target_date)
     daytime = [v["value"] for v in wx_values if 6 <= v["hour"] <= 18 and v["value"]]
     wx = daytime[0] if daytime else (wx_values[0]["value"] if wx_values else "無資料")
 
     # 最低溫（MinT）
-    mint_values = _collect_day(_parse_element(elements, "MinT"), target_date)
+    mint_values = _collect_day(_parse_element(elements, "最低溫度"), target_date)
     mints = [int(v["value"]) for v in mint_values if v["value"] is not None]
     min_t = min(mints) if mints else None
 
     # 最高溫（MaxT）
-    maxt_values = _collect_day(_parse_element(elements, "MaxT"), target_date)
+    maxt_values = _collect_day(_parse_element(elements, "最高溫度"), target_date)
     maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None]
     max_t = max(maxts) if maxts else None
 
     # 降雨機率（PoP12h）
-    pop_values = _collect_day(_parse_element(elements, "PoP12h"), target_date)
+    pop_values = _collect_day(_parse_element(elements, "12小時降雨機率"), target_date)
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != ""]
     max_pop = max(pops) if pops else None
 
