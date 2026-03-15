@@ -86,7 +86,6 @@ def now_taipei():
 _sheets_cache_ttl = 60  # 秒
 
 def _get_client():
-    """取得已認證的 gspread client（快取 spreadsheet 物件）"""
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = json.loads(GOOGLE_CREDENTIALS)
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -99,11 +98,20 @@ _spreadsheet_time = 0
 def get_sheet(name):
     global _spreadsheet, _spreadsheet_time
     now = time.time()
-    # 每 60 秒重新認證一次，其他時候重用
     if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
         _spreadsheet = _get_client()
         _spreadsheet_time = now
     return _spreadsheet.worksheet(name)
+
+def log_message(user_id, message):
+    def _log():
+        try:
+            sheet = get_sheet("訊息紀錄")
+            now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
+            sheet.append_row([now, user_id, message])
+        except Exception as e:
+            print(f"[LOG ERROR] {e}")
+    threading.Thread(target=_log, daemon=True).start()
 
 def save_conversation(user_id, role, content):
     sheet = get_sheet("對話暫存")
@@ -116,16 +124,14 @@ def get_recent_conversation(user_id, limit=6):
     user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
 
-    # 自動清理：超過 limit 的舊紀錄搬到封存
     if len(user_records) > limit:
         old_records = user_records[:-limit]
         try:
             archive = get_sheet("對話封存")
-            # 從後往前刪，避免 index 位移
             rows_to_delete = []
             for i, r in old_records:
                 archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
-                rows_to_delete.append(i + 2)  # +2 因為 header + 0-indexed
+                rows_to_delete.append(i + 2)
             for row_num in sorted(rows_to_delete, reverse=True):
                 sheet.delete_rows(row_num)
             print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
@@ -175,7 +181,6 @@ def get_current_todo():
         return ""
 
 def get_device_info():
-    """從 Google Sheets「智能居家」分頁讀取設備對照表"""
     try:
         sheet = get_sheet("智能居家")
         records = sheet.get_all_records()
@@ -194,7 +199,6 @@ def get_device_info():
         return "尚未設定智能居家設備"
 
 def get_ir_device_info():
-    """取得 IR 設備與其可用按鈕，供 SYSTEM_PROMPT 使用"""
     try:
         sheet = get_sheet("智能居家")
         records = sheet.get_all_records()
@@ -209,7 +213,6 @@ def get_ir_device_info():
         return "無法讀取 IR 設備資訊"
 
 def get_device_id_by_name(device_name):
-    """根據友善名稱查找 SwitchBot device ID"""
     try:
         sheet = get_sheet("智能居家")
         records = sheet.get_all_records()
@@ -221,7 +224,6 @@ def get_device_id_by_name(device_name):
     return ""
 
 def get_all_devices_by_type(device_type):
-    """根據設備類型取得所有啟用的設備"""
     try:
         sheet = get_sheet("智能居家")
         records = sheet.get_all_records()
@@ -238,11 +240,11 @@ def ask_claude(user_id, user_message, user_name=""):
     device_info = get_device_info()
     ir_device_info = get_ir_device_info()
     prompt = SYSTEM_PROMPT.format(
-    today=today, now_time=now_time,
-    family_info=family_info, food_info=food_info,
-    todo_info=todo_info, device_info=device_info,
-    ir_device_info=ir_device_info,
-    current_user=user_name
+        today=today, now_time=now_time,
+        family_info=family_info, food_info=food_info,
+        todo_info=todo_info, device_info=device_info,
+        ir_device_info=ir_device_info,
+        current_user=user_name
     )
     history = get_recent_conversation(user_id)
     messages = history + [{"role": "user", "content": user_message}]
@@ -273,7 +275,6 @@ def get_user_name(user_id):
     return user_id
 
 def generate_notify_message(data_summary):
-    """讓 Claude 用管家語氣整理推播訊息"""
     try:
         today = now_taipei().strftime("%Y-%m-%d")
         now_time = now_taipei().strftime("%H:%M")
@@ -286,7 +287,7 @@ def generate_notify_message(data_summary):
         return response.content[0].text.strip()
     except Exception as e:
         print(f"[NOTIFY CLAUDE ERROR] {e}")
-        return None  # fallback 用制式格式
+        return None
 
 def handle_add(data, user_name):
     sheet = get_sheet("食品庫存")
@@ -414,11 +415,9 @@ def handle_query_todo(user_name):
 # ── 智能居家 handlers ──
 
 def handle_control_ac(data):
-    """控制冷氣"""
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name)
 
-    # 如果找不到指定名稱，嘗試找唯一的冷氣設備
     if not device_id:
         ac_devices = get_all_devices_by_type("冷氣")
         if len(ac_devices) == 1:
@@ -431,17 +430,14 @@ def handle_control_ac(data):
             return "❌ 找不到冷氣設備，請先在「智能居家」分頁設定"
 
     power = data.get("power", "on")
-
     if power == "off":
         result = switchbot_api.ac_turn_off(device_id)
     else:
         temperature = int(data.get("temperature", 26))
         mode_str = data.get("mode", "cool")
         fan_str = data.get("fan_speed", "auto")
-
         mode = switchbot_api.AC_MODE_MAP.get(mode_str, 2)
         fan = switchbot_api.AC_FAN_MAP.get(fan_str, 1)
-
         result = switchbot_api.ac_set_all(device_id, temperature, mode, fan, "on")
 
     if result.get("success"):
@@ -451,13 +447,11 @@ def handle_control_ac(data):
 
 
 def handle_control_ir(data):
-    """控制 DIY IR 設備（電風扇、喇叭等）"""
     device_name = data.get("device_name", "")
     button = data.get("button", "")
     device_id = get_device_id_by_name(device_name)
 
     if not device_id:
-        # 嘗試找唯一的 IR 設備
         ir_devices = get_all_devices_by_type("IR")
         if len(ir_devices) == 1:
             device_id = ir_devices[0].get("Device ID", "")
@@ -476,11 +470,9 @@ def handle_control_ir(data):
 
 
 def handle_query_sensor(data):
-    """查詢感應器數據"""
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name)
 
-    # 如果找不到指定名稱，嘗試找唯一的感應器設備
     if not device_id:
         sensor_devices = get_all_devices_by_type("感應器")
         if len(sensor_devices) == 1:
@@ -502,7 +494,6 @@ def handle_query_sensor(data):
 
 
 def handle_query_devices():
-    """查詢所有已設定的設備"""
     try:
         sheet = get_sheet("智能居家")
         records = sheet.get_all_records()
@@ -523,7 +514,6 @@ def root():
 
 @app.get("/switchbot/devices")
 def list_switchbot_devices():
-    """瀏覽器打開即可查看 SwitchBot 帳號下所有設備與 Device ID"""
     result = switchbot_api.get_devices()
     if "error" in result:
         return {"status": "error", "message": result["error"]}
@@ -549,16 +539,9 @@ def list_switchbot_devices():
 
 @app.get("/switchbot/test/{device_id}/{button_name}")
 def test_switchbot_command(device_id: str, button_name: str):
-    """
-    測試用：直接對指定設備送出 IR 按鈕指令
-    範例：/switchbot/test/02-202509241953-60857229/電源
-    """
     print(f"[TEST] device_id={device_id}, button={button_name}")
-
-    # 先試 customize（DIY IR 按鈕）
     result = switchbot_api.send_command(device_id, button_name, "default", "customize")
     print(f"[TEST] customize result: {result}")
-
     return {
         "status": "ok" if result.get("success") else "error",
         "device_id": device_id,
@@ -569,10 +552,10 @@ def test_switchbot_command(device_id: str, button_name: str):
 
 @app.get("/switchbot/test_turnon/{device_id}")
 def test_switchbot_turnon(device_id: str):
-    """測試用：對設備送 turnOn 指令"""
     result = switchbot_api.send_command(device_id, "turnOn", "default", "command")
     print(f"[TEST] turnOn result: {result}")
     return {"status": "ok" if result.get("success") else "error", "result": result}
+
 
 @app.post("/notify")
 async def notify():
@@ -607,7 +590,7 @@ async def notify():
         members_sheet = get_sheet("家庭成員")
         members = members_sheet.get_all_records()
 
-        # ── 收集溫濕度 ──
+        # ── 溫濕度 ──
         sensor_lines = []
         try:
             sensor_devices = get_all_devices_by_type("感應器")
@@ -623,12 +606,12 @@ async def notify():
         except:
             pass
 
-        # ── 收集待辦事項 ──
+        # ── 待辦事項（今天以前過期 + 本週，含無時間的） ──
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
 
         todo_public = []
-        todo_private = {}  # {person_name: [items]}
+        todo_private = {}
 
         for r in todo_records:
             if r.get("狀態") != "待辦":
@@ -641,9 +624,12 @@ async def notify():
             except:
                 continue
             days_left = (todo_date - today).days
-            if 0 <= days_left <= 7:
+            # 修改：去掉 0 <= 限制，過期未完成也包含進來（days_left <= 7）
+            if days_left <= 7:
                 time_part = f" {r['時間']}" if r.get("時間") else ""
-                label = f"{r['事項']}（{date_str}{time_part}）"
+                # 過期未完成加上標記
+                overdue_mark = "⚠️ 未完成 " if days_left < 0 else ""
+                label = f"{overdue_mark}{r['事項']}（{date_str}{time_part}）"
                 if r.get("類型") == "私人":
                     person = r.get("負責人", "")
                     if person not in todo_private:
@@ -652,7 +638,7 @@ async def notify():
                 else:
                     todo_public.append(label)
 
-        # ── 組合原始資料，交給 Claude 整理 ──
+        # ── 組合並推播 ──
         has_content = expired or soon or this_week or sensor_lines or todo_public or todo_private
 
         if has_content:
@@ -664,7 +650,6 @@ async def notify():
                 if not user_id:
                     continue
 
-                # 組合該成員看得到的資料
                 data_parts = []
                 if expired:
                     data_parts.append("今天到期：" + "、".join(expired))
@@ -683,11 +668,9 @@ async def notify():
                     continue
 
                 data_summary = "\n".join(data_parts)
-
-                # 讓 Claude 整理成有溫度的推播
                 message = generate_notify_message(data_summary)
                 if not message:
-                    message = data_summary  # fallback 制式格式
+                    message = data_summary
 
                 line_bot_api.push_message(user_id, TextSendMessage(text=message))
                 save_conversation(user_id, "assistant", message)
@@ -696,56 +679,77 @@ async def notify():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 @app.post("/notify_realtime")
 async def notify_realtime():
     try:
         now = now_taipei()
+        today = now.date()
+
+        # window：未來 20 分鐘內即將到來的任務
         window_start = now
-        window_end = now + timedelta(minutes=15)
+        window_end = now + timedelta(minutes=20)
+
+        # 整點判斷：現在分鐘數在 0~4 或 55~59（±5 分鐘內）
+        is_near_hour = now.minute <= 4 or now.minute >= 55
 
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
         members_sheet = get_sheet("家庭成員")
         members = members_sheet.get_all_records()
 
+        def push_to_member(person, todo_type, message):
+            if todo_type == "私人":
+                for member in members:
+                    if member.get("狀態") == "啟用" and member.get("名稱") == person:
+                        user_id = member.get("Line User ID")
+                        if user_id:
+                            line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                            save_conversation(user_id, "assistant", message)
+            else:
+                for member in members:
+                    if member.get("狀態") == "啟用":
+                        user_id = member.get("Line User ID")
+                        if user_id:
+                            line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                            save_conversation(user_id, "assistant", message)
+
         for r in todo_records:
             if r.get("狀態") != "待辦":
                 continue
             date_str = r.get("日期", "")
             time_str = r.get("時間", "")
+            person = r.get("負責人", "")
+            todo_type = r.get("類型", "公開")
+
             if not date_str or not time_str:
                 continue
+
             try:
                 todo_dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
             except:
                 continue
+
+            # 情況一：即將到來（未來 20 分鐘內）
             if window_start <= todo_dt <= window_end:
-                # 讓 Claude 整理提醒訊息
                 data_summary = f"即時提醒：{r['事項']}，時間 {time_str}"
                 message = generate_notify_message(data_summary)
                 if not message:
                     message = f"⏰ 提醒：{r['事項']}（{time_str}）"
+                push_to_member(person, todo_type, message)
 
-                person = r.get("負責人", "")
-                todo_type = r.get("類型", "公開")
-                if todo_type == "私人":
-                    for member in members:
-                        if member.get("狀態") == "啟用" and member.get("名稱") == person:
-                            user_id = member.get("Line User ID")
-                            if user_id:
-                                line_bot_api.push_message(user_id, TextSendMessage(text=message))
-                                save_conversation(user_id, "assistant", message)
-                else:
-                    for member in members:
-                        if member.get("狀態") == "啟用":
-                            user_id = member.get("Line User ID")
-                            if user_id:
-                                line_bot_api.push_message(user_id, TextSendMessage(text=message))
-                                save_conversation(user_id, "assistant", message)
+            # 情況二：整點時，推播今天已過時間但未完成的任務
+            elif is_near_hour and todo_dt.date() == today and todo_dt < now:
+                data_summary = f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成"
+                message = generate_notify_message(data_summary)
+                if not message:
+                    message = f"⚠️ 未完成：{r['事項']}（原訂 {time_str}）"
+                push_to_member(person, todo_type, message)
 
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -765,12 +769,12 @@ def handle_message(event):
 
     try:
         print(f"[1] user_id={user_id}, text={text}")
+        log_message(user_id, text)
         user_name = get_user_name(user_id)
         print(f"[2] user_name={user_name}")
-        result = ask_claude(user_id, text)
+        result = ask_claude(user_id, text, user_name)  # ← 傳入 user_name
         print(f"[3] result={repr(result)}")
 
-        # 防護：Claude 回傳空字串或非 JSON
         if not result or not result.strip():
             print("[WARN] Claude returned empty response")
             reply = "抱歉，我沒有理解您的意思，可以再說一次嗎？"
@@ -779,11 +783,10 @@ def handle_message(event):
                 parsed = json.loads(result)
             except json.JSONDecodeError as je:
                 print(f"[WARN] JSON parse failed: {je}, raw: {repr(result)}")
-                # 如果 Claude 回傳的是純文字（非 JSON），直接當回覆用
                 if any(c in result for c in '{}[]'):
                     reply = "抱歉，系統處理時發生了一點問題，請再試一次。"
                 else:
-                    reply = result  # Claude 可能直接回了一段文字
+                    reply = result
                 parsed = None
 
             if parsed is not None:
@@ -828,10 +831,7 @@ def handle_message(event):
                     elif action == "unclear":
                         pass
 
-                # 如果有設備控制失敗（❌），優先顯示實際結果而非 Claude 的預設回覆
                 has_error = any("❌" in r for r in results if r)
-
-                # 即時數據（感應器）和 debug 資訊（設備列表），Claude 看不到實際數值，用程式結果
                 realtime_actions = {"query_sensor", "query_devices"}
                 has_realtime = any(d.get("action") in realtime_actions for d in actions)
 
@@ -850,13 +850,11 @@ def handle_message(event):
         print(f"[ERROR] {traceback.format_exc()}")
         reply = "抱歉，系統暫時出了點問題，請稍後再試。"
 
-    # 先回覆使用者，再存對話（使用者體感更快）
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply)
     )
 
-    # 背景存對話紀錄
     def _save():
         try:
             save_conversation(user_id, "user", text)
