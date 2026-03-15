@@ -229,7 +229,7 @@ def get_all_devices_by_type(device_type):
     except:
         return []
 
-def ask_claude(user_id, user_message):
+def ask_claude(user_id, user_message, user_name=""):
     today = now_taipei().strftime("%Y-%m-%d")
     now_time = now_taipei().strftime("%H:%M")
     family_info = get_family_members_info()
