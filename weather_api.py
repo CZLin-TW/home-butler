@@ -211,27 +211,27 @@ def get_weather_summary(date_str="today", location=None):
 
     # 最低溫（MinT）
     mint_values = _collect_day(_parse_element(elements, "最低溫度"), target_date)
-    mints = [int(v["value"]) for v in mint_values if v["value"] is not None]
+    mints = [int(v["value"]) for v in mint_values if v["value"] is not None and v["value"] not in ("", "-")]
     min_t = min(mints) if mints else None
 
     # 最高溫（MaxT）
     maxt_values = _collect_day(_parse_element(elements, "最高溫度"), target_date)
-    maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None]
+    maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None and v["value"] not in ("", "-")]
     max_t = max(maxts) if maxts else None
 
     # 降雨機率（PoP12h）
     pop_values = _collect_day(_parse_element(elements, "12小時降雨機率"), target_date)
-    pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != ""]
+    pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] not in ("", "-")]
     max_pop = max(pops) if pops else None
 
      # 最低體感溫度
     minat_values = _collect_day(_parse_element(elements, "最低體感溫度"), target_date)
-    minats = [int(v["value"]) for v in minat_values if v["value"] is not None]
+    minats = [int(v["value"]) for v in minat_values if v["value"] is not None and v["value"] not in ("", "-")]
     min_at = min(minats) if minats else None
 
     # 最高體感溫度
     maxat_values = _collect_day(_parse_element(elements, "最高體感溫度"), target_date)
-    maxats = [int(v["value"]) for v in maxat_values if v["value"] is not None]
+    maxats = [int(v["value"]) for v in maxat_values if v["value"] is not None and v["value"] not in ("", "-")]
     max_at = max(maxats) if maxats else None
 
     # 日期標籤
