@@ -105,17 +105,6 @@ def get_sheet(name):
         _spreadsheet_time = now
     return _spreadsheet.worksheet(name)
 
-def log_message(user_id, message):
-    """背景執行，不阻塞主流程"""
-    def _log():
-        try:
-            sheet = get_sheet("訊息紀錄")
-            now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
-            sheet.append_row([now, user_id, message])
-        except Exception as e:
-            print(f"[LOG ERROR] {e}")
-    threading.Thread(target=_log, daemon=True).start()
-
 def save_conversation(user_id, role, content):
     sheet = get_sheet("對話暫存")
     now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
@@ -281,6 +270,22 @@ def get_user_name(user_id):
     except:
         pass
     return user_id
+
+def generate_notify_message(data_summary):
+    """讓 Claude 用管家語氣整理推播訊息"""
+    try:
+        today = now_taipei().strftime("%Y-%m-%d")
+        now_time = now_taipei().strftime("%H:%M")
+        response = claude.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=500,
+            system=f"你是家庭專屬管家。現在是 {today} {now_time}。請根據以下資料，用溫暖簡潔的管家語氣整理成一則推播訊息。適度使用 emoji，主動補充貼心提醒（快過期的催促、今天的待辦提醒注意時間等）。不要加開頭問候語如「早安」，直接進入內容。只回傳推播文字，不要 JSON。",
+            messages=[{"role": "user", "content": data_summary}]
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        print(f"[NOTIFY CLAUDE ERROR] {e}")
+        return None  # fallback 用制式格式
 
 def handle_add(data, user_name):
     sheet = get_sheet("食品庫存")
@@ -601,15 +606,7 @@ async def notify():
         members_sheet = get_sheet("家庭成員")
         members = members_sheet.get_all_records()
 
-        food_lines = []
-        if expired:
-            food_lines.append("🔴 今天到期：" + "、".join(expired))
-        if soon:
-            food_lines.append("🟡 3天內到期：" + "、".join(soon))
-        if this_week:
-            food_lines.append("🟢 本週到期：" + "、".join(this_week))
-
-        # ── 溫濕度資訊（加入每日推播）──
+        # ── 收集溫濕度 ──
         sensor_lines = []
         try:
             sensor_devices = get_all_devices_by_type("感應器")
@@ -621,34 +618,16 @@ async def notify():
                     if "error" not in result:
                         temp = result.get("temperature", "N/A")
                         humidity = result.get("humidity", "N/A")
-                        sensor_lines.append(f"🌡️ {dev_name}：{temp}°C / {humidity}%")
+                        sensor_lines.append(f"{dev_name}：{temp}°C / {humidity}%")
         except:
             pass
 
-        # 組合推播訊息
-        all_lines = []
-        if food_lines:
-            all_lines.extend(food_lines)
-        if sensor_lines:
-            if all_lines:
-                all_lines.append("")  # 空行分隔
-            all_lines.extend(sensor_lines)
-
-        if all_lines:
-            message = "\n".join(all_lines)
-            for member in members:
-                if member.get("狀態") == "啟用":
-                    user_id = member.get("Line User ID")
-                    if user_id:
-                        line_bot_api.push_message(user_id, TextSendMessage(text=message))
-                        save_conversation(user_id, "assistant", message)
-
-        # ── 待辦事項推播（維持原邏輯）──
+        # ── 收集待辦事項 ──
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
 
-        todo_lines_public = []
-        todo_private = {}
+        todo_public = []
+        todo_private = {}  # {person_name: [items]}
 
         for r in todo_records:
             if r.get("狀態") != "待辦":
@@ -663,32 +642,54 @@ async def notify():
             days_left = (todo_date - today).days
             if 0 <= days_left <= 7:
                 time_part = f" {r['時間']}" if r.get("時間") else ""
-                label = f"• {r['事項']}（{date_str}{time_part}）"
+                label = f"{r['事項']}（{date_str}{time_part}）"
                 if r.get("類型") == "私人":
                     person = r.get("負責人", "")
                     if person not in todo_private:
                         todo_private[person] = []
                     todo_private[person].append(label)
                 else:
-                    todo_lines_public.append(label)
+                    todo_public.append(label)
 
-        if todo_lines_public:
-            todo_message = "📋 本週待辦：\n" + "\n".join(todo_lines_public)
-            for member in members:
-                if member.get("狀態") == "啟用":
-                    user_id = member.get("Line User ID")
-                    if user_id:
-                        line_bot_api.push_message(user_id, TextSendMessage(text=todo_message))
-                        save_conversation(user_id, "assistant", todo_message)
+        # ── 組合原始資料，交給 Claude 整理 ──
+        has_content = expired or soon or this_week or sensor_lines or todo_public or todo_private
 
-        for person_name, items in todo_private.items():
-            todo_message = "🔒 您的私人待辦：\n" + "\n".join(items)
+        if has_content:
             for member in members:
-                if member.get("狀態") == "啟用" and member.get("名稱") == person_name:
-                    user_id = member.get("Line User ID")
-                    if user_id:
-                        line_bot_api.push_message(user_id, TextSendMessage(text=todo_message))
-                        save_conversation(user_id, "assistant", todo_message)
+                if member.get("狀態") != "啟用":
+                    continue
+                user_id = member.get("Line User ID")
+                member_name = member.get("名稱", "")
+                if not user_id:
+                    continue
+
+                # 組合該成員看得到的資料
+                data_parts = []
+                if expired:
+                    data_parts.append("今天到期：" + "、".join(expired))
+                if soon:
+                    data_parts.append("3天內到期：" + "、".join(soon))
+                if this_week:
+                    data_parts.append("本週到期：" + "、".join(this_week))
+                if sensor_lines:
+                    data_parts.append("溫濕度：" + "、".join(sensor_lines))
+                if todo_public:
+                    data_parts.append("本週公開待辦：" + "、".join(todo_public))
+                if member_name in todo_private:
+                    data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
+
+                if not data_parts:
+                    continue
+
+                data_summary = "\n".join(data_parts)
+
+                # 讓 Claude 整理成有溫度的推播
+                message = generate_notify_message(data_summary)
+                if not message:
+                    message = data_summary  # fallback 制式格式
+
+                line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                save_conversation(user_id, "assistant", message)
 
         return {"status": "ok"}
     except Exception as e:
@@ -718,7 +719,12 @@ async def notify_realtime():
             except:
                 continue
             if window_start <= todo_dt <= window_end:
-                message = f"⏰ 提醒：{r['事項']}（{time_str}）"
+                # 讓 Claude 整理提醒訊息
+                data_summary = f"即時提醒：{r['事項']}，時間 {time_str}"
+                message = generate_notify_message(data_summary)
+                if not message:
+                    message = f"⏰ 提醒：{r['事項']}（{time_str}）"
+
                 person = r.get("負責人", "")
                 todo_type = r.get("類型", "公開")
                 if todo_type == "私人":
@@ -758,7 +764,6 @@ def handle_message(event):
 
     try:
         print(f"[1] user_id={user_id}, text={text}")
-        log_message(user_id, text)
         user_name = get_user_name(user_id)
         print(f"[2] user_name={user_name}")
         result = ask_claude(user_id, text)
@@ -825,13 +830,12 @@ def handle_message(event):
                 # 如果有設備控制失敗（❌），優先顯示實際結果而非 Claude 的預設回覆
                 has_error = any("❌" in r for r in results if r)
 
-                # 需要即時數據的查詢（感應器、設備列表），用程式結果
-                realtime_queries = {"query_sensor", "query_devices"}
-                has_realtime = any(d.get("action") in realtime_queries for d in actions)
+                # 設備列表是 debug 用途，直接用程式結果
+                has_device_list = any(d.get("action") == "query_devices" for d in actions)
 
                 if has_error:
                     reply = "\n".join(results)
-                elif has_realtime:
+                elif has_device_list:
                     reply = "\n".join(results)
                 elif claude_reply:
                     reply = claude_reply
