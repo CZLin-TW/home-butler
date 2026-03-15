@@ -440,7 +440,7 @@ function sendWeatherNotification() {
 |------|------|
 | main.py | FastAPI 主程式（Webhook、Claude 串接、所有 handler、推播邏輯） |
 | switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取、DIY IR） |
-| panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
+| panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢）。API 參考：https://github.com/osk2/panasonic_smart_app |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
