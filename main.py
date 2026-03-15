@@ -795,9 +795,10 @@ async def notify_weather():
         members = members_sheet.get_all_records()
 
         data_parts = []
+        data_parts.append(f"【重點】明日天氣預報：{tomorrow_weather}")
         if today_weather:
-            data_parts.append(f"今日天氣：{today_weather}")
-        data_parts.append(f"明日天氣預報：{tomorrow_weather}")
+            data_parts.append(f"（參考）今日天氣：{today_weather}")
+        data_parts.append("請以明日天氣為主，今日僅供比較溫差變化。如果明天比今天冷很多或會下雨，主動提醒。")
         data_summary = "\n".join(data_parts)
         message = generate_notify_message(data_summary)
         if not message:
