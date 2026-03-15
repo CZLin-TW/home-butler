@@ -13,7 +13,7 @@ import threading
 import anthropic
 import switchbot_api
 import panasonic_api
-import weather_api  # ← 新增
+import weather_api
 
 app = FastAPI()
 
@@ -93,8 +93,14 @@ action 定義：
 def now_taipei():
     return datetime.now(TZ)
 
-# ── Google Sheets 快取 ──
+
+# ══════════════════════════════════════════
+# Google Sheets 連線 & 快取
+# ══════════════════════════════════════════
+
 _sheets_cache_ttl = 60
+_spreadsheet = None
+_spreadsheet_time = 0
 
 def _get_client():
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -103,16 +109,181 @@ def _get_client():
     client = gspread.authorize(creds)
     return client.open_by_key(SPREADSHEET_ID)
 
-_spreadsheet = None
-_spreadsheet_time = 0
-
-def get_sheet(name):
+def _get_spreadsheet():
+    """取得快取的 spreadsheet 物件（60 秒 TTL）"""
     global _spreadsheet, _spreadsheet_time
     now = time.time()
     if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
         _spreadsheet = _get_client()
         _spreadsheet_time = now
-    return _spreadsheet.worksheet(name)
+    return _spreadsheet
+
+def get_sheet(name):
+    """取得單一 worksheet（僅用於寫入操作和 notify 端點）"""
+    return _get_spreadsheet().worksheet(name)
+
+
+# ══════════════════════════════════════════
+# RequestContext：批次讀取，一次 API 呼叫
+# ══════════════════════════════════════════
+
+def _parse_sheet_values(values):
+    """將 Sheets API 回傳的 2D array 轉為 list of dict（模擬 get_all_records 行為）"""
+    if not values or len(values) < 2:
+        return []
+    headers = values[0]
+    records = []
+    for row in values[1:]:
+        padded = list(row) + [''] * max(0, len(headers) - len(row))
+        record = {}
+        for i, h in enumerate(headers):
+            if not h:
+                continue
+            v = padded[i] if i < len(padded) else ''
+            # 模擬 gspread 的自動型別轉換
+            if isinstance(v, str) and v.strip():
+                try:
+                    v = int(v)
+                except ValueError:
+                    try:
+                        v = float(v)
+                    except ValueError:
+                        pass
+            record[h] = v
+        records.append(record)
+    return records
+
+
+class RequestContext:
+    """
+    單次請求的 Sheets 資料快取。
+    
+    用 values_batch_get 一次讀取所有分頁，取代原本 7~8 次個別 API 呼叫。
+    寫入操作仍使用個別 worksheet，但 worksheet 物件也做快取。
+    """
+    
+    BATCH_SHEETS = ["家庭成員", "食品庫存", "待辦事項", "智能居家", "對話暫存"]
+    
+    def __init__(self):
+        self._records = {}
+        self._worksheets = {}
+        self._loaded = False
+    
+    def load(self):
+        """一次 API 呼叫讀取所有分頁"""
+        ss = _get_spreadsheet()
+        ranges = [f"'{name}'" for name in self.BATCH_SHEETS]
+        try:
+            result = ss.values_batch_get(
+                ranges,
+                params={'valueRenderOption': 'FORMATTED_VALUE'}
+            )
+            for vr in result.get('valueRanges', []):
+                range_str = vr.get('range', '')
+                # "'家庭成員'!A1:Z1000" → "家庭成員"
+                sheet_name = range_str.split('!')[0].strip("'")
+                self._records[sheet_name] = _parse_sheet_values(vr.get('values', []))
+            print(f"[BATCH READ] 成功讀取 {len(self._records)} 個分頁")
+        except Exception as e:
+            print(f"[BATCH READ ERROR] {e}，改用逐一讀取")
+            ss = _get_spreadsheet()
+            for name in self.BATCH_SHEETS:
+                try:
+                    ws = ss.worksheet(name)
+                    self._records[name] = ws.get_all_records()
+                except Exception as e2:
+                    print(f"[FALLBACK READ ERROR] {name}: {e2}")
+                    self._records[name] = []
+        self._loaded = True
+    
+    def get(self, sheet_name):
+        """取得分頁資料（從快取）"""
+        if not self._loaded:
+            self.load()
+        return self._records.get(sheet_name, [])
+    
+    def get_worksheet(self, name):
+        """取得 worksheet 物件（用於寫入，快取避免重複 metadata 查詢）"""
+        if name not in self._worksheets:
+            ss = _get_spreadsheet()
+            self._worksheets[name] = ss.worksheet(name)
+        return self._worksheets[name]
+
+
+# ══════════════════════════════════════════
+# 資料讀取函數（全部改用 ctx 快取）
+# ══════════════════════════════════════════
+
+def get_user_name(user_id, ctx):
+    for row in ctx.get("家庭成員"):
+        if row.get("Line User ID") == user_id and row.get("狀態") == "啟用":
+            return row.get("名稱", user_id)
+    return user_id
+
+def get_family_members_info(ctx):
+    members = []
+    for row in ctx.get("家庭成員"):
+        if row.get("狀態") == "啟用":
+            members.append(f"{row.get('名稱')}（稱謂：{row.get('稱謂', '')}）")
+    return "、".join(members)
+
+def get_current_food(ctx):
+    valid = [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
+    if not valid:
+        return "目前庫存是空的"
+    lines = [f"{r['品名']} {r['數量']}{r['單位']}（過期日 {r['過期日']}）" for r in valid]
+    return "、".join(lines)
+
+def get_current_todo(ctx):
+    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    if not valid:
+        return "目前沒有待辦事項"
+    lines = []
+    for r in valid:
+        time_part = f" {r['時間']}" if r.get("時間") else ""
+        type_part = "（私人）" if r.get("類型") == "私人" else "（公開）"
+        lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
+    return "、".join(lines)
+
+def get_device_info(ctx):
+    valid = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
+    if not valid:
+        return "目前沒有已設定的智能居家設備"
+    lines = []
+    for r in valid:
+        buttons = r.get("按鈕", "")
+        if buttons:
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}）")
+        else:
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}）")
+    return "、".join(lines)
+
+def get_ir_device_info(ctx):
+    ir_devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用" and r.get("按鈕")]
+    if not ir_devices:
+        return "目前沒有 IR 設備"
+    lines = [f"{r['名稱']}：可用按鈕為 {r['按鈕']}" for r in ir_devices]
+    return "；".join(lines)
+
+def get_device_id_by_name(device_name, ctx):
+    for r in ctx.get("智能居家"):
+        if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
+            return r.get("Device ID", "")
+    return ""
+
+def get_device_auth_by_name(device_name, ctx):
+    for r in ctx.get("智能居家"):
+        if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
+            return r.get("Auth", ""), r.get("Device ID", "")
+    return "", ""
+
+def get_all_devices_by_type(device_type, ctx):
+    return [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用" and r.get("類型") == device_type]
+
+
+# ══════════════════════════════════════════
+# 對話紀錄（讀取用 ctx，寫入用 worksheet）
+# ══════════════════════════════════════════
 
 def log_message(user_id, message):
     def _log():
@@ -125,151 +296,59 @@ def log_message(user_id, message):
     threading.Thread(target=_log, daemon=True).start()
 
 def save_conversation(user_id, role, content):
-    sheet = get_sheet("對話暫存")
-    now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
-    sheet.append_row([user_id, role, content, now])
+    """背景寫入對話暫存"""
+    def _save():
+        try:
+            sheet = get_sheet("對話暫存")
+            now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
+            sheet.append_row([user_id, role, content, now])
+        except Exception as e:
+            print(f"[SAVE CONV ERROR] {e}")
+    threading.Thread(target=_save, daemon=True).start()
 
-def get_recent_conversation(user_id, limit=6):
-    sheet = get_sheet("對話暫存")
-    records = sheet.get_all_records(expected_headers=["Line User ID", "角色", "內容", "時間"])
+def get_recent_conversation(user_id, ctx, limit=6):
+    """從 ctx 快取讀取對話紀錄，超過 limit 則在背景封存"""
+    records = ctx.get("對話暫存")
     user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
 
     if len(user_records) > limit:
         old_records = user_records[:-limit]
-        try:
-            archive = get_sheet("對話封存")
-            rows_to_delete = []
-            for i, r in old_records:
-                archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
-                rows_to_delete.append(i + 2)
-            for row_num in sorted(rows_to_delete, reverse=True):
-                sheet.delete_rows(row_num)
-            print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
-        except Exception as e:
-            print(f"[CLEANUP ERROR] {e}")
+        def _archive():
+            try:
+                archive = get_sheet("對話封存")
+                sheet = get_sheet("對話暫存")
+                rows_to_delete = []
+                for i, r in old_records:
+                    archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
+                    rows_to_delete.append(i + 2)
+                for row_num in sorted(rows_to_delete, reverse=True):
+                    sheet.delete_rows(row_num)
+                print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
+            except Exception as e:
+                print(f"[CLEANUP ERROR] {e}")
+        threading.Thread(target=_archive, daemon=True).start()
 
     return [{"role": r["角色"], "content": r["內容"]} for _, r in recent]
 
-def get_family_members_info():
-    try:
-        sheet = get_sheet("家庭成員")
-        records = sheet.get_all_records()
-        members = []
-        for row in records:
-            if row.get("狀態") == "啟用":
-                members.append(f"{row.get('名稱')}（稱謂：{row.get('稱謂', '')}）")
-        return "、".join(members)
-    except:
-        return ""
 
-def get_current_food():
-    try:
-        sheet = get_sheet("食品庫存")
-        records = sheet.get_all_records()
-        valid = [r for r in records if r.get("狀態") == "有效"]
-        if not valid:
-            return "目前庫存是空的"
-        lines = [f"{r['品名']} {r['數量']}{r['單位']}（過期日 {r['過期日']}）" for r in valid]
-        return "、".join(lines)
-    except:
-        return ""
+# ══════════════════════════════════════════
+# Claude API
+# ══════════════════════════════════════════
 
-def get_current_todo():
-    try:
-        sheet = get_sheet("待辦事項")
-        records = sheet.get_all_records()
-        valid = [r for r in records if r.get("狀態") == "待辦"]
-        if not valid:
-            return "目前沒有待辦事項"
-        lines = []
-        for r in valid:
-            time_part = f" {r['時間']}" if r.get("時間") else ""
-            type_part = "（私人）" if r.get("類型") == "私人" else "（公開）"
-            lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
-        return "、".join(lines)
-    except:
-        return ""
-
-def get_device_info():
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        valid = [r for r in records if r.get("狀態") == "啟用"]
-        if not valid:
-            return "目前沒有已設定的智能居家設備"
-        lines = []
-        for r in valid:
-            buttons = r.get("按鈕", "")
-            if buttons:
-                lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}）")
-            else:
-                lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}）")
-        return "、".join(lines)
-    except:
-        return "尚未設定智能居家設備"
-
-def get_ir_device_info():
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        ir_devices = [r for r in records if r.get("狀態") == "啟用" and r.get("按鈕")]
-        if not ir_devices:
-            return "目前沒有 IR 設備"
-        lines = []
-        for r in ir_devices:
-            lines.append(f"{r['名稱']}：可用按鈕為 {r['按鈕']}")
-        return "；".join(lines)
-    except:
-        return "無法讀取 IR 設備資訊"
-
-def get_device_id_by_name(device_name):
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        for r in records:
-            if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
-                return r.get("Device ID", "")
-    except:
-        pass
-    return ""
-
-def get_device_auth_by_name(device_name):
-    """根據友善名稱查找 Panasonic Auth 和 GWID"""
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        for r in records:
-            if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
-                return r.get("Auth", ""), r.get("Device ID", "")
-    except:
-        pass
-    return "", ""
-
-def get_all_devices_by_type(device_type):
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        return [r for r in records if r.get("狀態") == "啟用" and r.get("類型") == device_type]
-    except:
-        return []
-
-def ask_claude(user_id, user_message, user_name=""):
+def ask_claude(user_id, user_message, user_name, ctx):
     today = now_taipei().strftime("%Y-%m-%d")
     now_time = now_taipei().strftime("%H:%M")
-    family_info = get_family_members_info()
-    food_info = get_current_food()
-    todo_info = get_current_todo()
-    device_info = get_device_info()
-    ir_device_info = get_ir_device_info()
     prompt = SYSTEM_PROMPT.format(
         today=today, now_time=now_time,
-        family_info=family_info, food_info=food_info,
-        todo_info=todo_info, device_info=device_info,
-        ir_device_info=ir_device_info,
+        family_info=get_family_members_info(ctx),
+        food_info=get_current_food(ctx),
+        todo_info=get_current_todo(ctx),
+        device_info=get_device_info(ctx),
+        ir_device_info=get_ir_device_info(ctx),
         current_user=user_name
     )
-    history = get_recent_conversation(user_id)
+    history = get_recent_conversation(user_id, ctx)
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
         model="claude-sonnet-4-6",
@@ -286,17 +365,6 @@ def ask_claude(user_id, user_message, user_name=""):
     print(f"[DEBUG] Claude raw: {repr(text)}")
     return text
 
-def get_user_name(user_id):
-    try:
-        sheet = get_sheet("家庭成員")
-        records = sheet.get_all_records()
-        for row in records:
-            if row.get("Line User ID") == user_id and row.get("狀態") == "啟用":
-                return row.get("名稱", user_id)
-    except:
-        pass
-    return user_id
-
 def generate_notify_message(data_summary):
     try:
         today = now_taipei().strftime("%Y-%m-%d")
@@ -312,8 +380,13 @@ def generate_notify_message(data_summary):
         print(f"[NOTIFY CLAUDE ERROR] {e}")
         return None
 
-def handle_add(data, user_name):
-    sheet = get_sheet("食品庫存")
+
+# ══════════════════════════════════════════
+# Action Handlers（讀取用 ctx，寫入用 ctx.get_worksheet）
+# ══════════════════════════════════════════
+
+def handle_add(data, user_name, ctx):
+    sheet = ctx.get_worksheet("食品庫存")
     today = now_taipei().strftime("%Y-%m-%d")
     sheet.append_row([
         data.get("name", ""),
@@ -326,10 +399,10 @@ def handle_add(data, user_name):
     ])
     return f"✅ 已新增 {data.get('name')}，過期日 {data.get('expiry')}"
 
-def handle_delete(data):
-    sheet = get_sheet("食品庫存")
-    archive = get_sheet("食品封存")
-    records = sheet.get_all_records()
+def handle_delete(data, ctx):
+    sheet = ctx.get_worksheet("食品庫存")
+    archive = ctx.get_worksheet("食品封存")
+    records = ctx.get("食品庫存")
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
             archive.append_row([
@@ -340,10 +413,10 @@ def handle_delete(data):
             return f"✅ 已標記 {data.get('name')} 為已消耗"
     return f"❌ 找不到 {data.get('name')}"
 
-def handle_modify(data):
-    sheet = get_sheet("食品庫存")
-    archive = get_sheet("食品封存")
-    records = sheet.get_all_records()
+def handle_modify(data, ctx):
+    sheet = ctx.get_worksheet("食品庫存")
+    archive = ctx.get_worksheet("食品封存")
+    records = ctx.get("食品庫存")
     new_quantity = int(data.get("quantity", 0))
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
@@ -359,17 +432,15 @@ def handle_modify(data):
                 return f"✅ {data.get('name')} 數量已更新為 {new_quantity}"
     return f"❌ 找不到 {data.get('name')}"
 
-def handle_query():
-    sheet = get_sheet("食品庫存")
-    records = sheet.get_all_records()
-    valid = [r for r in records if r.get("狀態") == "有效"]
+def handle_query(ctx):
+    valid = [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
     if not valid:
         return "目前庫存是空的"
     lines = [f"• {r['品名']} {r['數量']}{r['單位']}（{r['過期日']}）" for r in valid]
     return "目前庫存：\n" + "\n".join(lines)
 
-def handle_add_todo(data, user_name):
-    sheet = get_sheet("待辦事項")
+def handle_add_todo(data, user_name, ctx):
+    sheet = ctx.get_worksheet("待辦事項")
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
     sheet.append_row([
@@ -386,9 +457,9 @@ def handle_add_todo(data, user_name):
     type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
     return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
 
-def handle_modify_todo(data):
-    sheet = get_sheet("待辦事項")
-    records = sheet.get_all_records()
+def handle_modify_todo(data, ctx):
+    sheet = ctx.get_worksheet("待辦事項")
+    records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
             if data.get("date"):
@@ -402,10 +473,10 @@ def handle_modify_todo(data):
             return f"✅ 已更新「{data.get('item')}」"
     return f"❌ 找不到「{data.get('item')}」"
 
-def handle_delete_todo(data):
-    sheet = get_sheet("待辦事項")
-    archive = get_sheet("待辦封存")
-    records = sheet.get_all_records()
+def handle_delete_todo(data, ctx):
+    sheet = ctx.get_worksheet("待辦事項")
+    archive = ctx.get_worksheet("待辦封存")
+    records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
             archive.append_row([
@@ -416,10 +487,8 @@ def handle_delete_todo(data):
             return f"✅ 已標記「{data.get('item')}」為已完成"
     return f"❌ 找不到「{data.get('item')}」"
 
-def handle_query_todo(user_name):
-    sheet = get_sheet("待辦事項")
-    records = sheet.get_all_records()
-    valid = [r for r in records if r.get("狀態") == "待辦"]
+def handle_query_todo(user_name, ctx):
+    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
     if not valid:
         return "目前沒有待辦事項"
     lines = []
@@ -437,12 +506,12 @@ def handle_query_todo(user_name):
 
 # ── 智能居家 handlers ──
 
-def handle_control_ac(data):
+def handle_control_ac(data, ctx):
     device_name = data.get("device_name", "")
-    device_id = get_device_id_by_name(device_name)
+    device_id = get_device_id_by_name(device_name, ctx)
 
     if not device_id:
-        ac_devices = get_all_devices_by_type("冷氣")
+        ac_devices = get_all_devices_by_type("冷氣", ctx)
         if len(ac_devices) == 1:
             device_id = ac_devices[0].get("Device ID", "")
             device_name = ac_devices[0].get("名稱", device_name)
@@ -469,13 +538,13 @@ def handle_control_ac(data):
         return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
 
 
-def handle_control_ir(data):
+def handle_control_ir(data, ctx):
     device_name = data.get("device_name", "")
     button = data.get("button", "")
-    device_id = get_device_id_by_name(device_name)
+    device_id = get_device_id_by_name(device_name, ctx)
 
     if not device_id:
-        ir_devices = get_all_devices_by_type("IR")
+        ir_devices = get_all_devices_by_type("IR", ctx)
         if len(ir_devices) == 1:
             device_id = ir_devices[0].get("Device ID", "")
             device_name = ir_devices[0].get("名稱", device_name)
@@ -492,12 +561,12 @@ def handle_control_ir(data):
         return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
 
 
-def handle_query_sensor(data):
+def handle_query_sensor(data, ctx):
     device_name = data.get("device_name", "")
-    device_id = get_device_id_by_name(device_name)
+    device_id = get_device_id_by_name(device_name, ctx)
 
     if not device_id:
-        sensor_devices = get_all_devices_by_type("感應器")
+        sensor_devices = get_all_devices_by_type("感應器", ctx)
         if len(sensor_devices) == 1:
             device_id = sensor_devices[0].get("Device ID", "")
             device_name = sensor_devices[0].get("名稱", device_name)
@@ -516,28 +585,20 @@ def handle_query_sensor(data):
     return f"🌡️ {device_name}：溫度 {temp}°C，濕度 {humidity}%"
 
 
-def handle_query_devices():
-    try:
-        sheet = get_sheet("智能居家")
-        records = sheet.get_all_records()
-        valid = [r for r in records if r.get("狀態") == "啟用"]
-        if not valid:
-            return "目前沒有已設定的智能居家設備"
-        lines = []
-        for r in valid:
-            lines.append(f"• {r['名稱']}（{r['類型']}，{r.get('位置', '未設定')}）")
-        return "已設定的設備：\n" + "\n".join(lines)
-    except:
-        return "❌ 無法讀取設備列表"
+def handle_query_devices(ctx):
+    valid = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
+    if not valid:
+        return "目前沒有已設定的智能居家設備"
+    lines = [f"• {r['名稱']}（{r['類型']}，{r.get('位置', '未設定')}）" for r in valid]
+    return "已設定的設備：\n" + "\n".join(lines)
 
 
-def handle_control_dehumidifier(data):
-    """控制除濕機"""
+def handle_control_dehumidifier(data, ctx):
     device_name = data.get("device_name", "")
-    auth, gwid = get_device_auth_by_name(device_name)
+    auth, gwid = get_device_auth_by_name(device_name, ctx)
 
     if not auth:
-        dh_devices = get_all_devices_by_type("除濕機")
+        dh_devices = get_all_devices_by_type("除濕機", ctx)
         if len(dh_devices) == 1:
             auth = dh_devices[0].get("Auth", "")
             gwid = dh_devices[0].get("Device ID", "")
@@ -557,7 +618,6 @@ def handle_control_dehumidifier(data):
     elif power == "on" and not mode and not humidity:
         result = panasonic_api.dehumidifier_turn_on(auth, gwid)
     else:
-        # 有模式或濕度設定，先開機再設定
         panasonic_api.dehumidifier_turn_on(auth, gwid)
         result = {"success": True}
         if mode:
@@ -573,13 +633,12 @@ def handle_control_dehumidifier(data):
         return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
 
 
-def handle_query_dehumidifier(data):
-    """查詢除濕機狀態"""
+def handle_query_dehumidifier(data, ctx):
     device_name = data.get("device_name", "")
-    auth, gwid = get_device_auth_by_name(device_name)
+    auth, gwid = get_device_auth_by_name(device_name, ctx)
 
     if not auth:
-        dh_devices = get_all_devices_by_type("除濕機")
+        dh_devices = get_all_devices_by_type("除濕機", ctx)
         if len(dh_devices) == 1:
             auth = dh_devices[0].get("Auth", "")
             gwid = dh_devices[0].get("Device ID", "")
@@ -591,15 +650,16 @@ def handle_query_dehumidifier(data):
     return panasonic_api.format_dehumidifier_status(status, device_name)
 
 
-# ── 天氣 handler ── ← 新增
-
 def handle_query_weather(data):
-    """查詢天氣預報"""
     date_str = data.get("date", "today")
     location = data.get("location", None)
     summary = weather_api.get_weather_summary(date_str, location)
     return weather_api.format_weather(summary)
 
+
+# ══════════════════════════════════════════
+# HTTP 端點
+# ══════════════════════════════════════════
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
@@ -610,7 +670,6 @@ def list_switchbot_devices():
     result = switchbot_api.get_devices()
     if "error" in result:
         return {"status": "error", "message": result["error"]}
-
     devices = []
     for d in result.get("physical", []):
         devices.append({
@@ -627,7 +686,6 @@ def list_switchbot_devices():
             "Hub ID": d.get("hubDeviceId", ""),
             "分類": "紅外線虛擬設備（IR）",
         })
-
     return {"status": "ok", "設備數量": len(devices), "設備列表": devices}
 
 @app.get("/switchbot/test/{device_id}/{button_name}")
@@ -650,18 +708,23 @@ def test_switchbot_turnon(device_id: str):
     return {"status": "ok" if result.get("success") else "error", "result": result}
 
 
+# ══════════════════════════════════════════
+# 推播端點（notify 系列使用獨立 ctx）
+# ══════════════════════════════════════════
+
 @app.post("/notify")
 async def notify():
     try:
-        sheet = get_sheet("食品庫存")
-        records = sheet.get_all_records()
+        ctx = RequestContext()
+        ctx.load()
+
         today = now_taipei().date()
 
+        # ── 食品過期檢查 ──
         expired = []
         soon = []
         this_week = []
-
-        for r in records:
+        for r in ctx.get("食品庫存"):
             if r.get("狀態") != "有效":
                 continue
             expiry_str = r.get("過期日", "")
@@ -680,13 +743,12 @@ async def notify():
             elif days_left <= 7:
                 this_week.append(label)
 
-        members_sheet = get_sheet("家庭成員")
-        members = members_sheet.get_all_records()
+        members = ctx.get("家庭成員")
 
         # ── 溫濕度 ──
         sensor_lines = []
         try:
-            sensor_devices = get_all_devices_by_type("感應器")
+            sensor_devices = get_all_devices_by_type("感應器", ctx)
             for dev in sensor_devices:
                 dev_id = dev.get("Device ID", "")
                 dev_name = dev.get("名稱", "感應器")
@@ -699,21 +761,17 @@ async def notify():
         except:
             pass
 
-        # ── 今日天氣 ── ← 新增
+        # ── 今日天氣 ──
         weather_text = None
         try:
             weather_text = weather_api.get_weather_data_for_notify("today")
         except Exception as e:
             print(f"[NOTIFY WEATHER ERROR] {e}")
 
-        # ── 待辦事項（過期未完成 + 本週） ──
-        todo_sheet = get_sheet("待辦事項")
-        todo_records = todo_sheet.get_all_records()
-
+        # ── 待辦事項 ──
         todo_public = []
         todo_private = {}
-
-        for r in todo_records:
+        for r in ctx.get("待辦事項"):
             if r.get("狀態") != "待辦":
                 continue
             date_str = r.get("日期", "")
@@ -749,7 +807,7 @@ async def notify():
                     continue
 
                 data_parts = []
-                if weather_text:  # ← 新增：天氣放最前面
+                if weather_text:
                     data_parts.append(f"今日天氣：{weather_text}")
                 if expired:
                     data_parts.append("今天到期：" + "、".join(expired))
@@ -780,19 +838,17 @@ async def notify():
         return {"status": "error", "message": str(e)}
 
 
-# ── 晚間天氣推播 ── ← 新增端點
-
 @app.post("/notify_weather")
 async def notify_weather():
-    """每天晚上 9 點推播明日天氣"""
     try:
         today_weather = weather_api.get_weather_data_for_notify("today")
         tomorrow_weather = weather_api.get_weather_data_for_notify("tomorrow")
         if not tomorrow_weather:
             return {"status": "ok", "message": "無天氣資料，跳過推播"}
 
-        members_sheet = get_sheet("家庭成員")
-        members = members_sheet.get_all_records()
+        ctx = RequestContext()
+        ctx.load()
+        members = ctx.get("家庭成員")
 
         data_parts = []
         data_parts.append(f"【重點】明日天氣預報：{tomorrow_weather}")
@@ -823,17 +879,14 @@ async def notify_realtime():
     try:
         now = now_taipei()
         today = now.date()
-
         window_start = now
         window_end = now + timedelta(minutes=20)
-
-        # 整點判斷：分鐘數在 0~4 或 55~59
         is_near_hour = now.minute <= 4 or now.minute >= 55
 
-        todo_sheet = get_sheet("待辦事項")
-        todo_records = todo_sheet.get_all_records()
-        members_sheet = get_sheet("家庭成員")
-        members = members_sheet.get_all_records()
+        ctx = RequestContext()
+        ctx.load()
+        todo_records = ctx.get("待辦事項")
+        members = ctx.get("家庭成員")
 
         def push_to_member(person, todo_type, message):
             if todo_type == "私人":
@@ -867,7 +920,6 @@ async def notify_realtime():
             except:
                 continue
 
-            # 情況一：即將到來（未來 20 分鐘內）
             if window_start <= todo_dt <= window_end:
                 data_summary = f"即時提醒：{r['事項']}，時間 {time_str}"
                 message = generate_notify_message(data_summary)
@@ -875,7 +927,6 @@ async def notify_realtime():
                     message = f"⏰ 提醒：{r['事項']}（{time_str}）"
                 push_to_member(person, todo_type, message)
 
-            # 情況二：整點時，推播今天已過時間但未完成的任務
             elif is_near_hour and todo_dt.date() == today and todo_dt < now:
                 data_summary = f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成"
                 message = generate_notify_message(data_summary)
@@ -887,6 +938,10 @@ async def notify_realtime():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+# ══════════════════════════════════════════
+# LINE Webhook
+# ══════════════════════════════════════════
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -907,9 +962,14 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
         log_message(user_id, text)
-        user_name = get_user_name(user_id)
+
+        # ★ 一次批次讀取所有分頁（1 次 API 呼叫取代原本 7~8 次）
+        ctx = RequestContext()
+        ctx.load()
+
+        user_name = get_user_name(user_id, ctx)
         print(f"[2] user_name={user_name}")
-        result = ask_claude(user_id, text, user_name)
+        result = ask_claude(user_id, text, user_name, ctx)
         print(f"[3] result={repr(result)}")
 
         if not result or not result.strip():
@@ -942,34 +1002,34 @@ def handle_message(event):
                 for data in actions:
                     action = data.get("action")
                     if action == "add_food":
-                        results.append(handle_add(data, user_name))
+                        results.append(handle_add(data, user_name, ctx))
                     elif action == "delete_food":
-                        results.append(handle_delete(data))
+                        results.append(handle_delete(data, ctx))
                     elif action == "modify_food":
-                        results.append(handle_modify(data))
+                        results.append(handle_modify(data, ctx))
                     elif action == "query_food":
-                        results.append(handle_query())
+                        results.append(handle_query(ctx))
                     elif action == "add_todo":
-                        results.append(handle_add_todo(data, user_name))
+                        results.append(handle_add_todo(data, user_name, ctx))
                     elif action == "modify_todo":
-                        results.append(handle_modify_todo(data))
+                        results.append(handle_modify_todo(data, ctx))
                     elif action == "delete_todo":
-                        results.append(handle_delete_todo(data))
+                        results.append(handle_delete_todo(data, ctx))
                     elif action == "query_todo":
-                        results.append(handle_query_todo(user_name))
+                        results.append(handle_query_todo(user_name, ctx))
                     elif action == "control_ac":
-                        results.append(handle_control_ac(data))
+                        results.append(handle_control_ac(data, ctx))
                     elif action == "control_ir":
-                        results.append(handle_control_ir(data))
+                        results.append(handle_control_ir(data, ctx))
                     elif action == "query_sensor":
-                        results.append(handle_query_sensor(data))
+                        results.append(handle_query_sensor(data, ctx))
                     elif action == "control_dehumidifier":
-                        results.append(handle_control_dehumidifier(data))
+                        results.append(handle_control_dehumidifier(data, ctx))
                     elif action == "query_dehumidifier":
-                        results.append(handle_query_dehumidifier(data))
+                        results.append(handle_query_dehumidifier(data, ctx))
                     elif action == "query_devices":
-                        results.append(handle_query_devices())
-                    elif action == "query_weather":  # ← 新增
+                        results.append(handle_query_devices(ctx))
+                    elif action == "query_weather":
                         results.append(handle_query_weather(data))
                     elif action == "unclear":
                         pass
@@ -983,7 +1043,6 @@ def handle_message(event):
                 if has_error:
                     reply = "\n".join(results)
                 elif has_semantic and not has_realtime:
-                    # 天氣/溫濕度查詢：把數據丟給 Claude 用管家語氣回覆
                     raw_data = "\n".join(r for r in results if r and "❌" not in r)
                     if raw_data:
                         try:
