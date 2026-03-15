@@ -13,6 +13,7 @@ import threading
 import anthropic
 import switchbot_api
 import panasonic_api
+import weather_api  # ← 新增
 
 app = FastAPI()
 
@@ -58,6 +59,7 @@ action 定義：
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
 - query_dehumidifier：device_name。查詢除濕機目前狀態（開關/模式/目標濕度）。唯一除濕機時可省略
 - query_devices：無參數
+- query_weather：選填 target（"today" 或 "tomorrow"，預設 today）。查詢天氣預報
 - unclear：message(反問內容)
 
 規則：
@@ -82,6 +84,8 @@ action 定義：
 {{"actions": [{{"action": "control_dehumidifier", "power": "on", "humidity": 55}}], "reply": "好的，除濕機已開啟，目標濕度 55% 💧"}}
 {{"actions": [{{"action": "query_dehumidifier"}}], "reply": "為您查詢除濕機狀態。"}}
 {{"actions": [{{"action": "query_sensor", "device_name": "Hub 2"}}], "reply": "為您查詢溫濕度。"}}
+{{"actions": [{{"action": "query_weather"}}], "reply": "為您查詢今天天氣。"}}
+{{"actions": [{{"action": "query_weather", "target": "tomorrow"}}], "reply": "為您查詢明天天氣。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 """
 
@@ -299,7 +303,7 @@ def generate_notify_message(data_summary):
         response = claude.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=500,
-            system=f"你是家庭專屬管家。現在是 {today} {now_time}。請根據以下資料，用溫暖簡潔的管家語氣整理成一則推播訊息。適度使用 emoji，主動補充貼心提醒（快過期的催促、今天的待辦提醒注意時間等）。不要加開頭問候語如「早安」，直接進入內容。只回傳推播文字，不要 JSON。",
+            system=f"你是家庭專屬管家。現在是 {today} {now_time}。請根據以下資料，用溫暖簡潔的管家語氣整理成一則推播訊息。適度使用 emoji，主動補充貼心提醒（快過期的催促、今天的待辦提醒注意時間、天氣提醒帶傘或注意溫差等）。不要加開頭問候語如「早安」，直接進入內容。只回傳推播文字，不要 JSON。",
             messages=[{"role": "user", "content": data_summary}]
         )
         return response.content[0].text.strip()
@@ -586,6 +590,17 @@ def handle_query_dehumidifier(data):
     return panasonic_api.format_dehumidifier_status(status, device_name)
 
 
+# ── 天氣 handler ── ← 新增
+
+def handle_query_weather(data):
+    """查詢天氣預報"""
+    target = data.get("target", "today")
+    if target not in ("today", "tomorrow"):
+        target = "today"
+    summary = weather_api.get_weather_summary(target)
+    return weather_api.format_weather(summary)
+
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
@@ -684,6 +699,13 @@ async def notify():
         except:
             pass
 
+        # ── 今日天氣 ── ← 新增
+        weather_text = None
+        try:
+            weather_text = weather_api.get_weather_data_for_notify("today")
+        except Exception as e:
+            print(f"[NOTIFY WEATHER ERROR] {e}")
+
         # ── 待辦事項（過期未完成 + 本週） ──
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
@@ -715,7 +737,7 @@ async def notify():
                     todo_public.append(label)
 
         # ── 組合並推播 ──
-        has_content = expired or soon or this_week or sensor_lines or todo_public or todo_private
+        has_content = expired or soon or this_week or sensor_lines or weather_text or todo_public or todo_private
 
         if has_content:
             for member in members:
@@ -727,6 +749,8 @@ async def notify():
                     continue
 
                 data_parts = []
+                if weather_text:  # ← 新增：天氣放最前面
+                    data_parts.append(f"今日天氣：{weather_text}")
                 if expired:
                     data_parts.append("今天到期：" + "、".join(expired))
                 if soon:
@@ -734,7 +758,7 @@ async def notify():
                 if this_week:
                     data_parts.append("本週到期：" + "、".join(this_week))
                 if sensor_lines:
-                    data_parts.append("溫濕度：" + "、".join(sensor_lines))
+                    data_parts.append("室內溫濕度：" + "、".join(sensor_lines))
                 if todo_public:
                     data_parts.append("本週公開待辦：" + "、".join(todo_public))
                 if member_name in todo_private:
@@ -750,6 +774,38 @@ async def notify():
 
                 line_bot_api.push_message(user_id, TextSendMessage(text=message))
                 save_conversation(user_id, "assistant", message)
+
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ── 晚間天氣推播 ── ← 新增端點
+
+@app.post("/notify_weather")
+async def notify_weather():
+    """每天晚上 9 點推播明日天氣"""
+    try:
+        weather_text = weather_api.get_weather_data_for_notify("tomorrow")
+        if not weather_text:
+            return {"status": "ok", "message": "無天氣資料，跳過推播"}
+
+        members_sheet = get_sheet("家庭成員")
+        members = members_sheet.get_all_records()
+
+        data_summary = f"明日天氣預報：{weather_text}"
+        message = generate_notify_message(data_summary)
+        if not message:
+            message = weather_api.get_tomorrow_weather_text()
+
+        for member in members:
+            if member.get("狀態") != "啟用":
+                continue
+            user_id = member.get("Line User ID")
+            if not user_id:
+                continue
+            line_bot_api.push_message(user_id, TextSendMessage(text=message))
+            save_conversation(user_id, "assistant", message)
 
         return {"status": "ok"}
     except Exception as e:
@@ -907,11 +963,13 @@ def handle_message(event):
                         results.append(handle_query_dehumidifier(data))
                     elif action == "query_devices":
                         results.append(handle_query_devices())
+                    elif action == "query_weather":  # ← 新增
+                        results.append(handle_query_weather(data))
                     elif action == "unclear":
                         pass
 
                 has_error = any("❌" in r for r in results if r)
-                realtime_actions = {"query_sensor", "query_devices", "query_dehumidifier"}
+                realtime_actions = {"query_sensor", "query_devices", "query_dehumidifier", "query_weather"}  # ← 新增 query_weather
                 has_realtime = any(d.get("action") in realtime_actions for d in actions)
 
                 if has_error:
