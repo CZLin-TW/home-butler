@@ -196,6 +196,7 @@ DEHUMIDIFIER_MODE_MAP = {
     "送風": 3, "fan": 3,
     "目標濕度": 6, "target": 6,
     "空氣清淨": 7, "purify": 7,
+    "AI舒適": 8, "ai舒適": 8,
     "省電": 9, "eco": 9,
     "快速除濕": 10, "quick": 10,
     "靜音除濕": 11, "silent": 11,

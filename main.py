@@ -55,7 +55,7 @@ action 定義：
 - control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。唯一一台冷氣時可省略 device_name
 - query_sensor：device_name。唯一感應器時可省略
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）。唯一設備時可省略 device_name
-- control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
+- control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
 - query_dehumidifier：device_name。查詢除濕機目前狀態（開關/模式/目標濕度）。唯一除濕機時可省略
 - query_devices：無參數
 - unclear：message(反問內容)
