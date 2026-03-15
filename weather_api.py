@@ -30,6 +30,7 @@ def _fetch_forecast(data_id=DEFAULT_DATA_ID, location=DEFAULT_LOCATION):
             f"{BASE_URL}/{data_id}",
             params=params,
             timeout=15,
+            verify=False,
         )
         data = resp.json()
 
