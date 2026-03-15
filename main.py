@@ -11,6 +11,7 @@ import traceback
 import time
 import threading
 import anthropic
+import re
 import switchbot_api
 import panasonic_api
 import weather_api
@@ -88,6 +89,7 @@ action 定義：
 {{"actions": [{{"action": "query_weather", "date": "2026-03-17"}}], "reply": "為您查詢明天天氣。"}}
 {{"actions": [{{"action": "query_weather", "date": "2026-03-22", "location": "臺北市信義區"}}], "reply": "為您查詢臺北信義區週六天氣。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
+{{"actions": [], "reply": "了解，有需要再跟我說 😊"}}
 """
 
 def now_taipei():
@@ -978,11 +980,19 @@ def handle_message(event):
                 parsed = json.loads(result)
             except json.JSONDecodeError as je:
                 print(f"[WARN] JSON parse failed: {je}, raw: {repr(result)}")
-                if any(c in result for c in '{}[]'):
-                    reply = "抱歉，系統處理時發生了一點問題，請再試一次。"
+                # 嘗試從回傳內容中提取 JSON（Claude 有時會在 JSON 前後加文字）
+                json_match = re.search(r'\{.*\}', result, re.DOTALL)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group())
+                        print(f"[WARN] JSON extracted from partial response")
+                    except json.JSONDecodeError:
+                        parsed = None
+                        reply = "抱歉，系統處理時發生了一點問題，請再試一次。"
                 else:
+                    # 純文字回覆，當作閒聊
                     reply = result
-                parsed = None
+                    parsed = None
 
             if parsed is not None:
                 print(f"[4] parsed type={type(parsed)}, value={parsed}")
