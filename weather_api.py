@@ -1,7 +1,7 @@
 """
 中央氣象署開放資料 API 封裝模組
-- 鄉鎮天氣預報（3天逐3小時）
-- 支援查詢今日/明日天氣
+- 鄉鎮天氣預報（一週，每 12 小時）
+- 支援指定日期查詢（最多 7 天）
 - 支援全台 22 縣市鄉鎮查詢
 """
 
@@ -17,19 +17,19 @@ TZ = pytz.timezone("Asia/Taipei")
 # 預設地點
 DEFAULT_LOCATION = "竹北市"
 
-# 全台 22 縣市 → 鄉鎮預報 data_id
+# 全台 22 縣市 → 一週鄉鎮預報 data_id
 CITY_DATA_ID = {
-    "宜蘭縣": "F-D0047-001", "桃園市": "F-D0047-005",
-    "新竹縣": "F-D0047-009", "苗栗縣": "F-D0047-013",
-    "彰化縣": "F-D0047-017", "南投縣": "F-D0047-021",
-    "雲林縣": "F-D0047-025", "嘉義縣": "F-D0047-029",
-    "屏東縣": "F-D0047-033", "臺東縣": "F-D0047-037",
-    "花蓮縣": "F-D0047-041", "澎湖縣": "F-D0047-045",
-    "基隆市": "F-D0047-049", "新竹市": "F-D0047-053",
-    "嘉義市": "F-D0047-057", "臺北市": "F-D0047-061",
-    "高雄市": "F-D0047-065", "新北市": "F-D0047-069",
-    "臺中市": "F-D0047-073", "臺南市": "F-D0047-077",
-    "連江縣": "F-D0047-081", "金門縣": "F-D0047-085",
+    "宜蘭縣": "F-D0047-003", "桃園市": "F-D0047-007",
+    "新竹縣": "F-D0047-011", "苗栗縣": "F-D0047-015",
+    "彰化縣": "F-D0047-019", "南投縣": "F-D0047-023",
+    "雲林縣": "F-D0047-027", "嘉義縣": "F-D0047-031",
+    "屏東縣": "F-D0047-035", "臺東縣": "F-D0047-039",
+    "花蓮縣": "F-D0047-043", "澎湖縣": "F-D0047-047",
+    "基隆市": "F-D0047-051", "新竹市": "F-D0047-055",
+    "嘉義市": "F-D0047-059", "臺北市": "F-D0047-063",
+    "高雄市": "F-D0047-067", "新北市": "F-D0047-071",
+    "臺中市": "F-D0047-075", "臺南市": "F-D0047-079",
+    "連江縣": "F-D0047-083", "金門縣": "F-D0047-087",
 }
 
 
@@ -39,11 +39,11 @@ def _normalize(text):
 
 
 def _fetch_forecast(data_id, location_name=None):
-    """從氣象署 API 抓取鄉鎮預報原始資料"""
+    """從氣象署 API 抓取一週鄉鎮預報原始資料"""
     try:
         params = {
             "Authorization": CWA_API_KEY,
-            "elementName": "Wx,MinT,MaxT,PoP12h,T,WeatherDescription",
+            "elementName": "Wx,MinT,MaxT,PoP12h,WeatherDescription",
         }
         if location_name:
             params["locationName"] = location_name
@@ -67,7 +67,7 @@ def _fetch_forecast(data_id, location_name=None):
         if not location_array:
             return {"error": f"找不到「{location_name or '該地區'}」的預報資料"}
 
-        # 如果有指定 locationName，驗證回傳的是否匹配
+        # 驗證 locationName 匹配
         if location_name:
             matched = [loc for loc in location_array if loc.get("LocationName") == location_name]
             if matched:
@@ -89,11 +89,7 @@ def _fetch_forecast(data_id, location_name=None):
 def _resolve_location(location):
     """
     解析地點，回傳 (data_id, location_name)
-    支援：
-    - 「竹北市」→ (F-D0047-009, 竹北市)
-    - 「竹北」→ 嘗試竹北市/竹北區/竹北鄉/竹北鎮
-    - 「新竹縣」→ (F-D0047-009, None) 回傳第一個鄉鎮
-    - 「莿桐鄉」→ 遍歷找到雲林縣
+    支援：竹北市、竹北、新竹縣竹北市、新竹市東區、莿桐鄉
     """
     loc = _normalize(location)
 
@@ -101,19 +97,17 @@ def _resolve_location(location):
     if loc in CITY_DATA_ID:
         return CITY_DATA_ID[loc], None
 
-    # 情況2：開頭包含縣市名（例如「新竹縣竹北市」）
+    # 情況2：開頭包含縣市名
     for city, data_id in CITY_DATA_ID.items():
         if loc.startswith(city):
             town = loc[len(city):]
             return data_id, town if town else None
 
-    # 情況3：只有鄉鎮名，需要猜縣市
-    # 建立候選名稱
+    # 情況3：只有鄉鎮名，遍歷所有縣市
     candidates = [loc]
     if not any(loc.endswith(s) for s in ["市", "區", "鄉", "鎮"]):
         candidates.extend([loc + "市", loc + "區", loc + "鄉", loc + "鎮"])
 
-    # 優先查新竹縣/新竹市（預設地區），再查其他
     priority = ["新竹縣", "新竹市"]
     search_order = priority + [c for c in CITY_DATA_ID if c not in priority]
 
@@ -141,8 +135,8 @@ def _get_value(period):
     if not values:
         return None
     v = values[0]
-    for key in ["Temperature", "Weather", "WeatherDescription",
-                 "MinT", "MaxT", "ProbabilityOfPrecipitation"]:
+    for key in ["Weather", "MinTemperature", "MaxTemperature",
+                 "ProbabilityOfPrecipitation", "WeatherDescription"]:
         if key in v:
             return v[key]
     return list(v.values())[0] if v else None
@@ -152,11 +146,11 @@ def _collect_day(time_series, target_date):
     """收集某天所有時段的值"""
     results = []
     for period in time_series:
-        time_str = period.get("DataTime") or period.get("StartTime", "")
-        if not time_str:
+        start_str = period.get("StartTime", "")
+        if not start_str:
             continue
         try:
-            dt = datetime.strptime(time_str[:19], "%Y-%m-%dT%H:%M:%S")
+            dt = datetime.strptime(start_str[:19], "%Y-%m-%dT%H:%M:%S")
         except ValueError:
             continue
         if dt.date() == target_date:
@@ -164,15 +158,39 @@ def _collect_day(time_series, target_date):
     return results
 
 
-def get_weather_summary(target="today", location=None):
+def _parse_date(date_str):
+    """將日期字串解析為 date 物件，支援 YYYY-MM-DD"""
+    now = datetime.now(TZ)
+    if not date_str or date_str == "today":
+        return now.date()
+    if date_str == "tomorrow":
+        return (now + timedelta(days=1)).date()
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return now.date()
+
+
+def get_weather_summary(date_str="today", location=None):
     """
     取得天氣摘要
-    target: "today" 或 "tomorrow"
-    location: 地點名稱（鄉鎮或縣市），None 則用預設竹北市
+    date_str: "today"、"tomorrow"、或 "YYYY-MM-DD"
+    location: 地點名稱
     """
     if not location:
         location = DEFAULT_LOCATION
 
+    target_date = _parse_date(date_str)
+    now = datetime.now(TZ)
+
+    # 檢查日期範圍（最多 7 天）
+    days_diff = (target_date - now.date()).days
+    if days_diff < 0:
+        return {"error": "無法查詢過去的天氣"}
+    if days_diff > 7:
+        return {"error": "最多只能查詢未來 7 天的天氣"}
+
+    # 解析地點
     data_id, loc_name = _resolve_location(location)
     if data_id is None:
         return {"error": f"找不到「{location}」的天氣資料，請確認地名是否正確"}
@@ -186,26 +204,36 @@ def get_weather_summary(target="today", location=None):
     city_name = result.get("city", "")
     elements = loc_data.get("WeatherElement", [])
 
-    now = datetime.now(TZ)
-    target_date = (now + timedelta(days=1)).date() if target == "tomorrow" else now.date()
-
-    # 天氣現象
-    wx_values = _collect_day(_parse_element(elements, "天氣現象"), target_date)
+    # 天氣現象（Wx）
+    wx_values = _collect_day(_parse_element(elements, "Wx"), target_date)
     daytime = [v["value"] for v in wx_values if 6 <= v["hour"] <= 18 and v["value"]]
-    wx = daytime[len(daytime) // 2] if daytime else (wx_values[0]["value"] if wx_values else "無資料")
+    wx = daytime[0] if daytime else (wx_values[0]["value"] if wx_values else "無資料")
 
-    # 溫度
-    temp_values = _collect_day(_parse_element(elements, "溫度"), target_date)
-    temps = [int(v["value"]) for v in temp_values if v["value"] is not None]
-    min_t = min(temps) if temps else None
-    max_t = max(temps) if temps else None
+    # 最低溫（MinT）
+    mint_values = _collect_day(_parse_element(elements, "MinT"), target_date)
+    mints = [int(v["value"]) for v in mint_values if v["value"] is not None]
+    min_t = min(mints) if mints else None
 
-    # 降雨機率
-    pop_values = _collect_day(_parse_element(elements, "3小時降雨機率"), target_date)
-    pops = [int(v["value"]) for v in pop_values if v["value"] is not None]
+    # 最高溫（MaxT）
+    maxt_values = _collect_day(_parse_element(elements, "MaxT"), target_date)
+    maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None]
+    max_t = max(maxts) if maxts else None
+
+    # 降雨機率（PoP12h）
+    pop_values = _collect_day(_parse_element(elements, "PoP12h"), target_date)
+    pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != ""]
     max_pop = max(pops) if pops else None
 
-    date_label = "今天" if target == "today" else "明天"
+    # 日期標籤
+    if days_diff == 0:
+        date_label = "今天"
+    elif days_diff == 1:
+        date_label = "明天"
+    elif days_diff == 2:
+        date_label = "後天"
+    else:
+        weekday = ["一", "二", "三", "四", "五", "六", "日"]
+        date_label = f"週{weekday[target_date.weekday()]}"
 
     return {
         "location": actual_name,

@@ -59,7 +59,7 @@ action 定義：
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
 - query_dehumidifier：device_name。查詢除濕機目前狀態（開關/模式/目標濕度）。唯一除濕機時可省略
 - query_devices：無參數
-- query_weather：選填 target（"today" 或 "tomorrow"，預設 today）, 選填 location（完整地名，如「雲林縣莿桐鄉」「新竹市東區」「竹北」，盡量帶縣市名，不指定則查竹北市）。查詢天氣預報
+- query_weather：選填 date（YYYY-MM-DD，自行根據今天日期計算，如「這週末」算出週六日期，「後天」算出具體日期，不指定則查今天，最多未來 7 天）, 選填 location（完整地名，如「雲林縣莿桐鄉」「新竹市東區」「竹北」，盡量帶縣市名，不指定則查竹北市）。查詢天氣預報
 - unclear：message(反問內容)
 
 規則：
@@ -85,8 +85,8 @@ action 定義：
 {{"actions": [{{"action": "query_dehumidifier"}}], "reply": "為您查詢除濕機狀態。"}}
 {{"actions": [{{"action": "query_sensor", "device_name": "Hub 2"}}], "reply": "為您查詢溫濕度。"}}
 {{"actions": [{{"action": "query_weather"}}], "reply": "為您查詢今天天氣。"}}
-{{"actions": [{{"action": "query_weather", "target": "tomorrow"}}], "reply": "為您查詢明天天氣。"}}
-{{"actions": [{{"action": "query_weather", "target": "tomorrow", "location": "雲林縣莿桐鄉"}}], "reply": "為您查詢莿桐鄉明天天氣。"}}
+{{"actions": [{{"action": "query_weather", "date": "2026-03-17"}}], "reply": "為您查詢明天天氣。"}}
+{{"actions": [{{"action": "query_weather", "date": "2026-03-22", "location": "臺北市信義區"}}], "reply": "為您查詢臺北信義區週六天氣。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 """
 
@@ -595,11 +595,9 @@ def handle_query_dehumidifier(data):
 
 def handle_query_weather(data):
     """查詢天氣預報"""
-    target = data.get("target", "today")
-    if target not in ("today", "tomorrow"):
-        target = "today"
+    date_str = data.get("date", "today")
     location = data.get("location", None)
-    summary = weather_api.get_weather_summary(target, location)
+    summary = weather_api.get_weather_summary(date_str, location)
     return weather_api.format_weather(summary)
 
 
