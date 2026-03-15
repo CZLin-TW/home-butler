@@ -12,6 +12,7 @@ import time
 import threading
 import anthropic
 import switchbot_api
+import panasonic_api
 
 app = FastAPI()
 
@@ -20,6 +21,8 @@ LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+panasonic_api.PANASONIC_ACCOUNT = os.environ.get("PANASONIC_ACCOUNT", "")
+panasonic_api.PANASONIC_PASSWORD = os.environ.get("PANASONIC_PASSWORD", "")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -52,6 +55,8 @@ action 定義：
 - control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。唯一一台冷氣時可省略 device_name
 - query_sensor：device_name。唯一感應器時可省略
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）。唯一設備時可省略 device_name
+- control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
+- query_dehumidifier：device_name。查詢除濕機目前狀態（開關/模式/目標濕度）。唯一除濕機時可省略
 - query_devices：無參數
 - unclear：message(反問內容)
 
@@ -74,7 +79,8 @@ action 定義：
 {{"actions": [{{"action": "query_todo"}}], "reply": "📋 您的待辦事項：\\n• 預約貼隔熱紙（3/16）\\n• 剪頭髮（3/16）\\n• 舊物資回收諮詢（3/16 10:00）\\n• 買開飲機（3/19）\\n• 看牙醫（4/24 14:00）\\n\\n今天有三件事要忙，別忘了 10 點的回收諮詢！"}}
 {{"actions": [{{"action": "control_ac", "device_name": "客廳冷氣", "power": "on", "temperature": 26}}], "reply": "好的，冷氣已開啟，26 度 ❄️"}}
 {{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "開"}}], "reply": "好的，電風扇已開啟 🌀"}}
-{{"actions": [{{"action": "control_ir", "device_name": "電風扇", "button": "風速+"}}], "reply": "好的，風速已調高 💨"}}
+{{"actions": [{{"action": "control_dehumidifier", "power": "on", "humidity": 55}}], "reply": "好的，除濕機已開啟，目標濕度 55% 💧"}}
+{{"actions": [{{"action": "query_dehumidifier"}}], "reply": "為您查詢除濕機狀態。"}}
 {{"actions": [{{"action": "query_sensor", "device_name": "Hub 2"}}], "reply": "為您查詢溫濕度。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 """
@@ -83,7 +89,7 @@ def now_taipei():
     return datetime.now(TZ)
 
 # ── Google Sheets 快取 ──
-_sheets_cache_ttl = 60  # 秒
+_sheets_cache_ttl = 60
 
 def _get_client():
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -222,6 +228,18 @@ def get_device_id_by_name(device_name):
     except:
         pass
     return ""
+
+def get_device_auth_by_name(device_name):
+    """根據友善名稱查找 Panasonic Auth 和 GWID"""
+    try:
+        sheet = get_sheet("智能居家")
+        records = sheet.get_all_records()
+        for r in records:
+            if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
+                return r.get("Auth", ""), r.get("Device ID", "")
+    except:
+        pass
+    return "", ""
 
 def get_all_devices_by_type(device_type):
     try:
@@ -508,6 +526,66 @@ def handle_query_devices():
         return "❌ 無法讀取設備列表"
 
 
+def handle_control_dehumidifier(data):
+    """控制除濕機"""
+    device_name = data.get("device_name", "")
+    auth, gwid = get_device_auth_by_name(device_name)
+
+    if not auth:
+        dh_devices = get_all_devices_by_type("除濕機")
+        if len(dh_devices) == 1:
+            auth = dh_devices[0].get("Auth", "")
+            gwid = dh_devices[0].get("Device ID", "")
+            device_name = dh_devices[0].get("名稱", device_name)
+        elif len(dh_devices) > 1:
+            names = "、".join([d.get("名稱") for d in dh_devices])
+            return f"❌ 有多台除濕機（{names}），請指定要控制哪一台"
+        else:
+            return "❌ 找不到除濕機設備，請先在「智能居家」分頁設定"
+
+    power = data.get("power", "")
+    mode = data.get("mode", "")
+    humidity = data.get("humidity", "")
+
+    if power == "off":
+        result = panasonic_api.dehumidifier_turn_off(auth, gwid)
+    elif power == "on" and not mode and not humidity:
+        result = panasonic_api.dehumidifier_turn_on(auth, gwid)
+    else:
+        # 有模式或濕度設定，先開機再設定
+        panasonic_api.dehumidifier_turn_on(auth, gwid)
+        result = {"success": True}
+        if mode:
+            result = panasonic_api.dehumidifier_set_mode(auth, mode)
+            if not result.get("success"):
+                return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
+        if humidity:
+            result = panasonic_api.dehumidifier_set_humidity(auth, int(humidity))
+
+    if result.get("success"):
+        return f"✅ {device_name} 指令已送出"
+    else:
+        return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+
+
+def handle_query_dehumidifier(data):
+    """查詢除濕機狀態"""
+    device_name = data.get("device_name", "")
+    auth, gwid = get_device_auth_by_name(device_name)
+
+    if not auth:
+        dh_devices = get_all_devices_by_type("除濕機")
+        if len(dh_devices) == 1:
+            auth = dh_devices[0].get("Auth", "")
+            gwid = dh_devices[0].get("Device ID", "")
+            device_name = dh_devices[0].get("名稱", device_name)
+        else:
+            return "❌ 找不到除濕機設備"
+
+    status = panasonic_api.get_dehumidifier_status(auth, gwid)
+    return panasonic_api.format_dehumidifier_status(status, device_name)
+
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
@@ -606,7 +684,7 @@ async def notify():
         except:
             pass
 
-        # ── 待辦事項（今天以前過期 + 本週，含無時間的） ──
+        # ── 待辦事項（過期未完成 + 本週） ──
         todo_sheet = get_sheet("待辦事項")
         todo_records = todo_sheet.get_all_records()
 
@@ -624,10 +702,8 @@ async def notify():
             except:
                 continue
             days_left = (todo_date - today).days
-            # 修改：去掉 0 <= 限制，過期未完成也包含進來（days_left <= 7）
             if days_left <= 7:
                 time_part = f" {r['時間']}" if r.get("時間") else ""
-                # 過期未完成加上標記
                 overdue_mark = "⚠️ 未完成 " if days_left < 0 else ""
                 label = f"{overdue_mark}{r['事項']}（{date_str}{time_part}）"
                 if r.get("類型") == "私人":
@@ -686,11 +762,10 @@ async def notify_realtime():
         now = now_taipei()
         today = now.date()
 
-        # window：未來 20 分鐘內即將到來的任務
         window_start = now
         window_end = now + timedelta(minutes=20)
 
-        # 整點判斷：現在分鐘數在 0~4 或 55~59（±5 分鐘內）
+        # 整點判斷：分鐘數在 0~4 或 55~59
         is_near_hour = now.minute <= 4 or now.minute >= 55
 
         todo_sheet = get_sheet("待辦事項")
@@ -772,7 +847,7 @@ def handle_message(event):
         log_message(user_id, text)
         user_name = get_user_name(user_id)
         print(f"[2] user_name={user_name}")
-        result = ask_claude(user_id, text, user_name)  # ← 傳入 user_name
+        result = ask_claude(user_id, text, user_name)
         print(f"[3] result={repr(result)}")
 
         if not result or not result.strip():
@@ -826,13 +901,17 @@ def handle_message(event):
                         results.append(handle_control_ir(data))
                     elif action == "query_sensor":
                         results.append(handle_query_sensor(data))
+                    elif action == "control_dehumidifier":
+                        results.append(handle_control_dehumidifier(data))
+                    elif action == "query_dehumidifier":
+                        results.append(handle_query_dehumidifier(data))
                     elif action == "query_devices":
                         results.append(handle_query_devices())
                     elif action == "unclear":
                         pass
 
                 has_error = any("❌" in r for r in results if r)
-                realtime_actions = {"query_sensor", "query_devices"}
+                realtime_actions = {"query_sensor", "query_devices", "query_dehumidifier"}
                 has_realtime = any(d.get("action") in realtime_actions for d in actions)
 
                 if has_error:
