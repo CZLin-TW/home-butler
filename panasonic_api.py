@@ -135,6 +135,7 @@ def get_dehumidifier_status(device_auth: str, gwid: str) -> dict:
     回傳 dict，key 為 CommandType，value 為目前數值
     例如：{"0x00": "1", "0x01": "1", "0x04": "3"}
     """
+    _ensure_token()
     commands = {
         "CommandTypes": [{"CommandType": c} for c in DEHUMIDIFIER_STATUS_COMMANDS],
         "DeviceID": 1,
@@ -166,6 +167,7 @@ def set_dehumidifier_command(device_auth: str, command_type: str, value: int) ->
     command_type: "0x00"（電源）, "0x01"（模式）, "0x04"（目標濕度）等
     value: 對應的整數值
     """
+    _ensure_token()
     data = _request_with_retry(
         "GET",
         f"{BASE_URL}/DeviceSetCommand",
