@@ -974,29 +974,30 @@ def handle_message(event):
                         pass
 
                 has_error = any("❌" in r for r in results if r)
-                realtime_actions = {"query_sensor", "query_devices", "query_dehumidifier"}
+                realtime_actions = {"query_devices", "query_dehumidifier"}
                 has_realtime = any(d.get("action") in realtime_actions for d in actions)
-                has_weather = any(d.get("action") == "query_weather" for d in actions)
+                semantic_actions = {"query_weather", "query_sensor"}
+                has_semantic = any(d.get("action") in semantic_actions for d in actions)
 
                 if has_error:
                     reply = "\n".join(results)
-                elif has_weather and not has_realtime:
-                    # 天氣查詢：把數據丟給 Claude 用管家語氣回覆
-                    weather_data = "\n".join(r for r in results if r and "❌" not in r)
-                    if weather_data:
+                elif has_semantic and not has_realtime:
+                    # 天氣/溫濕度查詢：把數據丟給 Claude 用管家語氣回覆
+                    raw_data = "\n".join(r for r in results if r and "❌" not in r)
+                    if raw_data:
                         try:
-                            weather_reply = claude.messages.create(
+                            semantic_reply = claude.messages.create(
                                 model="claude-sonnet-4-6",
                                 max_tokens=300,
-                                system="你是家庭管家。根據以下天氣數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」這類問題，直接回答並給建議。",
+                                system="你是家庭管家。根據以下數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。",
                                 messages=[
-                                    {"role": "user", "content": f"使用者問：{text}\n\n天氣數據：\n{weather_data}"}
+                                    {"role": "user", "content": f"使用者問：{text}\n\n數據：\n{raw_data}"}
                                 ]
                             )
-                            reply = weather_reply.content[0].text.strip()
+                            reply = semantic_reply.content[0].text.strip()
                         except Exception as e:
-                            print(f"[WEATHER CLAUDE ERROR] {e}")
-                            reply = weather_data
+                            print(f"[SEMANTIC CLAUDE ERROR] {e}")
+                            reply = raw_data
                     else:
                         reply = claude_reply or "\n".join(results)
                 elif has_realtime:
