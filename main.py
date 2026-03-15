@@ -830,12 +830,13 @@ def handle_message(event):
                 # 如果有設備控制失敗（❌），優先顯示實際結果而非 Claude 的預設回覆
                 has_error = any("❌" in r for r in results if r)
 
-                # 設備列表是 debug 用途，直接用程式結果
-                has_device_list = any(d.get("action") == "query_devices" for d in actions)
+                # 即時數據（感應器）和 debug 資訊（設備列表），Claude 看不到實際數值，用程式結果
+                realtime_actions = {"query_sensor", "query_devices"}
+                has_realtime = any(d.get("action") in realtime_actions for d in actions)
 
                 if has_error:
                     reply = "\n".join(results)
-                elif has_device_list:
+                elif has_realtime:
                     reply = "\n".join(results)
                 elif claude_reply:
                     reply = claude_reply
