@@ -43,7 +43,7 @@ def _fetch_forecast(data_id, location_name=None):
     try:
         params = {
             "Authorization": CWA_API_KEY,
-            "elementName": "Wx,MinT,MaxT,PoP12h,WeatherDescription",
+            "elementName": "Wx,MinT,MaxT,PoP12h,WeatherDescription,MaxAT,MinAT",
         }
         if location_name:
             params["locationName"] = location_name
@@ -205,24 +205,34 @@ def get_weather_summary(date_str="today", location=None):
     elements = loc_data.get("WeatherElement", [])
 
     # 天氣現象（Wx）
-    wx_values = _collect_day(_parse_element(elements, "Wx"), target_date)
+    wx_values = _collect_day(_parse_element(elements, "天氣現象"), target_date)
     daytime = [v["value"] for v in wx_values if 6 <= v["hour"] <= 18 and v["value"]]
     wx = daytime[0] if daytime else (wx_values[0]["value"] if wx_values else "無資料")
 
     # 最低溫（MinT）
-    mint_values = _collect_day(_parse_element(elements, "MinT"), target_date)
+    mint_values = _collect_day(_parse_element(elements, "最低溫度"), target_date)
     mints = [int(v["value"]) for v in mint_values if v["value"] is not None]
     min_t = min(mints) if mints else None
 
     # 最高溫（MaxT）
-    maxt_values = _collect_day(_parse_element(elements, "MaxT"), target_date)
+    maxt_values = _collect_day(_parse_element(elements, "最高溫度"), target_date)
     maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None]
     max_t = max(maxts) if maxts else None
 
     # 降雨機率（PoP12h）
-    pop_values = _collect_day(_parse_element(elements, "PoP12h"), target_date)
+    pop_values = _collect_day(_parse_element(elements, "12小時降雨機率"), target_date)
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != ""]
     max_pop = max(pops) if pops else None
+
+     # 最低體感溫度
+    minat_values = _collect_day(_parse_element(elements, "最低體感溫度"), target_date)
+    minats = [int(v["value"]) for v in minat_values if v["value"] is not None]
+    min_at = min(minats) if minats else None
+
+    # 最高體感溫度
+    maxat_values = _collect_day(_parse_element(elements, "最高體感溫度"), target_date)
+    maxats = [int(v["value"]) for v in maxat_values if v["value"] is not None]
+    max_at = max(maxats) if maxats else None
 
     # 日期標籤
     if days_diff == 0:
@@ -244,6 +254,8 @@ def get_weather_summary(date_str="today", location=None):
         "min_t": min_t,
         "max_t": max_t,
         "pop": max_pop,
+        "min_at": min_at,
+        "max_at": max_at,
     }
 
 
@@ -260,7 +272,12 @@ def format_weather(summary):
     lines.append(f"天氣：{summary['wx']}")
 
     if summary["min_t"] is not None and summary["max_t"] is not None:
-        lines.append(f"溫度：{summary['min_t']}~{summary['max_t']}°C")
+        min_at = summary.get("min_at")
+        max_at = summary.get("max_at")
+        if min_at is not None and max_at is not None:
+            lines.append(f"溫度：{summary['min_t']}(體感{min_at})~{summary['max_t']}(體感{max_at})°C")
+        else:
+            lines.append(f"溫度：{summary['min_t']}~{summary['max_t']}°C")
 
     if summary["pop"] is not None:
         lines.append(f"降雨機率：{summary['pop']}%")
