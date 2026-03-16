@@ -1,5 +1,68 @@
 # 家庭 AI 管家系統
 
+## 這是什麼？
+
+一個用 LINE Bot 操作的家庭智能管家系統。家人只要會用 LINE 就能使用——傳訊息給管家，它就會幫你管理食品庫存、待辦事項、智能家電、天氣查詢，還會每天主動推播提醒。
+
+核心理念：
+- **零學習門檻**：LINE 是台灣人每天在用的工具，不需要另外裝 App 或學新介面
+- **全自然語言**：說「牛奶快沒了」「明天台北會下雨嗎」「開冷氣 24 度」就行，不需要記指令格式
+- **主動提醒**：食品快過期會催你、待辦到時間會提醒、天氣要變冷會通知
+- **零供應商鎖定**：資料存在 Google Sheets，完全透明可查看，隨時可以搬走
+- **全架構透明**：不是黑盒子，每一層怎麼運作都清楚，壞了自己也能修
+
+### 功能一覽
+
+| 功能 | 說明 |
+|------|------|
+| 食品庫存管理 | 新增、查詢、消耗，到期前自動提醒 |
+| 待辦事項管理 | 新增、查詢、完成，支援私人/公開、指定負責人 |
+| 冷氣控制 | 開關、溫度、模式、風速（SwitchBot Hub IR） |
+| 除濕機控制 | 開關、模式、目標濕度（Panasonic Smart App） |
+| DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
+| 溫濕度查詢 | 即時讀取室內溫度與濕度 |
+| 天氣預報 | 全台鄉鎮一週天氣，支援自然語言查詢 |
+| 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 天氣 |
+| 即時提醒 | 每 15 分鐘檢查即將到來的待辦 |
+| 晚間天氣 | 晚上推播明日天氣，提醒溫差變化 |
+
+---
+## 需要的資源
+
+### 帳號與服務（全部免費方案即可）
+
+| 服務 | 用途 | 費用 |
+|------|------|------|
+| [LINE Developers](https://developers.line.biz/) | Messaging API Bot | 免費 |
+| [Google Cloud](https://console.cloud.google.com/) | Sheets API + Drive API（Service Account） | 免費 |
+| [Google Sheets](https://sheets.google.com/) | 資料庫（食品、待辦、設備、對話紀錄） | 免費 |
+| [Google Apps Script](https://script.google.com/) | 排程觸發推播 | 免費 |
+| [Render.com](https://render.com/) | Python FastAPI Server 部署 | 免費（Free Instance） |
+| [Anthropic](https://console.anthropic.com/) | Claude API（自然語言理解） | 按量計費（見下方） |
+| [UptimeRobot](https://uptimerobot.com/) | 每 5 分鐘 ping 防止 Render 休眠 | 免費 |
+| [SwitchBot](https://www.switch-bot.com/) | 智能居家 API（冷氣 IR + 溫濕度） | 免費（需硬體） |
+| [Panasonic Smart App](https://www.panasonic.com/tw/) | 除濕機控制 API | 免費（需硬體） |
+| [中央氣象署](https://opendata.cwa.gov.tw/) | 天氣預報開放資料 | 免費 |
+
+### 硬體設備（依需求選配）
+
+| 設備 | 用途 | 大約費用 |
+|------|------|---------|
+| SwitchBot Hub 2 / Hub Mini | IR 遙控器 + 溫濕度感應 | NT$1,500~2,500 |
+| Panasonic 聯網除濕機 | 除濕機控制（需支援 Smart App） | 依機型而定 |
+
+> 智能居家設備是選配，不裝也能正常使用食品管理、待辦事項、天氣查詢等功能。
+
+### 每月費用
+
+| 項目 | 費用 |
+|------|------|
+| Claude API | 約 NT$10~30/月（一般家庭使用量） |
+| 其他所有服務 | 免費 |
+
+> 建議在 Anthropic Console 設定 monthly spend limit $5（約 NT$160），防止意外爆量。
+
+---
 ## 系統架構
 - **介面**：Line Bot（Messaging API）
 - **大腦**：Claude API（claude-sonnet-4-6）
