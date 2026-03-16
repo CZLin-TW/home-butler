@@ -969,8 +969,8 @@ def handle_message(event):
                 headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
                 json={"chatId": user_id, "loadingSeconds": 60}
             )
-        except:
-            pass
+        except Exception as e:
+            print(f"[LOADING ERROR] {e}")
 
         # ★ 一次批次讀取所有分頁（1 次 API 呼叫取代原本 7~8 次）
         ctx = RequestContext()
