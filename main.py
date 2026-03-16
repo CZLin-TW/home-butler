@@ -671,6 +671,7 @@ def handle_query_weather(data):
     date_str = data.get("date", "today")
     location = data.get("location", None)
     summary = weather_api.get_weather_summary(date_str, location)
+    print(f"[WEATHER] date={date_str}, location={location}, summary={summary}")
     return weather_api.format_weather(summary)
 
 
