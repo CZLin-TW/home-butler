@@ -43,7 +43,8 @@ def _fetch_forecast(data_id, location_name=None):
     try:
         params = {
             "Authorization": CWA_API_KEY,
-            "elementName": "Wx,MinT,MaxT,PoP12h,WeatherDescription",
+            "elementName": "Wx,MinT,MaxT,MinAT,MaxAT,PoP12h,WeatherDescription",
+            
         }
         if location_name:
             params["locationName"] = location_name
@@ -219,6 +220,16 @@ def get_weather_summary(date_str="today", location=None):
     maxts = [int(v["value"]) for v in maxt_values if v["value"] is not None]
     max_t = max(maxts) if maxts else None
 
+    # 最低體感溫度（MinAT）
+    minat_values = _collect_day(_parse_element(elements, "最低體感溫度"), target_date)
+    minats = [int(v["value"]) for v in minat_values if v["value"] is not None]
+    min_at = min(minats) if minats else None
+
+    # 最高體感溫度（MaxAT）
+    maxat_values = _collect_day(_parse_element(elements, "最高體感溫度"), target_date)
+    maxats = [int(v["value"]) for v in maxat_values if v["value"] is not None]
+    max_at = max(maxats) if maxats else None
+
     # 降雨機率（PoP12h）
     pop_values = _collect_day(_parse_element(elements, "12小時降雨機率"), target_date)
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
@@ -243,6 +254,8 @@ def get_weather_summary(date_str="today", location=None):
         "wx": wx,
         "min_t": min_t,
         "max_t": max_t,
+        "min_at": min_at,
+        "max_at": max_at,
         "pop": max_pop,
     }
 
@@ -261,6 +274,9 @@ def format_weather(summary):
 
     if summary["min_t"] is not None and summary["max_t"] is not None:
         lines.append(f"溫度：{summary['min_t']}~{summary['max_t']}°C")
+
+    if summary.get("min_at") is not None and summary.get("max_at") is not None:
+        lines.append(f"體感溫度：{summary['min_at']}~{summary['max_at']}°C")
 
     if summary["pop"] is not None:
         lines.append(f"降雨機率：{summary['pop']}%")

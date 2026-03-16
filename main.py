@@ -320,7 +320,7 @@ def get_recent_conversation(user_id, ctx, limit=6):
     records = ctx.get("對話暫存")
     user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
-    return [{"role": r["角色"], "content": r["內容"]} for _, r in recent]
+    return [{"role": r["角色"], "content": r["內容"]} for _, r in recent if r.get("內容")]
 
 
 # ══════════════════════════════════════════
@@ -401,6 +401,7 @@ def handle_delete(data, ctx):
                 row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
             ])
             sheet.delete_rows(i + 2)
+            records.pop(i)
             return f"✅ 已標記 {data.get('name')} 為已消耗"
     return f"❌ 找不到 {data.get('name')}"
 
@@ -417,6 +418,7 @@ def handle_modify(data, ctx):
                     row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
                 ])
                 sheet.delete_rows(i + 2)
+                records.pop(i)
                 return f"✅ {data.get('name')} 已全部消耗"
             else:
                 sheet.update_cell(i + 2, 2, new_quantity)
@@ -475,6 +477,7 @@ def handle_delete_todo(data, ctx):
                 row.get("負責人"), "已完成", row.get("類型")
             ])
             sheet.delete_rows(i + 2)
+            records.pop(i)
             return f"✅ 已標記「{data.get('item')}」為已完成"
     return f"❌ 找不到「{data.get('item')}」"
 
