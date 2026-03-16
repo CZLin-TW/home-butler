@@ -1097,10 +1097,10 @@ def handle_message(event):
                         # 根據 action 類型選擇不同的 system prompt
                         action_types = {d.get("action") for d in actions}
                         if action_types & {"query_todo"}:
-                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期排序，格式緊湊：每項一行，格式為「emoji 事項（日期 時間）」。不要用 markdown 標題或分隔線。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。"
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n日期\nemoji 事項1\nemoji 事項2（HH:MM）\n\n不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。"
                             semantic_max_tokens = 500
                         elif action_types & {"query_food"}:
-                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項補簡短提醒，其餘不加評語。"
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。依過期日由近到遠排序，每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項後面補簡短提醒，其餘不加評語。"
                             semantic_max_tokens = 500
                         else:
                             semantic_system = "你是家庭管家。根據以下數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。"
