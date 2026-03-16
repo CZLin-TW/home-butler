@@ -964,11 +964,12 @@ def handle_message(event):
         print(f"[1] user_id={user_id}, text={text}")
         log_message(user_id, text)
         try:
-            httpx.post(
+            loading_resp = httpx.post(
                 "https://api.line.me/v2/bot/chat/loading",
                 headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
                 json={"chatId": user_id, "loadingSeconds": 60}
             )
+            print(f"[LOADING] status={loading_resp.status_code}, body={loading_resp.text}")
         except Exception as e:
             print(f"[LOADING ERROR] {e}")
 
