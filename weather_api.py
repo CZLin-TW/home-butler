@@ -221,7 +221,7 @@ def get_weather_summary(date_str="today", location=None):
 
     # 降雨機率（PoP12h）
     pop_values = _collect_day(_parse_element(elements, "12小時降雨機率"), target_date)
-    pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != ""]
+    pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_pop = max(pops) if pops else None
 
     # 日期標籤
