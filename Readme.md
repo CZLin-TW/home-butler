@@ -18,17 +18,19 @@
 
 | 功能 | 說明 |
 |------|------|
-| 食品庫存管理 | 新增、查詢、消耗，到期前自動提醒 |
-| 待辦事項管理 | 新增、查詢、完成，支援私人/公開、指定負責人 |
+| 食品庫存管理 | 新增、查詢、消耗、修改（品名/數量/單位/過期日），到期前自動提醒 |
+| 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
+| 外部行事曆整合 | Notion 行事曆唯讀整合，查待辦時自動合併顯示（支援 Sheet 自訂篩選條件） |
 | 冷氣控制 | 開關、溫度、模式、風速（SwitchBot Hub IR） |
 | 除濕機控制 | 開關、模式、目標濕度（Panasonic Smart App） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
 | 溫濕度查詢 | 即時讀取室內溫度與濕度 |
-| 天氣預報 | 全台鄉鎮一週天氣，支援自然語言查詢 |
+| 天氣預報 | 全台鄉鎮一週天氣（含體感溫度），支援自然語言查詢 |
 | 廣播訊息 | `@all` 開頭可對全體家庭成員發送訊息 |
-| 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 天氣 |
+| 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 今日天氣（含體感溫度） |
 | 即時提醒 | 每 15 分鐘檢查即將到來的待辦 |
 | 晚間天氣 | 晚上推播明日天氣，提醒溫差變化 |
+| 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 
 ---
 ## 需要的資源
@@ -47,6 +49,7 @@
 | [SwitchBot](https://www.switch-bot.com/) | 智能居家 API（冷氣 IR + 溫濕度） | 免費（需硬體） |
 | [Panasonic Smart App](https://www.panasonic.com/tw/) | 除濕機控制 API | 免費（需硬體） |
 | [中央氣象署](https://opendata.cwa.gov.tw/) | 天氣預報開放資料 | 免費 |
+| [Notion](https://www.notion.so/) | 外部行事曆整合（唯讀） | 免費（需 Internal Integration） |
 
 ### 硬體設備（依需求選配）
 
@@ -55,7 +58,7 @@
 | SwitchBot Hub 2 / Hub Mini | IR 遙控器 + 溫濕度感應 | NT$1,500~2,500 |
 | Panasonic 聯網除濕機 | 除濕機控制（需支援 Smart App） | 依機型而定 |
 
-> 智能居家設備是選配，不裝也能正常使用食品管理、待辦事項、天氣查詢等功能。
+> 智能居家設備和 Notion 整合都是選配，不裝也能正常使用食品管理、待辦事項、天氣查詢等功能。
 
 ### 每月費用
 
@@ -76,7 +79,8 @@
 - **防冷啟動**：UptimeRobot（每 5 分鐘 ping）
 - **智能居家**：SwitchBot API v1.1（冷氣 IR 控制 + Hub 溫濕度 + DIY IR 設備）
 - **除濕機**：Panasonic Smart App API（電源 / 模式 / 目標濕度控制）
-- **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報）
+- **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報，含體感溫度）
+- **外部行事曆**：Notion API（唯讀，支援每人獨立篩選條件）
 
 ---
 
@@ -132,6 +136,7 @@ pip install fastapi uvicorn line-bot-sdk gspread google-auth anthropic pytz http
 credentials.json
 venv/
 __pycache__/
+test_notion.py
 ```
 
 ---
@@ -201,11 +206,12 @@ git push
 - 已完成的待辦自動移至此分頁，Claude 不會讀取
 
 **家庭成員**
-| 名稱 | Line User ID | 狀態 | 稱謂 |
-|------|-------------|------|------|
+| 名稱 | Line User ID | 狀態 | 稱謂 | Notion Database ID | Notion 篩選 | Google Calendar ID |
+|------|-------------|------|------|-------------------|------------|-------------------|
 - 狀態值：啟用 / 停用
 - 稱謂例如「父親,老公,爸爸」（逗號分隔）
 - Line User ID 取得方式：家人加好友後傳訊息，從「訊息紀錄」分頁複製（U 開頭）
+- Notion Database ID / Notion 篩選 / Google Calendar ID：選填，有填才整合（詳見下方說明）
 
 **訊息紀錄**
 | 時間 | 用戶ID | 訊息 |
@@ -293,11 +299,39 @@ DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指
 2. 登入後到「會員中心」→「取得授權碼」
 3. 在 Render.com 新增環境變數 `CWA_API_KEY`（貼上授權碼）
 
-天氣功能免費，支援全台 22 縣市所有鄉鎮，預報範圍一週。
+天氣功能免費，支援全台 22 縣市所有鄉鎮，預報範圍一週，包含體感溫度。
 
 ---
 
-### 十一、防冷啟動
+### 十一、Notion 行事曆整合（選配）
+
+Notion 整合為唯讀，管家只會在查待辦時一起顯示 Notion 行事曆的事件，不會寫入 Notion。
+
+**建立 Integration：**
+1. 前往 https://www.notion.so/my-integrations 建立 Internal Integration（需 Workspace Owner 或 Admin 權限）
+2. 複製 Integration Token
+3. 在 Render.com 新增環境變數 `NOTION_TOKEN`
+
+**連結 Database：**
+1. 打開 Notion 行事曆 Database 頁面
+2. 右上角「...」→「Connections」→ 加入剛建立的 Integration
+3. 從 Database 頁面網址取得 Database ID（`https://www.notion.so/xxxxx?v=yyyyy` 中的 `xxxxx`）
+
+**設定 Google Sheets：**
+在「家庭成員」分頁對應的成員行填入：
+- `Notion Database ID`：Database ID
+- `Notion 篩選`：篩選條件，格式為 `欄位名:值,欄位名:值`
+
+篩選條件範例：
+- `Status:Incoming,person:CZ` — 只顯示狀態為 Incoming 且 person 為 CZ 的事件
+- `Status:Incoming,person:CZ,名稱分析:!休假事件` — 再排除名稱分析為「休假事件」的項目
+- `!` 開頭表示排除條件
+
+每個家庭成員可以各自設定不同的 Database ID 和篩選條件，沒有填的成員不會整合 Notion。
+
+---
+
+### 十二、防冷啟動
 
 前往 https://uptimerobot.com 註冊免費帳號：
 1. 新增 HTTP monitor
@@ -307,7 +341,7 @@ DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指
 
 ---
 
-### 十二、排程推播（Google Apps Script）
+### 十三、排程推播（Google Apps Script）
 
 前往 https://script.google.com 建立新專案「家庭管家推播」，貼入：
 
@@ -356,7 +390,7 @@ function sendWeatherNotification() {
 
 ---
 
-### 十三、取得家庭成員 Line User ID
+### 十四、取得家庭成員 Line User ID
 
 每位家庭成員：
 1. 掃 QR Code 加管家好友
@@ -368,18 +402,19 @@ function sendWeatherNotification() {
 
 ## Render 環境變數
 
-| 變數名稱 | 說明 |
-|----------|------|
-| LINE_CHANNEL_ACCESS_TOKEN | Line Bot 的 Channel Access Token |
-| LINE_CHANNEL_SECRET | Line Bot 的 Channel Secret |
-| SPREADSHEET_ID | Google Sheets 的試算表 ID（網址中間那串） |
-| GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） |
-| ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） |
-| SWITCHBOT_TOKEN | SwitchBot 開發者 Token |
-| SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key |
-| PANASONIC_ACCOUNT | Panasonic Smart App 帳號 |
-| PANASONIC_PASSWORD | Panasonic Smart App 密碼 |
-| CWA_API_KEY | 中央氣象署開放資料授權碼 |
+| 變數名稱 | 說明 | 必要 |
+|----------|------|------|
+| LINE_CHANNEL_ACCESS_TOKEN | Line Bot 的 Channel Access Token | 必要 |
+| LINE_CHANNEL_SECRET | Line Bot 的 Channel Secret | 必要 |
+| SPREADSHEET_ID | Google Sheets 的試算表 ID（網址中間那串） | 必要 |
+| GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） | 必要 |
+| ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） | 必要 |
+| SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
+| SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
+| PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
+| PANASONIC_PASSWORD | Panasonic Smart App 密碼 | 選配 |
+| CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
+| NOTION_TOKEN | Notion Internal Integration Token | 選配 |
 
 ---
 
@@ -389,9 +424,9 @@ function sendWeatherNotification() {
 |------|------|------|
 | / | GET / HEAD | 健康檢查（UptimeRobot 用） |
 | /callback | POST | Line Webhook 接收訊息 |
-| /notify | POST | GAS 呼叫，觸發每日推播（食品過期 + 待辦 + 溫濕度 + 今日天氣） |
+| /notify | POST | GAS 呼叫，觸發每日推播（食品過期 + 待辦 + 溫濕度 + 今日天氣含體感溫度） |
 | /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒 |
-| /notify_weather | POST | GAS 呼叫，晚上推播明日天氣（含今天比較，Claude 可提醒溫差） |
+| /notify_weather | POST | GAS 呼叫，晚上推播明日天氣（含今天比較與體感溫度，Claude 可提醒溫差） |
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
@@ -406,17 +441,17 @@ function sendWeatherNotification() {
 |--------|------|------|
 | add_food | 新增食品 | name, quantity, unit, expiry |
 | delete_food | 食品全部用完，移至封存 | name |
-| modify_food | 修改食品數量 | name, quantity |
+| modify_food | 修改食品 | name，選填：name_new, quantity, unit, expiry |
 | query_food | 查詢食品庫存 | 無 |
 
 ### 待辦事項
 
 | action | 說明 | 欄位 |
 |--------|------|------|
-| add_todo | 新增待辦 | item, date，選填：time, person, type |
-| modify_todo | 修改待辦 | item，選填：date, time, person, type |
+| add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type |
+| modify_todo | 修改待辦 | item，選填：item_new, date, time, person, type |
 | delete_todo | 標記完成，移至封存 | item |
-| query_todo | 查詢待辦（只顯示自己的私人 + 所有公開） | 無 |
+| query_todo | 查詢待辦（含外部行事曆） | 無 |
 
 ### 智能居家
 
@@ -433,7 +468,7 @@ function sendWeatherNotification() {
 
 | action | 說明 | 欄位 |
 |--------|------|------|
-| query_weather | 查詢天氣預報 | 選填：date（YYYY-MM-DD，最多 7 天）, location（鄉鎮或縣市） |
+| query_weather | 查詢天氣預報（含體感溫度） | 選填：date（YYYY-MM-DD，最多 7 天）, location（鄉鎮或縣市） |
 
 天氣查詢使用兩次 Claude API 呼叫：第一次解析使用者意圖（查哪裡、哪天），第二次根據實際天氣數據用管家語氣回覆。支援自然語言如「週末台北冷嗎」「明天會下雨嗎」。
 
@@ -459,7 +494,7 @@ function sendWeatherNotification() {
 
 | 情境 | 回覆來源 |
 |------|---------|
-| 食品 / 待辦的查詢 | Sheet 真實數據 → 第二次 Claude 用管家語氣回覆 |
+| 食品 / 待辦的查詢 | Sheet 真實數據（+ Notion 行事曆）→ 第二次 Claude 用管家語氣回覆 |
 | 食品 / 待辦的操作（新增、修改、刪除） | Claude 的 reply（管家語氣） |
 | 天氣查詢 | 兩次 Claude：第一次解析意圖 → 查天氣 API → 第二次根據數據回覆 |
 | 溫濕度查詢 | 查感應器 API → 第二次 Claude 用管家語氣回覆 |
@@ -467,6 +502,8 @@ function sendWeatherNotification() {
 | 設備控制成功 | Claude 的 reply |
 | 設備控制失敗（❌） | 程式的實際錯誤訊息 |
 | 廣播（@all） | 直接轉發，不經 Claude |
+| 指派待辦給他人 | Claude 的 reply + 自動推送通知給被指派者 |
+| 外部行事曆事項完成 | Claude 提醒使用者到原本的日曆上更新 |
 | Claude 回傳異常 | 友善的錯誤提示，不顯示 traceback |
 
 ---
@@ -475,9 +512,9 @@ function sendWeatherNotification() {
 
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
-| 每日推播 | 早上 10 點 | 食品過期提醒 + 本週待辦 + 溫濕度 + 今日天氣 |
+| 每日推播 | 早上 10 點 | 食品過期提醒 + 本週待辦 + 溫濕度 + 今日天氣（含體感溫度） |
 | 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 |
-| 晚間天氣 | 晚上 9 點 | 明日天氣預報（含今天比較，Claude 可提醒溫差變化） |
+| 晚間天氣 | 晚上 9 點 | 明日天氣預報（含體感溫度與今天比較，Claude 可提醒溫差變化） |
 
 推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。
 
@@ -495,6 +532,35 @@ function sendWeatherNotification() {
 
 ---
 
+## 外部行事曆整合
+
+### 設計原則
+
+- **唯讀**：管家只讀取外部行事曆，不寫入。新增/修改/完成待辦只操作 Google Sheets
+- **每人獨立**：每個家庭成員可設定不同的外部行事曆來源和篩選條件
+- **Sheet 控制**：透過「家庭成員」分頁的欄位控制整合行為，不用改程式碼
+- **按需載入**：只在使用者查詢待辦（query_todo）時才呼叫外部 API
+
+### 目前支援
+
+| 來源 | 設定欄位 | 篩選欄位 |
+|------|---------|---------|
+| Notion | Notion Database ID | Notion 篩選 |
+
+### 篩選語法
+
+格式：`欄位名:值,欄位名:值`（逗號分隔，AND 關係）
+
+- 包含條件：`Status:Incoming` — Status 欄位包含 "Incoming"
+- 排除條件：`名稱分析:!休假事件` — 名稱分析欄位不包含 "休假事件"
+- 比對不分大小寫
+
+### 顯示方式
+
+查詢待辦時，管家待辦和外部行事曆會合併顯示，外部行事曆事項以 📅 標記區分。使用者若說外部行事曆事項已完成，Claude 會提醒到原本的日曆上更新。
+
+---
+
 ## 天氣功能技術細節
 
 - **API**：中央氣象署開放資料 F-D0047 系列（鄉鎮一週逐 12 小時預報）
@@ -502,7 +568,7 @@ function sendWeatherNotification() {
 - **地點解析**：支援模糊比對，「竹北」→ 自動嘗試竹北市/區/鄉/鎮，遍歷所有縣市。台/臺自動轉換
 - **顯示資訊**：天氣現象、最高/最低溫度、體感溫度、降雨機率
 - **主動查詢**：使用者問天氣 → Claude 解析意圖 → 程式查天氣 API → Claude 用管家語氣回覆
-- **推播**：早上帶今日天氣，晚上帶明日+今日天氣（支援溫差比較）
+- **推播**：早上帶今日天氣（含體感溫度），晚上帶明日+今日天氣（支援溫差比較）
 
 ---
 
@@ -514,6 +580,8 @@ function sendWeatherNotification() {
 - **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
 - **精簡 SYSTEM_PROMPT**：減少 token 數，加速 Claude 回應
 - **SSL 驗證關閉**：氣象署 API 的 SSL 憑證有已知問題，使用 `verify=False` 繞過
+- **Notion API 日期預過濾**：在 API 層加 `on_or_after` 過濾，只拉今天以後的事件，大幅減少回傳資料量
+- **快取索引同步**：多筆刪除操作時同步更新記憶體快取，避免行號偏移
 
 ---
 
@@ -525,6 +593,7 @@ function sendWeatherNotification() {
 | switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取、DIY IR） |
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢）。API 參考：https://github.com/osk2/panasonic_smart_app |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
+| notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 
@@ -546,8 +615,13 @@ function sendWeatherNotification() {
 3. 填入 Google Sheets「智能居家」分頁
 4. 若是新設備類型，需在 switchbot_api.py 新增控制函數並更新 SYSTEM_PROMPT
 
+**新增外部行事曆**：
+1. 在 Render.com 設定對應的環境變數（如 NOTION_TOKEN）
+2. 在 Google Sheets「家庭成員」分頁填入對應欄位
+3. 若是新的行事曆來源（如 Google Calendar），需新增 API 封裝模組並更新 handle_query_todo
+
 **費用控管**：
-- Claude API 按用量計費，每月約 NT$10~20
+- Claude API 按用量計費，每月約 NT$10~30
 - 天氣查詢因為兩次 Claude 呼叫，會比一般操作多消耗約 1 倍 token
 - 建議在 Anthropic Console 設定 monthly spend limit $5
-- 其他服務（Render、GAS、UptimeRobot、SwitchBot、氣象署）均為免費方案
+- 其他服務（Render、GAS、UptimeRobot、SwitchBot、氣象署、Notion）均為免費方案
