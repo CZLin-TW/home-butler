@@ -656,8 +656,10 @@ def handle_control_dehumidifier(data, ctx):
     elif power == "on" and not mode and not humidity:
         result = panasonic_api.dehumidifier_turn_on(auth, gwid)
     else:
-        panasonic_api.dehumidifier_turn_on(auth, gwid)
-        result = {"success": True}
+        turn_on_result = panasonic_api.dehumidifier_turn_on(auth, gwid)
+        if not turn_on_result.get("success"):
+            return f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}"
+        result = turn_on_result
         if mode:
             result = panasonic_api.dehumidifier_set_mode(auth, mode)
             if not result.get("success"):
@@ -771,7 +773,8 @@ async def notify():
                 continue
             try:
                 expiry = datetime.strptime(str(expiry_str), "%Y-%m-%d").date()
-            except:
+            except (ValueError, TypeError) as e:
+                print(f"[WARN] 無法解析食品過期日 {expiry_str!r}: {e}")
                 continue
             days_left = (expiry - today).days
             label = f"{r['品名']}（{expiry_str}）"
@@ -797,8 +800,8 @@ async def notify():
                         temp = result.get("temperature", "N/A")
                         humidity = result.get("humidity", "N/A")
                         sensor_lines.append(f"{dev_name}：{temp}°C / {humidity}%")
-        except:
-            pass
+        except Exception as e:
+            print(f"[WARN] 讀取感應器失敗: {e}")
 
         # ── 今日天氣 ──
         weather_text = None
@@ -818,7 +821,8 @@ async def notify():
                 continue
             try:
                 todo_date = datetime.strptime(str(date_str), "%Y-%m-%d").date()
-            except:
+            except (ValueError, TypeError) as e:
+                print(f"[WARN] 無法解析待辦日期 {date_str!r}: {e}")
                 continue
             days_left = (todo_date - today).days
             if days_left <= 7:
@@ -961,7 +965,8 @@ async def notify_realtime():
 
             try:
                 todo_dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
-            except:
+            except (ValueError, TypeError) as e:
+                print(f"[WARN] 無法解析即時提醒時間 {date_str!r} {time_str!r}: {e}")
                 continue
 
             if window_start <= todo_dt <= window_end:
