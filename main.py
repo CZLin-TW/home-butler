@@ -49,10 +49,10 @@ IR 按鈕：{ir_device_info}
 action 定義：
 - add_food：name, quantity(預設1), unit(預設「個」), expiry(YYYY-MM-DD)
 - delete_food：name
-- modify_food：name, quantity(更新後數量，自行計算)
+- modify_food：name, 只填要改的欄位(name_new/quantity/unit/expiry)。quantity 為更新後數量，自行計算
 - query_food：無參數
 - add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人)
-- modify_todo：item, 只填要改的欄位(date/time/person/type)
+- modify_todo：item, 只填要改的欄位(item_new/date/time/person/type)
 - delete_todo：item
 - query_todo：無參數
 - control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。唯一一台冷氣時可省略 device_name
@@ -409,10 +409,10 @@ def handle_modify(data, ctx):
     sheet = ctx.get_worksheet("食品庫存")
     archive = ctx.get_worksheet("食品封存")
     records = ctx.get("食品庫存")
-    new_quantity = int(data.get("quantity", 0))
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
-            if new_quantity <= 0:
+            # 數量歸零 → 封存
+            if data.get("quantity") is not None and int(data.get("quantity", 1)) <= 0:
                 archive.append_row([
                     row.get("品名"), row.get("數量"), row.get("單位"),
                     row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
@@ -420,9 +420,16 @@ def handle_modify(data, ctx):
                 sheet.delete_rows(i + 2)
                 records.pop(i)
                 return f"✅ {data.get('name')} 已全部消耗"
-            else:
-                sheet.update_cell(i + 2, 2, new_quantity)
-                return f"✅ {data.get('name')} 數量已更新為 {new_quantity}"
+            # 逐欄更新
+            if data.get("name_new"):
+                sheet.update_cell(i + 2, 1, data.get("name_new"))
+            if data.get("quantity") is not None:
+                sheet.update_cell(i + 2, 2, int(data.get("quantity")))
+            if data.get("unit"):
+                sheet.update_cell(i + 2, 3, data.get("unit"))
+            if data.get("expiry"):
+                sheet.update_cell(i + 2, 4, data.get("expiry"))
+            return f"✅ {data.get('name')} 已更新"
     return f"❌ 找不到 {data.get('name')}"
 
 def handle_query(ctx):
@@ -455,6 +462,8 @@ def handle_modify_todo(data, ctx):
     records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
+            if data.get("item_new"):
+                sheet.update_cell(i + 2, 1, data.get("item_new"))
             if data.get("date"):
                 sheet.update_cell(i + 2, 2, data.get("date"))
             if data.get("time") is not None:
