@@ -56,6 +56,24 @@ def _extract_property_value(prop):
     elif prop_type == "rich_text":
         texts = prop.get("rich_text", [])
         return texts[0]["text"]["content"] if texts else ""
+    elif prop_type == "formula":
+        formula = prop.get("formula", {})
+        f_type = formula.get("type", "")
+        if f_type == "string":
+            return formula.get("string", "")
+        elif f_type == "number":
+            return formula.get("number")
+        elif f_type == "boolean":
+            return formula.get("boolean")
+        elif f_type == "date":
+            date_obj = formula.get("date")
+            if date_obj:
+                return {"start": date_obj.get("start", ""), "end": date_obj.get("end")}
+        return ""
+
+    elif prop_type == "created_by":
+        user = prop.get("created_by", {})
+        return user.get("name", "")
 
     else:
         return ""
@@ -119,8 +137,16 @@ def get_upcoming_events(database_id, filters_str=""):
         has_more = True
         start_cursor = None
 
+        today_str = datetime.now(TZ).strftime("%Y-%m-%d")
+
         while has_more:
-            body = {"page_size": 100}
+            body = {
+                "page_size": 100,
+                "filter": {
+                    "property": "Date",
+                    "date": {"on_or_after": today_str}
+                }
+            }
             if start_cursor:
                 body["start_cursor"] = start_cursor
 
