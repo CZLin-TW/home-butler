@@ -970,7 +970,11 @@ def handle_message(event):
             if broadcast_msg:
                 members_sheet = get_sheet("家庭成員")
                 members = members_sheet.get_all_records()
-                sender_name = get_user_name(user_id)
+                sender_name = user_id
+                for m in members:
+                    if m.get("Line User ID") == user_id and m.get("狀態") == "啟用":
+                        sender_name = m.get("名稱", user_id)
+                        break
                 push_text = f"📢 {sender_name}：{broadcast_msg}"
                 for member in members:
                     if member.get("狀態") == "啟用":
