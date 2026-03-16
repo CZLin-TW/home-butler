@@ -521,6 +521,7 @@ def handle_query_todo(user_name, ctx):
     notion_text = ""
     for member in ctx.get("家庭成員"):
         if member.get("名稱") == user_name and member.get("狀態") == "啟用":
+            print(f"[NOTION DEBUG] member keys: {list(member.keys())}, db_id: {member.get('Notion Database ID', 'NOT FOUND')}")
             db_id = str(member.get("Notion Database ID", "")).strip()
             filters = str(member.get("Notion 篩選", "")).strip()
             if db_id:
