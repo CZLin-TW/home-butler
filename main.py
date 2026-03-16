@@ -965,7 +965,7 @@ def handle_message(event):
         log_message(user_id, text)
         try:
             loading_resp = httpx.post(
-                "https://api.line.me/v2/bot/chat/loading",
+                "https://api.line.me/v2/bot/chat/loading/start",
                 headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
                 json={"chatId": user_id, "loadingSeconds": 60}
             )
