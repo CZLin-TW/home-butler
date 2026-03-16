@@ -524,6 +524,7 @@ def handle_query_todo(user_name, ctx):
             print(f"[NOTION DEBUG] member keys: {list(member.keys())}, db_id: {member.get('Notion Database ID', 'NOT FOUND')}")
             db_id = str(member.get("Notion Database ID", "")).strip()
             filters = str(member.get("Notion 篩選", "")).strip()
+            print(f"[NOTION DEBUG] filters: {repr(filters)}")
             if db_id:
                 events = notion_api.get_upcoming_events(db_id, filters)
                 if events:

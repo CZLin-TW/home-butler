@@ -111,6 +111,7 @@ def get_upcoming_events(database_id, filters_str=""):
     filters_str: Sheet 定義的篩選條件，如 "Status:Incoming,person:CZ"
     """
     if not NOTION_TOKEN or not database_id:
+        print(f"[NOTION] Skip: token={'set' if NOTION_TOKEN else 'empty'}, db_id={'set' if database_id else 'empty'}")
         return []
 
     try:
