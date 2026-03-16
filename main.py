@@ -11,6 +11,7 @@ import traceback
 import time
 import threading
 import anthropic
+import httpx
 import re
 import switchbot_api
 import panasonic_api
@@ -962,6 +963,14 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
         log_message(user_id, text)
+        try:
+            httpx.post(
+                "https://api.line.me/v2/bot/chat/loading",
+                headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+                json={"chatId": user_id, "loadingSeconds": 60}
+            )
+        except:
+            pass
 
         # ★ 一次批次讀取所有分頁（1 次 API 呼叫取代原本 7~8 次）
         ctx = RequestContext()
