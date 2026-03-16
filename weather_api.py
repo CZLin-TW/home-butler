@@ -222,12 +222,12 @@ def get_weather_summary(date_str="today", location=None):
 
     # 最低體感溫度（MinAT）
     minat_values = _collect_day(_parse_element(elements, "最低體感溫度"), target_date)
-    minats = [int(v["value"]) for v in minat_values if v["value"] is not None]
+    minats = [int(float(v["value"])) for v in minat_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     min_at = min(minats) if minats else None
 
     # 最高體感溫度（MaxAT）
     maxat_values = _collect_day(_parse_element(elements, "最高體感溫度"), target_date)
-    maxats = [int(v["value"]) for v in maxat_values if v["value"] is not None]
+    maxats = [int(float(v["value"])) for v in maxat_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_at = max(maxats) if maxats else None
 
     # 降雨機率（PoP12h）
@@ -302,6 +302,7 @@ def get_weather_data_for_notify(target="today", location=None):
     """取得天氣摘要字串（給 Claude 組推播訊息用）"""
     summary = get_weather_summary(target, location)
     if "error" in summary:
+        print(f"[WEATHER DATA] {summary['error']}")
         return None
 
     parts = [f"{summary['location']}{summary['date_label']}天氣：{summary['wx']}"]
