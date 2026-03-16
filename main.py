@@ -456,15 +456,19 @@ def handle_add_todo(data, user_name, ctx):
     time_part = f" {time_str}" if time_str else ""
     type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
     # 指派給別人時，通知對方
+    # 指派給別人時，通知對方（背景執行）
     if person != user_name:
-        for member in ctx.get("家庭成員"):
-            if member.get("名稱") == person and member.get("狀態") == "啟用":
-                mid = member.get("Line User ID")
-                if mid:
-                    notify_text = f"📋 {user_name} 指派了一項待辦給你：\n{data.get('item')}（{date_str}{time_part}）"
-                    line_bot_api.push_message(mid, TextSendMessage(text=notify_text))
-                    save_conversation(mid, "assistant", notify_text)
-                break
+        def _notify():
+            for member in ctx.get("家庭成員"):
+                if member.get("名稱") == person and member.get("狀態") == "啟用":
+                    mid = member.get("Line User ID")
+                    if mid:
+                        notify_text = f"📋 {user_name} 指派了一項待辦給你：\n{data.get('item')}（{date_str}{time_part}）"
+                        line_bot_api.push_message(mid, TextSendMessage(text=notify_text))
+                        save_conversation(mid, "assistant", notify_text)
+                        cleanup_conversation(mid)
+                    break
+        threading.Thread(target=_notify, daemon=True).start()
     return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
 
 def handle_modify_todo(data, ctx):
