@@ -1097,10 +1097,10 @@ def handle_message(event):
                         # 根據 action 類型選擇不同的 system prompt
                         action_types = {d.get("action") for d in actions}
                         if action_types & {"query_todo"}:
-                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據，用自然、有溫度的語氣回覆。請完整列出所有待辦事項，依日期排序分組。主動提醒今天的事項注意時間，過期未完成的要標註提醒。適度用 emoji。"
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期排序，格式緊湊：每項一行，格式為「emoji 事項（日期 時間）」。不要用 markdown 標題或分隔線。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。"
                             semantic_max_tokens = 500
                         elif action_types & {"query_food"}:
-                            semantic_system = "你是家庭管家。根據以下庫存數據，用自然、有溫度的語氣回覆。請完整列出所有庫存品項。快過期（3天內）的要特別提醒，已過期的要警告。適度用 emoji。"
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項補簡短提醒，其餘不加評語。"
                             semantic_max_tokens = 500
                         else:
                             semantic_system = "你是家庭管家。根據以下數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。"
