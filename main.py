@@ -963,6 +963,25 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
         log_message(user_id, text)
+        
+        # 廣播功能
+        if text.strip().startswith("@all"):
+            broadcast_msg = text.strip()[4:].strip()
+            if broadcast_msg:
+                members_sheet = get_sheet("家庭成員")
+                members = members_sheet.get_all_records()
+                sender_name = get_user_name(user_id)
+                push_text = f"📢 {sender_name}：{broadcast_msg}"
+                for member in members:
+                    if member.get("狀態") == "啟用":
+                        mid = member.get("Line User ID")
+                        if mid:
+                            line_bot_api.push_message(mid, TextSendMessage(text=push_text))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 已廣播給全體成員"))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請在 @all 後面輸入廣播內容"))
+            return
+            
         try:
             loading_resp = httpx.post(
                 "https://api.line.me/v2/bot/chat/loading/start",
