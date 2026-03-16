@@ -1045,7 +1045,7 @@ def handle_message(event):
                 has_error = any("❌" in r for r in results if r)
                 realtime_actions = {"query_devices", "query_dehumidifier"}
                 has_realtime = any(d.get("action") in realtime_actions for d in actions)
-                semantic_actions = {"query_weather", "query_sensor"}
+                semantic_actions = {"query_weather", "query_sensor", "query_food", "query_todo"}
                 has_semantic = any(d.get("action") in semantic_actions for d in actions)
 
                 if has_error:
@@ -1053,11 +1053,22 @@ def handle_message(event):
                 elif has_semantic and not has_realtime:
                     raw_data = "\n".join(r for r in results if r and "❌" not in r)
                     if raw_data:
+                        # 根據 action 類型選擇不同的 system prompt
+                        action_types = {d.get("action") for d in actions}
+                        if action_types & {"query_todo"}:
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據，用自然、有溫度的語氣回覆。請完整列出所有待辦事項，依日期排序分組。主動提醒今天的事項注意時間，過期未完成的要標註提醒。適度用 emoji。"
+                            semantic_max_tokens = 500
+                        elif action_types & {"query_food"}:
+                            semantic_system = "你是家庭管家。根據以下庫存數據，用自然、有溫度的語氣回覆。請完整列出所有庫存品項。快過期（3天內）的要特別提醒，已過期的要警告。適度用 emoji。"
+                            semantic_max_tokens = 500
+                        else:
+                            semantic_system = "你是家庭管家。根據以下數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。"
+                            semantic_max_tokens = 300
                         try:
                             semantic_reply = claude.messages.create(
                                 model="claude-sonnet-4-6",
-                                max_tokens=300,
-                                system="你是家庭管家。根據以下數據，用自然、簡潔、有溫度的語氣回覆使用者的問題。適度用 emoji。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。",
+                                max_tokens=semantic_max_tokens,
+                                system=semantic_system,
                                 messages=[
                                     {"role": "user", "content": f"使用者問：{text}\n\n數據：\n{raw_data}"}
                                 ]
