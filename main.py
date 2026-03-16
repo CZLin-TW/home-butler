@@ -16,6 +16,7 @@ import re
 import switchbot_api
 import panasonic_api
 import weather_api
+import notion_api
 
 app = FastAPI()
 
@@ -68,6 +69,7 @@ action 定義：
 - 可一次多個 action
 - 有上下文先推斷，真的模糊才用 unclear 反問
 - modify_todo 不要用 delete+add 替代
+- 外部行事曆（Notion、Google Calendar 等）是唯讀，無法用 delete_todo 標記完成，請使用者到原本的日曆上更新
 
 範例：
 {{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25 🥛"}}
@@ -506,8 +508,6 @@ def handle_delete_todo(data, ctx):
 
 def handle_query_todo(user_name, ctx):
     valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
-    if not valid:
-        return "目前沒有待辦事項"
     lines = []
     for r in valid:
         todo_type = r.get("類型", "公開")
@@ -516,9 +516,28 @@ def handle_query_todo(user_name, ctx):
             continue
         time_part = f" {r['時間']}" if r.get("時間") else ""
         lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
-    if not lines:
+
+    # 外部行事曆（如有設定）
+    notion_text = ""
+    for member in ctx.get("家庭成員"):
+        if member.get("名稱") == user_name and member.get("狀態") == "啟用":
+            db_id = str(member.get("Notion Database ID", "")).strip()
+            filters = str(member.get("Notion 篩選", "")).strip()
+            if db_id:
+                events = notion_api.get_upcoming_events(db_id, filters)
+                if events:
+                    notion_text = "\n\nNotion 行事曆：\n" + notion_api.format_events_for_claude(events)
+            break
+
+    if not lines and not notion_text:
         return "目前沒有待辦事項"
-    return "待辦事項：\n" + "\n".join(lines)
+
+    result = ""
+    if lines:
+        result = "待辦事項：\n" + "\n".join(lines)
+    if notion_text:
+        result += notion_text
+    return result
 
 
 # ── 智能居家 handlers ──
@@ -1112,7 +1131,7 @@ def handle_message(event):
                         # 根據 action 類型選擇不同的 system prompt
                         action_types = {d.get("action") for d in actions}
                         if action_types & {"query_todo"}:
-                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n日期\nemoji 事項1\nemoji 事項2（HH:MM）\n\n不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。"
+                            semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項和行事曆數據回覆。資料可能來自不同來源（管家待辦、外部行事曆等），請分開列出。依日期分組，格式如下：\n日期\nemoji 事項1\nemoji 事項2（HH:MM）\n\n不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。"
                             semantic_max_tokens = 500
                         elif action_types & {"query_food"}:
                             semantic_system = f"你是家庭管家。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。依過期日由近到遠排序，每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項後面補簡短提醒，其餘不加評語。"
