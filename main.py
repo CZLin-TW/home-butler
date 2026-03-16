@@ -307,29 +307,33 @@ def save_conversation(user_id, role, content):
     except Exception as e:
         print(f"[SAVE CONV ERROR] {e}")
 
+def cleanup_conversation(user_id, limit=6):
+    """清理對話暫存，保留最近 limit 則，其餘封存（背景執行）"""
+    def _cleanup():
+        try:
+            sheet = get_sheet("對話暫存")
+            archive = get_sheet("對話封存")
+            records = sheet.get_all_records()
+            user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
+            if len(user_records) <= limit:
+                return
+            old_records = user_records[:-limit]
+            rows_to_delete = []
+            for i, r in old_records:
+                archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
+                rows_to_delete.append(i + 2)
+            for row_num in sorted(rows_to_delete, reverse=True):
+                sheet.delete_rows(row_num)
+            print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
+        except Exception as e:
+            print(f"[CLEANUP ERROR] {e}")
+    threading.Thread(target=_cleanup, daemon=True).start()
+
 def get_recent_conversation(user_id, ctx, limit=6):
-    """從 ctx 快取讀取對話紀錄，超過 limit 則在背景封存"""
+    """從 ctx 快取讀取對話紀錄"""
     records = ctx.get("對話暫存")
     user_records = [(i, r) for i, r in enumerate(records) if r.get("Line User ID") == user_id]
     recent = user_records[-limit:]
-
-    if len(user_records) > limit:
-        old_records = user_records[:-limit]
-        def _archive():
-            try:
-                archive = get_sheet("對話封存")
-                sheet = get_sheet("對話暫存")
-                rows_to_delete = []
-                for i, r in old_records:
-                    archive.append_row([r.get("Line User ID"), r.get("角色"), r.get("內容"), r.get("時間")])
-                    rows_to_delete.append(i + 2)
-                for row_num in sorted(rows_to_delete, reverse=True):
-                    sheet.delete_rows(row_num)
-                print(f"[CLEANUP] 已封存 {len(old_records)} 則對話（{user_id}）")
-            except Exception as e:
-                print(f"[CLEANUP ERROR] {e}")
-        threading.Thread(target=_archive, daemon=True).start()
-
     return [{"role": r["角色"], "content": r["內容"]} for _, r in recent]
 
 
@@ -833,6 +837,7 @@ async def notify():
 
                 line_bot_api.push_message(user_id, TextSendMessage(text=message))
                 save_conversation(user_id, "assistant", message)
+                cleanup_conversation(user_id)
                 
 
         return {"status": "ok"}
@@ -870,6 +875,7 @@ async def notify_weather():
                 continue
             line_bot_api.push_message(user_id, TextSendMessage(text=message))
             save_conversation(user_id, "assistant", message)
+            cleanup_conversation(user_id)
 
         return {"status": "ok"}
     except Exception as e:
@@ -898,6 +904,7 @@ async def notify_realtime():
                         if user_id:
                             line_bot_api.push_message(user_id, TextSendMessage(text=message))
                             save_conversation(user_id, "assistant", message)
+                            cleanup_conversation(user_id)
             else:
                 for member in members:
                     if member.get("狀態") == "啟用":
@@ -905,6 +912,7 @@ async def notify_realtime():
                         if user_id:
                             line_bot_api.push_message(user_id, TextSendMessage(text=message))
                             save_conversation(user_id, "assistant", message)
+                            cleanup_conversation(user_id)
 
         for r in todo_records:
             if r.get("狀態") != "待辦":
@@ -1136,6 +1144,7 @@ def handle_message(event):
         try:
             save_conversation(user_id, "user", text)
             save_conversation(user_id, "assistant", reply)
+            cleanup_conversation(user_id)
         except Exception as e:
             print(f"[SAVE ERROR] {e}")
     threading.Thread(target=_save, daemon=True).start()
