@@ -833,6 +833,7 @@ async def notify():
 
                 line_bot_api.push_message(user_id, TextSendMessage(text=message))
                 save_conversation(user_id, "assistant", message)
+                
 
         return {"status": "ok"}
     except Exception as e:
@@ -981,6 +982,7 @@ def handle_message(event):
                         mid = member.get("Line User ID")
                         if mid:
                             line_bot_api.push_message(mid, TextSendMessage(text=push_text))
+                            save_conversation(mid, "assistant", push_text)
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 已廣播給全體成員"))
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請在 @all 後面輸入廣播內容"))
