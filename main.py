@@ -17,7 +17,6 @@ import switchbot_api
 import panasonic_api
 import weather_api
 import notion_api
-import theater_api
 
 app = FastAPI()
 
@@ -65,9 +64,6 @@ action 定義：
 - query_dehumidifier：device_name。唯一除濕機時可省略
 - query_devices：無參數
 - query_weather：選填 date（YYYY-MM-DD，自行根據今天日期計算，如「這週末」算出週六日期，「後天」算出具體日期，不指定則查今天，最多未來 7 天）, 選填 location（完整地名如「雲林縣莿桐鄉」，不指定則查竹北市）
-- control_theater：power(on/off)。「開啟劇院」「關閉劇院」「開劇院」「關劇院」觸發。開=三台設備全開（Marantz Cinema 50 + KEF LS60 切 coaxial + KEF LSX II 切 optical），關=全關
-- query_theater：無參數。查詢劇院所有設備狀態（電源/輸入源/音量）
-- control_speaker：device_name(LS60/LSX II/Marantz), 選填 power(on/off), source(wifi/bluetooth/optical/coaxial/tv/analog 等)。個別控制單台設備
 - unclear：message(反問內容)
 
 規則：
@@ -702,70 +698,6 @@ def handle_query_weather(data):
     return weather_api.format_weather(summary)
 
 
-def handle_control_theater(data):
-    power = data.get("power", "on")
-    if power == "on":
-        result = theater_api.theater_on()
-    else:
-        result = theater_api.theater_off()
-
-    if "error" in result:
-        return f"❌ 劇院控制失敗：{result['error']}"
-    if result.get("success"):
-        return f"✅ 劇院已{'開啟' if power == 'on' else '關閉'}"
-    return f"❌ 劇院控制失敗：{result}"
-
-
-def handle_query_theater():
-    result = theater_api.theater_status()
-    return theater_api.format_theater_status(result)
-
-
-def handle_control_speaker(data):
-    device = data.get("device_name", "")
-    power = data.get("power", "")
-    source = data.get("source", "")
-
-    # 對應設備名稱到 API 函數
-    device_lower = device.lower().strip()
-
-    if "ls60" in device_lower:
-        if power == "off":
-            result = theater_api.ls60_power("off")
-        elif source:
-            result = theater_api.ls60_source(source)
-        elif power == "on":
-            result = theater_api.ls60_power("on")
-        else:
-            return theater_api.format_theater_status({"ls60": theater_api.ls60_status()})
-    elif "lsx" in device_lower:
-        if power == "off":
-            result = theater_api.lsx2_power("off")
-        elif source:
-            result = theater_api.lsx2_source(source)
-        elif power == "on":
-            result = theater_api.lsx2_power("on")
-        else:
-            return theater_api.format_theater_status({"lsx2": theater_api.lsx2_status()})
-    elif "marantz" in device_lower or "cinema" in device_lower or "擴大機" in device_lower:
-        if power == "on":
-            result = theater_api.marantz_power("on")
-        elif power == "off":
-            result = theater_api.marantz_power("off")
-        elif source:
-            result = theater_api.marantz_input(source)
-        else:
-            return theater_api.format_theater_status({"marantz": theater_api.marantz_status()})
-    else:
-        return f"❌ 找不到設備「{device}」，可控制的有：LS60、LSX II、Marantz"
-
-    if "error" in result:
-        return f"❌ {device} 控制失敗：{result['error']}"
-    if result.get("success") is not None:
-        return f"✅ {device} 指令已送出"
-    return f"✅ {device} 指令已送出"
-
-
 # ══════════════════════════════════════════
 # HTTP 端點
 # ══════════════════════════════════════════
@@ -1222,18 +1154,12 @@ def handle_message(event):
                         results.append(handle_query_devices(ctx))
                     elif action == "query_weather":
                         results.append(handle_query_weather(data))
-                    elif action == "control_theater":
-                        results.append(handle_control_theater(data))
-                    elif action == "query_theater":
-                        results.append(handle_query_theater())
-                    elif action == "control_speaker":
-                        results.append(handle_control_speaker(data))
                     elif action == "unclear":
                         pass
 
                 has_error = any("❌" in r for r in results if r)
                 # raw_actions：直接回傳原始資料，不再交給 Claude 二次整理
-                raw_actions = {"query_devices", "query_dehumidifier", "query_theater"}
+                raw_actions = {"query_devices", "query_dehumidifier"}
                 has_realtime = any(d.get("action") in raw_actions for d in actions)
                 # semantic_actions：回傳原始資料後，交給 Claude 整理成自然語言回覆
                 semantic_actions = {"query_weather", "query_sensor", "query_food", "query_todo"}
