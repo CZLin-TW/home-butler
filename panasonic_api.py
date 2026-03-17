@@ -161,7 +161,7 @@ def get_dehumidifier_status(device_auth: str, gwid: str) -> dict:
 
 # ── 除濕機控制 ──
 
-def set_dehumidifier_command(device_auth: str, command_type: str, value: int) -> dict:
+def set_dehumidifier_command(device_auth: str, gwid: str, command_type: str, value: int) -> dict:
     """
     對除濕機送出指令
     command_type: "0x00"（電源）, "0x01"（模式）, "0x04"（目標濕度）等
@@ -171,7 +171,7 @@ def set_dehumidifier_command(device_auth: str, command_type: str, value: int) ->
     data = _request_with_retry(
         "GET",
         f"{BASE_URL}/DeviceSetCommand",
-        headers=_headers({"cptoken": _cp_token, "auth": device_auth}),
+        headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         params={"DeviceID": 1, "CommandType": command_type, "Value": value},
     )
     if data is None:
@@ -183,10 +183,10 @@ def set_dehumidifier_command(device_auth: str, command_type: str, value: int) ->
 
 # 電源
 def dehumidifier_turn_on(device_auth: str, gwid: str) -> dict:
-    return set_dehumidifier_command(device_auth, "0x00", 1)
+    return set_dehumidifier_command(device_auth, gwid, "0x00", 1)
 
 def dehumidifier_turn_off(device_auth: str, gwid: str) -> dict:
-    return set_dehumidifier_command(device_auth, "0x00", 0)
+    return set_dehumidifier_command(device_auth, gwid, "0x00", 0)
 
 # 模式
 DEHUMIDIFIER_MODE_MAP = {
@@ -202,21 +202,21 @@ DEHUMIDIFIER_MODE_MAP = {
     "靜音除濕": 11, "silent": 11,
 }
 
-def dehumidifier_set_mode(device_auth: str, mode_str: str) -> dict:
+def dehumidifier_set_mode(device_auth: str, gwid: str, mode_str: str) -> dict:
     mode = DEHUMIDIFIER_MODE_MAP.get(mode_str)
     if mode is None:
         return {"success": False, "error": f"不支援的模式：{mode_str}"}
-    return set_dehumidifier_command(device_auth, "0x01", mode)
+    return set_dehumidifier_command(device_auth, gwid, "0x01", mode)
 
 # 目標濕度（0x04：0=40%, 1=45%, 2=50%, 3=55%, 4=60%, 5=65%, 6=70%）
 HUMIDITY_VALUE_MAP = {40: 0, 45: 1, 50: 2, 55: 3, 60: 4, 65: 5, 70: 6}
 
-def dehumidifier_set_humidity(device_auth: str, humidity: int) -> dict:
+def dehumidifier_set_humidity(device_auth: str, gwid: str, humidity: int) -> dict:
     """設定目標濕度，接受 40/45/50/55/60/65/70"""
     # 找最近的支援值
     closest = min(HUMIDITY_VALUE_MAP.keys(), key=lambda x: abs(x - humidity))
     value = HUMIDITY_VALUE_MAP[closest]
-    return set_dehumidifier_command(device_auth, "0x04", value)
+    return set_dehumidifier_command(device_auth, gwid, "0x04", value)
 
 
 # ── 格式化狀態為人類可讀文字 ──

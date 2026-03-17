@@ -661,11 +661,11 @@ def handle_control_dehumidifier(data, ctx):
             return f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}"
         result = turn_on_result
         if mode:
-            result = panasonic_api.dehumidifier_set_mode(auth, mode)
+            result = panasonic_api.dehumidifier_set_mode(auth, gwid, mode)
             if not result.get("success"):
                 return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
         if humidity:
-            result = panasonic_api.dehumidifier_set_humidity(auth, int(humidity))
+            result = panasonic_api.dehumidifier_set_humidity(auth, gwid, int(humidity))
 
     if result.get("success"):
         return f"✅ {device_name} 指令已送出"
