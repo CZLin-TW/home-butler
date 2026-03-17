@@ -57,7 +57,7 @@ def _fetch_forecast(data_id, location_name=None):
         )
         data = resp.json()
 
-        if data.get("success") != "true":
+        if data.get("success") != "true":  # 氣象署 API 回傳字串 "true"，非布林值
             return {"error": data.get("records", {}).get("msg", "API 回傳失敗")}
 
         locations_list = data.get("records", {}).get("Locations", [])
