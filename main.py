@@ -865,6 +865,40 @@ async def notify():
                 if member_name in todo_private:
                     data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
 
+                # Notion 行事曆
+                try:
+                    db_id = str(member.get("Notion Database ID", "")).strip()
+                    filters = str(member.get("Notion 篩選", "")).strip()
+                    if db_id:
+                        events = notion_api.get_upcoming_events(db_id, filters)
+                        if events:
+                            today_events = []
+                            week_events = []
+                            for item in events:
+                                date_val = item.get("Date", {})
+                                if not isinstance(date_val, dict):
+                                    continue
+                                start_str = date_val.get("start", "")
+                                try:
+                                    if "T" in start_str:
+                                        event_date = datetime.fromisoformat(start_str).date()
+                                    else:
+                                        event_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+                                except (ValueError, TypeError):
+                                    continue
+                                name = item.get("Event", "")
+                                days_left = (event_date - today).days
+                                if days_left == 0:
+                                    today_events.append(name)
+                                elif days_left <= 7:
+                                    week_events.append(f"{name}（{start_str[:10]}）")
+                            if today_events:
+                                data_parts.append("今日行事曆📅：" + "、".join(today_events))
+                            if week_events:
+                                data_parts.append("本週行事曆📅：" + "、".join(week_events))
+                except Exception as e:
+                    print(f"[NOTIFY NOTION ERROR] {e}")
+
                 if not data_parts:
                     continue
 
