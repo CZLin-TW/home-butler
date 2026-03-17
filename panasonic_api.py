@@ -18,6 +18,8 @@ PANASONIC_ACCOUNT = os.environ.get("PANASONIC_ACCOUNT", "")
 PANASONIC_PASSWORD = os.environ.get("PANASONIC_PASSWORD", "")
 
 # Token 快取（服務運行期間保持登入狀態）
+# 注意：無 thread lock，理論上並發時可能重複登入。
+# 家庭使用情境下發生機率極低，暫不處理。
 _cp_token = None
 _refresh_token = None
 
@@ -41,7 +43,7 @@ def login() -> bool:
             timeout=REQUEST_TIMEOUT,
         )
         data = resp.json()
-        _cp_token = data["CPToken"]
+        _cp_token = data["CPToken"]       # KeyError 會被下方 except 捕捉
         _refresh_token = data["RefreshToken"]
         return True
     except Exception as e:
@@ -60,7 +62,7 @@ def refresh_token() -> bool:
             timeout=REQUEST_TIMEOUT,
         )
         data = resp.json()
-        _cp_token = data["CPToken"]
+        _cp_token = data["CPToken"]       # KeyError 會被下方 except 捕捉
         _refresh_token = data["RefreshToken"]
         return True
     except Exception as e:

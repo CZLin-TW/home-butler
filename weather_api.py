@@ -140,7 +140,7 @@ def _get_value(period):
                  "ProbabilityOfPrecipitation", "WeatherDescription"]:
         if key in v:
             return v[key]
-    return list(v.values())[0] if v else None
+    return list(v.values())[0] if v else None  # v 為空字典時 if v 為 False，不會 IndexError
 
 
 def _collect_day(time_series, target_date):

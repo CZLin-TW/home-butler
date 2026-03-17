@@ -33,6 +33,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 TZ = pytz.timezone('Asia/Taipei')
 
+# !! 禁止擅自修改 SYSTEM_PROMPT，任何調整請與使用者確認後再進行 !!
 SYSTEM_PROMPT = """你是家庭專屬管家，管理食品庫存、待辦事項和智能居家設備。
 語氣有禮簡潔，帶管家從容感，適度用 emoji（🥛📋🌡️❄️ 等）但不過度。查詢時主動補充貼心提醒。
 
@@ -403,7 +404,7 @@ def handle_delete(data, ctx):
                 row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
             ])
             sheet.delete_rows(i + 2)
-            records.pop(i)
+            records.pop(i)  # 同步更新快取，確保同請求後續 action 看到正確狀態
             return f"✅ 已標記 {data.get('name')} 為已消耗"
     return f"❌ 找不到 {data.get('name')}"
 
@@ -420,7 +421,7 @@ def handle_modify(data, ctx):
                     row.get("過期日"), row.get("新增日"), row.get("新增者"), "已消耗"
                 ])
                 sheet.delete_rows(i + 2)
-                records.pop(i)
+                records.pop(i)  # 同步更新快取，確保同請求後續 action 看到正確狀態
                 return f"✅ {data.get('name')} 已全部消耗"
             # 逐欄更新
             if data.get("name_new"):
@@ -457,7 +458,6 @@ def handle_add_todo(data, user_name, ctx):
     time_str = data.get("time", "")
     time_part = f" {time_str}" if time_str else ""
     type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
-    # 指派給別人時，通知對方
     # 指派給別人時，通知對方（背景執行）
     if person != user_name:
         def _notify():
@@ -502,7 +502,7 @@ def handle_delete_todo(data, ctx):
                 row.get("負責人"), "已完成", row.get("類型")
             ])
             sheet.delete_rows(i + 2)
-            records.pop(i)
+            records.pop(i)  # 同步更新快取，確保同請求後續 action 看到正確狀態
             return f"✅ 已標記「{data.get('item')}」為已完成"
     return f"❌ 找不到「{data.get('item')}」"
 
@@ -838,10 +838,9 @@ async def notify():
                     todo_public.append(label)
 
         # ── 組合並推播 ──
-        has_content = expired or soon or this_week or sensor_lines or weather_text or todo_public or todo_private
-
-        if has_content:
-            for member in members:
+        # 注意：Notion 行事曆是 per-member 在迴圈內才查，無法在此預判。
+        # 因此不做全域 has_content 檢查，靠每位成員的 if not data_parts 來跳過。
+        for member in members:
                 if member.get("狀態") != "啟用":
                     continue
                 user_id = member.get("Line User ID")
@@ -961,7 +960,7 @@ async def notify_realtime():
         today = now.date()
         window_start = now
         window_end = now + timedelta(minutes=20)
-        is_near_hour = now.minute <= 4 or now.minute >= 55
+        is_near_hour = now.minute <= 4 or now.minute >= 55  # 整點前後 5 分鐘內（XX:55~XX:04）
 
         ctx = RequestContext()
         ctx.load()
@@ -1159,8 +1158,10 @@ def handle_message(event):
                         pass
 
                 has_error = any("❌" in r for r in results if r)
-                realtime_actions = {"query_devices", "query_dehumidifier"}
-                has_realtime = any(d.get("action") in realtime_actions for d in actions)
+                # raw_actions：直接回傳原始資料，不再交給 Claude 二次整理
+                raw_actions = {"query_devices", "query_dehumidifier"}
+                has_realtime = any(d.get("action") in raw_actions for d in actions)
+                # semantic_actions：回傳原始資料後，交給 Claude 整理成自然語言回覆
                 semantic_actions = {"query_weather", "query_sensor", "query_food", "query_todo"}
                 has_semantic = any(d.get("action") in semantic_actions for d in actions)
 
