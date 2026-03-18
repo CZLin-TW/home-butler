@@ -58,7 +58,7 @@ action 定義：
 - modify_todo：item, 只填要改的欄位(item_new/date/time/person/type)
 - delete_todo：item
 - query_todo：無參數
-- control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。唯一一台空調時可省略 device_name
+- control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。未指定溫度時：heat 預設 24 度，其餘預設 27 度。唯一一台空調時可省略 device_name
 - query_sensor：device_name。唯一感應器時可省略
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）。唯一設備時可省略 device_name
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on。唯一除濕機時可省略 device_name
@@ -92,7 +92,7 @@ action 定義：
 {{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25 🥛"}}
 {{"actions": [{{"action": "query_food"}}], "reply": "目前庫存如下：\\n🥛 鮮奶 1瓶（3/23）\\n🍰 草莓生乳捲 1個（3/17）\\n\\n⚠️ 草莓生乳捲後天到期，建議盡快享用！"}}
 {{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00"}}], "reply": "好的，4/24 下午 2 點看牙醫已記下 🦷"}}
-{{"actions": [{{"action": "control_ac", "device_name": "客廳空調", "power": "on", "temperature": 26}}], "reply": "好的，空調已開啟，26 度 ❄️"}}
+{{"actions": [{{"action": "control_ac", "device_name": "客廳空調", "power": "on", "temperature": 27}}], "reply": "好的，空調已開啟，27 度 ❄️"}}
 {{"actions": [{{"action": "query_weather", "date": "2026-03-22", "location": "臺北市信義區"}}], "reply": "為您查詢臺北信義區週六天氣。"}}
 {{"actions": [{{"action": "control_ac", "device_name": "客廳空調", "power": "on", "temperature": 26}}, {{"action": "control_ir", "device_name": "電風扇", "button": "開"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"temperature": 27}}, "trigger_time": "2026-03-19 22:30"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"power": "off"}}, "trigger_time": "2026-03-20 08:00"}}, {{"action": "add_schedule", "device_name": "電風扇", "target_action": "control_ir", "params": {{"button": "關"}}, "trigger_time": "2026-03-20 08:00"}}], "reply": "好的，空調已開 26 度，電風扇已開 🌀\n⏰ 排程已設定：\n• 22:30 空調調 27 度\n• 明早 8:00 空調和電風扇一起關"}}
 {{"actions": [{{"action": "set_style", "style": "回覆簡短，多用 emoji，語氣活潑"}}], "reply": "好的，以後我會更活潑一點！😆"}}
@@ -616,8 +616,8 @@ def handle_control_ac(data, ctx):
     if power == "off":
         result = switchbot_api.ac_turn_off(device_id)
     else:
-        temperature = int(data.get("temperature", 26))
         mode_str = data.get("mode", "cool")
+        temperature = int(data.get("temperature", 24 if mode_str == "heat" else 27))
         fan_str = data.get("fan_speed", "auto")
         mode = switchbot_api.AC_MODE_MAP.get(mode_str, 2)
         fan = switchbot_api.AC_FAN_MAP.get(fan_str, 1)
