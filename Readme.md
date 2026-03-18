@@ -30,7 +30,7 @@
 | 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 今日天氣（含體感溫度） |
 | 即時提醒 | 每 15 分鐘檢查即將到來的待辦 |
 | 晚間天氣 | 晚上推播明日天氣，提醒溫差變化 |
-| 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），空調自動追加安全關機 |
+| 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 
@@ -43,7 +43,7 @@
 |------|------|------|
 | [LINE Developers](https://developers.line.biz/) | Messaging API Bot | 免費 |
 | [Google Cloud](https://console.cloud.google.com/) | Sheets API + Drive API（Service Account） | 免費 |
-| [Google Sheets](https://sheets.google.com/) | 資料庫（食品、待辦、設備、對話紀錄） | 免費 |
+| [Google Sheets](https://sheets.google.com/) | 資料庫（食品、待辦、設備、對話、排程） | 免費 |
 | [Google Apps Script](https://script.google.com/) | 排程觸發推播 | 免費 |
 | [Render.com](https://render.com/) | Python FastAPI Server 部署 | 免費（Free Instance） |
 | [Anthropic](https://console.anthropic.com/) | Claude API（自然語言理解） | 按量計費（見下方） |
@@ -213,12 +213,8 @@ git push
 - 狀態值：啟用 / 停用
 - 稱謂例如「父親,老公,爸爸」（逗號分隔）
 - 管家風格：選填，自訂管家回覆風格（例如「回覆簡短，多用 emoji，語氣活潑」），空白則使用預設風格
-- Line User ID 取得方式：家人加好友後傳訊息，從「訊息紀錄」分頁複製（U 開頭）
+- Line User ID 取得方式：家人加好友後傳訊息，從「對話暫存」分頁複製（U 開頭）
 - Notion Database ID / Notion 篩選 / Google Calendar ID：選填，有填才整合（詳見下方說明）
-
-**訊息紀錄**
-| 時間 | 用戶ID | 訊息 |
-|------|--------|------|
 
 **對話暫存**
 | Line User ID | 角色 | 內容 | 時間 |
@@ -243,17 +239,16 @@ git push
 - SwitchBot Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
 
 **排程指令**
-| 設備名稱 | 動作 | 參數 | 觸發時間 | 類別 | 建立者 | 建立時間 | 狀態 |
-|---------|------|------|---------|------|--------|---------|------|
+| 設備名稱 | 動作 | 參數 | 觸發時間 | 建立者 | 建立時間 | 狀態 |
+|---------|------|------|---------|--------|---------|------|
 - 動作值：control_ac / control_ir / control_dehumidifier
 - 參數：JSON 字串（例如 `{"temperature":27,"power":"on"}`）
-- 類別值：user（使用者建立）/ system（進階自動產生）
-- 狀態值：待執行 / 已執行 / 已取消
+- 狀態值：待執行 / 已執行 / 已過期 / 已取消
 
 **排程封存**
-| 設備名稱 | 動作 | 參數 | 觸發時間 | 類別 | 建立者 | 建立時間 | 狀態 |
-|---------|------|------|---------|------|--------|---------|------|
-- 已執行和已取消的排程自動移至此分頁，Claude 不會讀取
+| 設備名稱 | 動作 | 參數 | 觸發時間 | 建立者 | 建立時間 | 狀態 |
+|---------|------|------|---------|--------|---------|------|
+- 設備所有排程完成後統一移至此分頁，Claude 不會讀取
 
 ---
 
@@ -411,7 +406,7 @@ function sendWeatherNotification() {
 每位家庭成員：
 1. 掃 QR Code 加管家好友
 2. 傳任何一則訊息
-3. 從「訊息紀錄」分頁複製 User ID（U 開頭）
+3. 從「對話暫存」分頁複製 User ID（U 開頭）
 4. 填入「家庭成員」分頁
 
 ---
@@ -506,7 +501,7 @@ function sendWeatherNotification() {
 | delete_schedule | 取消排程（移至封存） | device_name，選填：trigger_time, all |
 | query_schedule | 查詢目前所有待執行排程 | 無 |
 
-排程由 `notify_realtime`（GAS 每 15 分鐘觸發）負責執行，精準度約 15 分鐘。空調排程最後一筆為開啟狀態時，系統自動追加 8 小時後關機（system 類別）。
+排程由 `notify_realtime`（GAS 每 15 分鐘觸發）負責執行，精準度約 15 分鐘。觸發時間超過 2 小時未執行的排程自動標記為已過期。設備所有排程完成後統一通知建立者（含執行結果與設備目前狀態）。
 
 ### 風格
 
@@ -533,7 +528,7 @@ function sendWeatherNotification() {
 | 設備列表、除濕機狀態 | 程式的即時數據結果 |
 | 設備控制成功 | Claude 的 reply |
 | 排程操作（新增、取消、查詢） | Claude 的 reply |
-| 排程自動執行 | notify_realtime 靜默執行，不推播 |
+| 排程自動執行 | notify_realtime 執行，設備排程全部完成時通知建立者 |
 | 設備控制失敗（❌） | 程式的實際錯誤訊息 |
 | 廣播（@all） | 直接轉發，不經 Claude |
 | 指派待辦給他人 | Claude 的 reply + 自動推送通知給被指派者 |
@@ -613,7 +608,7 @@ function sendWeatherNotification() {
 
 - **Google Sheets 批次讀取**：RequestContext 使用 values_batch_get 一次讀取所有分頁，取代原本多次個別 API 呼叫
 - **Google Sheets 快取**：get_sheet() 快取已認證的 spreadsheet 物件 60 秒，避免每次都重新 OAuth
-- **背景寫入**：log_message（訊息紀錄）和 save_conversation（對話暫存）在背景 thread 執行
+- **背景寫入**：save_conversation（對話暫存）在背景 thread 執行
 - **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
 - **精簡 SYSTEM_PROMPT**：減少 token 數，加速 Claude 回應
 - **SSL 驗證關閉**：氣象署 API 的 SSL 憑證有已知問題，使用 `verify=False` 繞過

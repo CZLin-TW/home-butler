@@ -332,16 +332,6 @@ def get_all_devices_by_type(device_type, ctx):
 # 對話紀錄（讀取用 ctx，寫入用 worksheet）
 # ══════════════════════════════════════════
 
-def log_message(user_id, message):
-    def _log():
-        try:
-            sheet = get_sheet("訊息紀錄")
-            now = now_taipei().strftime("%Y-%m-%d %H:%M:%S")
-            sheet.append_row([now, user_id, message])
-        except Exception as e:
-            print(f"[LOG ERROR] {e}")
-    threading.Thread(target=_log, daemon=True).start()
-
 def save_conversation(user_id, role, content):
     try:
         sheet = get_sheet("對話暫存")
@@ -1291,7 +1281,7 @@ def handle_message(event):
 
     try:
         print(f"[1] user_id={user_id}, text={text}")
-        log_message(user_id, text)
+
         
         # 廣播功能
         if text.strip().startswith("@all"):
