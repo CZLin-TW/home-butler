@@ -8,7 +8,7 @@
 
 核心理念：
 - **零學習門檻**：LINE 是台灣人每天在用的工具，不需要另外裝 App 或學新介面
-- **全自然語言**：說「牛奶快沒了」「明天台北會下雨嗎」「開冷氣 24 度」就行，不需要記指令格式
+- **全自然語言**：說「牛奶快沒了」「明天台北會下雨嗎」「開空調 24 度」就行，不需要記指令格式
 - **主動提醒**：食品快過期會催你、待辦到時間會提醒、天氣要變冷會通知
 - **零供應商鎖定**：資料存在 Google Sheets，完全透明可查看，隨時可以搬走
 - **全架構透明**：不是黑盒子，每一層怎麼運作都清楚，壞了自己也能修
@@ -21,7 +21,7 @@
 | 食品庫存管理 | 新增、查詢、消耗、修改（品名/數量/單位/過期日），到期前自動提醒 |
 | 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
 | 外部行事曆整合 | Notion 行事曆唯讀整合，查待辦時自動合併顯示（支援 Sheet 自訂篩選條件） |
-| 冷氣控制 | 開關、溫度、模式、風速（SwitchBot Hub IR） |
+| 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR） |
 | 除濕機控制 | 開關、模式、目標濕度（Panasonic Smart App） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
 | 溫濕度查詢 | 即時讀取室內溫度與濕度 |
@@ -30,6 +30,7 @@
 | 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 今日天氣（含體感溫度） |
 | 即時提醒 | 每 15 分鐘檢查即將到來的待辦 |
 | 晚間天氣 | 晚上推播明日天氣，提醒溫差變化 |
+| 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），空調自動追加安全關機 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 
@@ -47,7 +48,7 @@
 | [Render.com](https://render.com/) | Python FastAPI Server 部署 | 免費（Free Instance） |
 | [Anthropic](https://console.anthropic.com/) | Claude API（自然語言理解） | 按量計費（見下方） |
 | [UptimeRobot](https://uptimerobot.com/) | 每 5 分鐘 ping 防止 Render 休眠 | 免費 |
-| [SwitchBot](https://www.switch-bot.com/) | 智能居家 API（冷氣 IR + 溫濕度） | 免費（需硬體） |
+| [SwitchBot](https://www.switch-bot.com/) | 智能居家 API（空調 IR + 溫濕度） | 免費（需硬體） |
 | [Panasonic Smart App](https://www.panasonic.com/tw/) | 除濕機控制 API | 免費（需硬體） |
 | [中央氣象署](https://opendata.cwa.gov.tw/) | 天氣預報開放資料 | 免費 |
 | [Notion](https://www.notion.so/) | 外部行事曆整合（唯讀） | 免費（需 Internal Integration） |
@@ -78,7 +79,7 @@
 - **Server**：Render.com（Python + FastAPI）
 - **排程**：Google Apps Script（每日推播 + 即時提醒 + 晚間天氣）
 - **防冷啟動**：UptimeRobot（每 5 分鐘 ping）
-- **智能居家**：SwitchBot API v1.1（冷氣 IR 控制 + Hub 溫濕度 + DIY IR 設備）
+- **智能居家**：SwitchBot API v1.1（空調 IR 控制 + Hub 溫濕度 + DIY IR 設備）
 - **除濕機**：Panasonic Smart App API（電源 / 模式 / 目標濕度控制）
 - **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報，含體感溫度）
 - **外部行事曆**：Notion API（唯讀，支援每人獨立篩選條件）
@@ -235,11 +236,24 @@ git push
 **智能居家**
 | 名稱 | 類型 | 位置 | Device ID | 狀態 | 按鈕 | Auth |
 |------|------|------|-----------|------|------|------|
-- 類型值：冷氣 / 感應器 / IR / 除濕機
+- 類型值：空調 / 感應器 / IR / 除濕機
 - 狀態值：啟用 / 停用
 - 按鈕欄：僅 IR 設備需要填寫，逗號分隔（例如「電源,風速+,風速-,擺頭」）
 - Auth 欄：僅 Panasonic 除濕機需要填寫
 - SwitchBot Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
+
+**排程指令**
+| 設備名稱 | 動作 | 參數 | 觸發時間 | 類別 | 建立者 | 建立時間 | 狀態 |
+|---------|------|------|---------|------|--------|---------|------|
+- 動作值：control_ac / control_ir / control_dehumidifier
+- 參數：JSON 字串（例如 `{"temperature":27,"power":"on"}`）
+- 類別值：user（使用者建立）/ system（進階自動產生）
+- 狀態值：待執行 / 已執行 / 已取消
+
+**排程封存**
+| 設備名稱 | 動作 | 參數 | 觸發時間 | 類別 | 建立者 | 建立時間 | 狀態 |
+|---------|------|------|---------|------|--------|---------|------|
+- 已執行和已取消的排程自動移至此分頁，Claude 不會讀取
 
 ---
 
@@ -277,7 +291,7 @@ git push
 4. 部署後瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices` 取得 Device ID
 5. 在 Google Sheets「智能居家」分頁填入設備資料
 
-冷氣（IR 虛擬設備）的 Device ID 通常是 `02-` 開頭，Hub 的 Device ID 是 MAC 地址格式。
+空調（IR 虛擬設備）的 Device ID 通常是 `02-` 開頭，Hub 的 Device ID 是 MAC 地址格式。
 
 DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指令，其他自訂按鈕使用 customize 模式，程式會自動判斷。
 
@@ -459,7 +473,7 @@ function sendWeatherNotification() {
 
 | action | 說明 | 欄位 |
 |--------|------|------|
-| control_ac | 控制冷氣（IR） | device_name，選填：power, temperature, mode, fan_speed |
+| control_ac | 控制空調（IR） | device_name，選填：power, temperature, mode, fan_speed |
 | control_ir | 控制 DIY IR 設備 | device_name, button（開/關自動轉 turnOn/turnOff） |
 | query_sensor | 查詢溫濕度感應器 | device_name |
 | query_devices | 列出所有已設定設備 | 無 |
@@ -483,6 +497,16 @@ function sendWeatherNotification() {
 - 訊息格式：`📢 發送者名稱：內容`
 - 廣播內容會存入每位收到者的對話暫存，Claude 可參考上下文
 - 不經過 Claude 解析，直接發送
+
+### 排程
+
+| action | 說明 | 欄位 |
+|--------|------|------|
+| add_schedule | 新增定時排程 | device_name（可唯一設備可省略）, target_action, params, trigger_time |
+| delete_schedule | 取消排程（移至封存） | device_name，選填：trigger_time, all |
+| query_schedule | 查詢目前所有待執行排程 | 無 |
+
+排程由 `notify_realtime`（GAS 每 15 分鐘觸發）負責執行，精準度約 15 分鐘。空調排程最後一筆為開啟狀態時，系統自動追加 8 小時後關機（system 類別）。
 
 ### 風格
 
@@ -508,6 +532,8 @@ function sendWeatherNotification() {
 | 溫濕度查詢 | 查感應器 API → 第二次 Claude 用管家語氣回覆 |
 | 設備列表、除濕機狀態 | 程式的即時數據結果 |
 | 設備控制成功 | Claude 的 reply |
+| 排程操作（新增、取消、查詢） | Claude 的 reply |
+| 排程自動執行 | notify_realtime 靜默執行，不推播 |
 | 設備控制失敗（❌） | 程式的實際錯誤訊息 |
 | 廣播（@all） | 直接轉發，不經 Claude |
 | 指派待辦給他人 | Claude 的 reply + 自動推送通知給被指派者 |
@@ -523,7 +549,7 @@ function sendWeatherNotification() {
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
 | 每日推播 | 早上 10 點 | 食品過期提醒 + 本週待辦 + 溫濕度 + 今日天氣（含體感溫度） |
-| 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 |
+| 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
 | 晚間天氣 | 晚上 9 點 | 明日天氣預報（含體感溫度與今天比較，Claude 可提醒溫差變化） |
 
 推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。
@@ -537,6 +563,7 @@ function sendWeatherNotification() {
 | 食品庫存 | delete_food 或 modify_food 數量歸零 | 食品封存 |
 | 待辦事項 | delete_todo | 待辦封存 |
 | 對話暫存 | 同一用戶超過 6 則（預設值，可調整） | 對話封存 |
+| 排程指令 | 排程執行完成或被取消 | 排程封存 |
 
 封存分頁 Claude 不會讀取，只作為歷史紀錄保存。
 
