@@ -84,7 +84,7 @@ action 定義：
 - 使用者要求延遲或定時操作家電時，即時指令用原 action，未來指令用 add_schedule
 - 多台同類型設備時，add_schedule 必須指定 device_name
 - 使用者對有排程的設備下即時指令時，在 reply 中提醒目前有哪些排程，詢問要保留還是取消
-- 空調排程最後一筆為開啟狀態時（power=on 或有設定溫度/模式），必須自動追加一筆 8 小時後關機的排程，並在 reply 中告知使用者
+- 純即時 control_ac 不需追加排程。只有使用者主動建立排程（add_schedule）時，若空調排程最後一筆為開啟狀態（power=on 或有設定溫度/模式），才追加一筆 8 小時後關機的排程，並在 reply 中告知
 - control_ac 開啟時，reply 必須告知實際溫度設定（含未指定時的預設值）
 - 「取消排程」「清除排程」等指令使用 delete_schedule
 
