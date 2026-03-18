@@ -84,7 +84,6 @@ action 定義：
 - 使用者要求延遲或定時操作家電時，即時指令用原 action，未來指令用 add_schedule
 - 多台同類型設備時，add_schedule 必須指定 device_name
 - 使用者對有排程的設備下即時指令時，在 reply 中提醒目前有哪些排程，詢問要保留還是取消
-- 純即時 control_ac 不需追加排程。只有使用者主動建立排程（add_schedule）時，若空調排程最後一筆為開啟狀態（power=on 或有設定溫度/模式），才追加一筆 8 小時後關機的排程，並在 reply 中告知
 - control_ac 開啟時，reply 必須告知實際溫度設定（含未指定時的預設值）
 - 「取消排程」「清除排程」等指令使用 delete_schedule
 
@@ -1159,8 +1158,14 @@ async def notify_realtime():
         schedule_records = ctx.get("排程指令")
         schedule_sheet = ctx.get_worksheet("排程指令")
         schedule_archive = ctx.get_worksheet("排程封存")
-        executed_indices = []
-        expired_indices = []
+        processed_devices = set()
+
+        # 找出狀態欄位的位置
+        header = schedule_sheet.row_values(1)
+        try:
+            status_col = header.index("狀態") + 1
+        except ValueError:
+            status_col = 7  # fallback
 
         for i, r in enumerate(schedule_records):
             if r.get("狀態") != "待執行":
@@ -1176,9 +1181,10 @@ async def notify_realtime():
             if trigger_dt <= now:
                 hours_late = (now - trigger_dt).total_seconds() / 3600
                 device_name = r.get("設備名稱", "")
+                processed_devices.add(device_name)
 
                 if hours_late > 2:
-                    expired_indices.append(i)
+                    schedule_sheet.update_cell(i + 2, status_col, "已過期")
                     print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
                 else:
                     action_type = r.get("動作", "")
@@ -1196,49 +1202,67 @@ async def notify_realtime():
                     elif action_type == "control_dehumidifier":
                         result = handle_control_dehumidifier(params, ctx)
 
+                    schedule_sheet.update_cell(i + 2, status_col, "已執行")
                     print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
-                    executed_indices.append(i)
 
-        # 封存已執行的排程（倒序刪除）
-        for i in sorted(executed_indices, reverse=True):
-            row = schedule_records[i]
-            schedule_archive.append_row([
-                row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                row.get("觸發時間"), row.get("建立者"),
-                row.get("建立時間"), "已執行"
-            ])
-            schedule_sheet.delete_rows(i + 2)
+        # 檢查有變動的設備是否還有待執行排程
+        if processed_devices:
+            updated_records = schedule_sheet.get_all_records()
 
-        # 封存已過期的排程 + 通知建立者（倒序刪除）
-        expired_by_creator = {}
-        for i in sorted(expired_indices, reverse=True):
-            row = schedule_records[i]
-            schedule_archive.append_row([
-                row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                row.get("觸發時間"), row.get("建立者"),
-                row.get("建立時間"), "已過期"
-            ])
-            schedule_sheet.delete_rows(i + 2)
+            for device_name in processed_devices:
+                device_records = [r for r in updated_records if r.get("設備名稱") == device_name]
+                if any(r.get("狀態") == "待執行" for r in device_records):
+                    continue  # 還有排程，不封存不通知
 
-            creator = row.get("建立者", "")
-            if creator:
-                if creator not in expired_by_creator:
-                    expired_by_creator[creator] = []
-                expired_by_creator[creator].append(
-                    f"• {row.get('設備名稱')} {_format_schedule_params(row.get('動作',''), row.get('參數',''))}（原訂 {row.get('觸發時間','')}）"
-                )
+                # 按觸發時間排序
+                device_records.sort(key=lambda r: r.get("觸發時間", ""))
+                executed = [r for r in device_records if r.get("狀態") == "已執行"]
+                expired = [r for r in device_records if r.get("狀態") == "已過期"]
 
-        # 推播過期通知給建立者
-        for creator, items in expired_by_creator.items():
-            for member in members:
-                if member.get("名稱") == creator and member.get("狀態") == "啟用":
-                    user_id = member.get("Line User ID")
-                    if user_id:
-                        msg = "⚠️ 以下排程因超時未執行已自動取消：\n" + "\n".join(items)
-                        line_bot_api.push_message(user_id, TextSendMessage(text=msg))
-                        save_conversation(user_id, "assistant", msg)
-                        cleanup_conversation(user_id)
-                    break
+                # 組通知訊息
+                parts = []
+                if executed:
+                    exec_texts = [_format_schedule_params(r.get("動作", ""), r.get("參數", "")) for r in executed]
+                    parts.append(f"✅ {device_name}：{'、'.join(exec_texts)} 已執行")
+                if expired:
+                    expired_lines = [f"• {_format_schedule_params(r.get('動作',''), r.get('參數',''))}（原訂 {r.get('觸發時間','')}）" for r in expired]
+                    parts.append(f"⚠️ {device_name} 以下排程因超時已取消：\n" + "\n".join(expired_lines))
+
+                last = device_records[-1]
+                if last.get("狀態") == "已過期" and executed:
+                    last_exec = executed[-1]
+                    parts.append(f"ℹ️ {device_name} 目前狀態為上次執行的：{_format_schedule_params(last_exec.get('動作',''), last_exec.get('參數',''))}")
+                elif last.get("狀態") == "已過期" and not executed:
+                    parts.append(f"ℹ️ {device_name} 所有排程皆未執行，設備狀態未變更")
+
+                parts.append(f"📋 {device_name} 的排程已全部完成。")
+
+                # 通知建立者
+                creators = set(r.get("建立者", "") for r in device_records if r.get("建立者"))
+                for creator in creators:
+                    for member in members:
+                        if member.get("名稱") == creator and member.get("狀態") == "啟用":
+                            user_id = member.get("Line User ID")
+                            if user_id:
+                                msg = "\n".join(parts)
+                                line_bot_api.push_message(user_id, TextSendMessage(text=msg))
+                                save_conversation(user_id, "assistant", msg)
+                                cleanup_conversation(user_id)
+                            break
+
+                # 封存該設備所有排程（倒序刪除）
+                final_records = schedule_sheet.get_all_records()
+                indices_to_archive = [
+                    (i, r) for i, r in enumerate(final_records)
+                    if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期")
+                ]
+                for i, row in sorted(indices_to_archive, key=lambda x: x[0], reverse=True):
+                    schedule_archive.append_row([
+                        row.get("設備名稱"), row.get("動作"), row.get("參數"),
+                        row.get("觸發時間"), row.get("建立者"),
+                        row.get("建立時間"), row.get("狀態")
+                    ])
+                    schedule_sheet.delete_rows(i + 2)
 
         return {"status": "ok"}
     except Exception as e:
