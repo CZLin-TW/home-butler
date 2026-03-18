@@ -83,11 +83,9 @@ action 定義：
 排程規則：
 - 使用者要求延遲或定時操作家電時，即時指令用原 action，未來指令用 add_schedule
 - 多台同類型設備時，add_schedule 必須指定 device_name
-- 使用者對有排程的設備下即時指令時：
-  - user 類別排程：在 reply 中提醒目前有哪些排程，詢問要保留還是取消
-  - system 類別排程：不提醒，直接產生 delete_schedule 刪除該設備所有 system 排程
-- 空調的排程應判斷最後一筆為開啟狀態時（power=on 或有設定溫度/模式），自動追加一筆 system 類別排程，8 小時後關機
-- system 進階僅針對空調（control_ac），除濕機與 IR 設備不加
+- 使用者對有排程的設備下即時指令時，在 reply 中提醒目前有哪些排程，詢問要保留還是取消
+- 空調排程最後一筆為開啟狀態時（power=on 或有設定溫度/模式），必須自動追加一筆 8 小時後關機的排程，並在 reply 中告知使用者
+- control_ac 開啟時，reply 必須告知實際溫度設定（含未指定時的預設值）
 - 「取消排程」「清除排程」等指令使用 delete_schedule
 
 範例：
@@ -302,8 +300,7 @@ def get_schedule_info(ctx):
             by_device[name] = []
         params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
         trigger = r.get("觸發時間", "")
-        category = r.get("類別", "user")
-        by_device[name].append(f"{params_text}（{trigger}, {category}）")
+        by_device[name].append(f"{params_text}（{trigger}）")
     lines = [f"{name}：{'、'.join(items)}" for name, items in by_device.items()]
     return "；".join(lines)
 
@@ -795,7 +792,7 @@ def handle_add_schedule(data, user_name, ctx):
 
     sheet.append_row([
         device_name, target_action, params, trigger_time,
-        "user", user_name, now, "待執行"
+        user_name, now, "待執行"
     ])
 
     return f"✅ 已新增排程：{device_name} {trigger_time}"
@@ -816,8 +813,6 @@ def handle_delete_schedule(data, ctx):
             continue
         if row.get("設備名稱") != device_name:
             continue
-        if row.get("類別") == "system":
-            continue
         if not delete_all and trigger_time and row.get("觸發時間") != trigger_time:
             continue
         indices_to_delete.append(i)
@@ -826,7 +821,7 @@ def handle_delete_schedule(data, ctx):
         row = records[i]
         archive.append_row([
             row.get("設備名稱"), row.get("動作"), row.get("參數"),
-            row.get("觸發時間"), row.get("類別"), row.get("建立者"),
+            row.get("觸發時間"), row.get("建立者"),
             row.get("建立時間"), "已取消"
         ])
         sheet.delete_rows(i + 2)
@@ -843,90 +838,9 @@ def handle_query_schedule(ctx):
         return "目前沒有排程"
     lines = []
     for r in schedules:
-        category_label = "🔧" if r.get("類別") == "system" else "👤"
         params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
-        lines.append(f"• {category_label} {r['設備名稱']}｜{params_text}｜{r['觸發時間']}")
+        lines.append(f"• {r['設備名稱']}｜{params_text}｜{r['觸發時間']}")
     return "排程列表：\n" + "\n".join(lines)
-
-def _delete_system_schedules(device_name, ctx):
-    """刪除指定設備的所有 system 類別排程"""
-    sheet = ctx.get_worksheet("排程指令")
-    archive = ctx.get_worksheet("排程封存")
-    records = ctx.get("排程指令")
-    indices = []
-    for i, row in enumerate(records):
-        if (row.get("狀態") == "待執行" and
-            row.get("設備名稱") == device_name and
-            row.get("類別") == "system"):
-            indices.append(i)
-    for i in sorted(indices, reverse=True):
-        row = records[i]
-        archive.append_row([
-            row.get("設備名稱"), row.get("動作"), row.get("參數"),
-            row.get("觸發時間"), row.get("類別"), row.get("建立者"),
-            row.get("建立時間"), "已取消"
-        ])
-        sheet.delete_rows(i + 2)
-        records.pop(i)
-
-def check_ac_safety_schedule(actions, ctx):
-    """
-    檢查這次的 actions 中涉及的空調設備，
-    如果最後一筆 user 排程為開啟狀態，追加 8 小時進階。
-    """
-    ac_devices = set()
-    for data in actions:
-        if data.get("action") == "add_schedule" and data.get("target_action") == "control_ac":
-            ac_devices.add(data.get("device_name", ""))
-
-    if not ac_devices:
-        return
-
-    records = ctx.get("排程指令")
-    now = now_taipei().strftime("%Y-%m-%d %H:%M")
-
-    for device_name in ac_devices:
-        if not device_name:
-            continue
-
-        _delete_system_schedules(device_name, ctx)
-
-        # 重新讀取 records（_delete_system_schedules 可能已修改）
-        records = ctx.get("排程指令")
-
-        user_schedules = [
-            r for r in records
-            if r.get("狀態") == "待執行"
-            and r.get("設備名稱") == device_name
-            and r.get("類別") == "user"
-        ]
-        user_schedules.sort(key=lambda r: r.get("觸發時間", ""))
-
-        if not user_schedules:
-            continue
-
-        last = user_schedules[-1]
-        try:
-            last_params = json.loads(last.get("參數", "{}"))
-        except json.JSONDecodeError:
-            continue
-
-        is_on = last_params.get("power") == "on" or "temperature" in last_params or "mode" in last_params
-        is_off = last_params.get("power") == "off"
-
-        if is_on and not is_off:
-            try:
-                trigger_dt = datetime.strptime(last.get("觸發時間", ""), "%Y-%m-%d %H:%M")
-                safety_time = (trigger_dt + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
-                sheet = ctx.get_worksheet("排程指令")
-                sheet.append_row([
-                    device_name, "control_ac",
-                    json.dumps({"power": "off"}, ensure_ascii=False),
-                    safety_time, "system", "系統", now, "待執行"
-                ])
-                print(f"[AC SAFETY] {device_name} 追加進階：{safety_time}")
-            except Exception as e:
-                print(f"[AC SAFETY ERROR] {e}")
 
 
 # ══════════════════════════════════════════
@@ -1290,7 +1204,7 @@ async def notify_realtime():
             row = schedule_records[i]
             schedule_archive.append_row([
                 row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                row.get("觸發時間"), row.get("類別"), row.get("建立者"),
+                row.get("觸發時間"), row.get("建立者"),
                 row.get("建立時間"), "已執行"
             ])
             schedule_sheet.delete_rows(i + 2)
@@ -1301,13 +1215,13 @@ async def notify_realtime():
             row = schedule_records[i]
             schedule_archive.append_row([
                 row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                row.get("觸發時間"), row.get("類別"), row.get("建立者"),
+                row.get("觸發時間"), row.get("建立者"),
                 row.get("建立時間"), "已過期"
             ])
             schedule_sheet.delete_rows(i + 2)
 
             creator = row.get("建立者", "")
-            if creator and creator != "系統":
+            if creator:
                 if creator not in expired_by_creator:
                     expired_by_creator[creator] = []
                 expired_by_creator[creator].append(
@@ -1488,9 +1402,6 @@ def handle_message(event):
                         results.append(handle_set_style(data, user_name, ctx))
                     elif action == "unclear":
                         pass
-
-                # 排程安全檢查：空調排程自動追加進階關機
-                check_ac_safety_schedule(actions, ctx)
 
                 has_error = any("❌" in r for r in results if r)
                 raw_actions = {"query_devices", "query_dehumidifier"}
