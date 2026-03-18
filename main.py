@@ -265,6 +265,31 @@ def get_ir_device_info(ctx):
     lines = [f"{r['名稱']}：可用按鈕為 {r['按鈕']}" for r in ir_devices]
     return "；".join(lines)
 
+def _format_schedule_params(_action_type, params_str):
+    """將排程參數 JSON 轉為人類可讀文字"""
+    try:
+        params = json.loads(params_str) if isinstance(params_str, str) else params_str
+    except (json.JSONDecodeError, TypeError):
+        return params_str
+
+    parts = []
+    if params.get("power") == "off":
+        return "關機"
+    if params.get("power") == "on":
+        parts.append("開機")
+    if "temperature" in params:
+        parts.append(f"{params['temperature']}度")
+    if "mode" in params:
+        parts.append(f"模式:{params['mode']}")
+    if "fan_speed" in params:
+        parts.append(f"風速:{params['fan_speed']}")
+    if "button" in params:
+        return params["button"]
+    if "humidity" in params:
+        parts.append(f"濕度{params['humidity']}%")
+
+    return " ".join(parts) if parts else params_str
+
 def get_schedule_info(ctx):
     """取得排程資訊，注入 system prompt"""
     schedules = [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
@@ -275,10 +300,10 @@ def get_schedule_info(ctx):
         name = r.get("設備名稱", "")
         if name not in by_device:
             by_device[name] = []
-        params = r.get("參數", "")
+        params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
         trigger = r.get("觸發時間", "")
         category = r.get("類別", "user")
-        by_device[name].append(f"{params}（{trigger}, {category}）")
+        by_device[name].append(f"{params_text}（{trigger}, {category}）")
     lines = [f"{name}：{'、'.join(items)}" for name, items in by_device.items()]
     return "；".join(lines)
 
@@ -819,7 +844,8 @@ def handle_query_schedule(ctx):
     lines = []
     for r in schedules:
         category_label = "🔧" if r.get("類別") == "system" else "👤"
-        lines.append(f"• {category_label} {r['設備名稱']}｜{r['參數']}｜{r['觸發時間']}")
+        params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
+        lines.append(f"• {category_label} {r['設備名稱']}｜{params_text}｜{r['觸發時間']}")
     return "排程列表：\n" + "\n".join(lines)
 
 def _delete_system_schedules(device_name, ctx):
@@ -1220,6 +1246,7 @@ async def notify_realtime():
         schedule_sheet = ctx.get_worksheet("排程指令")
         schedule_archive = ctx.get_worksheet("排程封存")
         executed_indices = []
+        expired_indices = []
 
         for i, r in enumerate(schedule_records):
             if r.get("狀態") != "待執行":
@@ -1233,25 +1260,32 @@ async def notify_realtime():
                 continue
 
             if trigger_dt <= now:
-                action_type = r.get("動作", "")
-                try:
-                    params = json.loads(r.get("參數", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    params = {}
+                hours_late = (now - trigger_dt).total_seconds() / 3600
                 device_name = r.get("設備名稱", "")
-                params["device_name"] = device_name
 
-                result = ""
-                if action_type == "control_ac":
-                    result = handle_control_ac(params, ctx)
-                elif action_type == "control_ir":
-                    result = handle_control_ir(params, ctx)
-                elif action_type == "control_dehumidifier":
-                    result = handle_control_dehumidifier(params, ctx)
+                if hours_late > 2:
+                    expired_indices.append(i)
+                    print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
+                else:
+                    action_type = r.get("動作", "")
+                    try:
+                        params = json.loads(r.get("參數", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        params = {}
+                    params["device_name"] = device_name
 
-                print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
-                executed_indices.append(i)
+                    result = ""
+                    if action_type == "control_ac":
+                        result = handle_control_ac(params, ctx)
+                    elif action_type == "control_ir":
+                        result = handle_control_ir(params, ctx)
+                    elif action_type == "control_dehumidifier":
+                        result = handle_control_dehumidifier(params, ctx)
 
+                    print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
+                    executed_indices.append(i)
+
+        # 封存已執行的排程（倒序刪除）
         for i in sorted(executed_indices, reverse=True):
             row = schedule_records[i]
             schedule_archive.append_row([
@@ -1260,6 +1294,37 @@ async def notify_realtime():
                 row.get("建立時間"), "已執行"
             ])
             schedule_sheet.delete_rows(i + 2)
+
+        # 封存已過期的排程 + 通知建立者（倒序刪除）
+        expired_by_creator = {}
+        for i in sorted(expired_indices, reverse=True):
+            row = schedule_records[i]
+            schedule_archive.append_row([
+                row.get("設備名稱"), row.get("動作"), row.get("參數"),
+                row.get("觸發時間"), row.get("類別"), row.get("建立者"),
+                row.get("建立時間"), "已過期"
+            ])
+            schedule_sheet.delete_rows(i + 2)
+
+            creator = row.get("建立者", "")
+            if creator and creator != "系統":
+                if creator not in expired_by_creator:
+                    expired_by_creator[creator] = []
+                expired_by_creator[creator].append(
+                    f"• {row.get('設備名稱')} {_format_schedule_params(row.get('動作',''), row.get('參數',''))}（原訂 {row.get('觸發時間','')}）"
+                )
+
+        # 推播過期通知給建立者
+        for creator, items in expired_by_creator.items():
+            for member in members:
+                if member.get("名稱") == creator and member.get("狀態") == "啟用":
+                    user_id = member.get("Line User ID")
+                    if user_id:
+                        msg = "⚠️ 以下排程因超時未執行已自動取消：\n" + "\n".join(items)
+                        line_bot_api.push_message(user_id, TextSendMessage(text=msg))
+                        save_conversation(user_id, "assistant", msg)
+                        cleanup_conversation(user_id)
+                    break
 
         return {"status": "ok"}
     except Exception as e:
