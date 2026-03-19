@@ -516,7 +516,7 @@ def handle_add_todo(data, user_name, ctx):
         threading.Thread(target=_notify, daemon=True).start()
     return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
 
-def handle_modify_todo(data, ctx):
+def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     records = ctx.get("待辦事項")
     for i, row in enumerate(records):
@@ -531,6 +531,19 @@ def handle_modify_todo(data, ctx):
                 sheet.update_cell(i + 2, 4, data.get("person"))
             if data.get("type"):
                 sheet.update_cell(i + 2, 6, data.get("type"))
+            new_person = data.get("person")
+            if new_person and new_person != row.get("負責人") and new_person != user_name:
+                def _notify(person=new_person, item=data.get("item_new") or data.get("item"), date_str=data.get("date") or row.get("日期")):
+                    for member in ctx.get("家庭成員"):
+                        if member.get("名稱") == person and member.get("狀態") == "啟用":
+                            mid = member.get("Line User ID")
+                            if mid:
+                                notify_text = f"📋 {user_name} 將一項待辦指派給你：\n{item}（{date_str}）"
+                                line_bot_api.push_message(mid, TextSendMessage(text=notify_text))
+                                save_conversation(mid, "assistant", notify_text)
+                                cleanup_conversation(mid)
+                            break
+                threading.Thread(target=_notify, daemon=True).start()
             return f"✅ 已更新「{data.get('item')}」"
     return f"❌ 找不到「{data.get('item')}」"
 
@@ -1387,7 +1400,7 @@ def handle_message(event):
                     elif action == "add_todo":
                         results.append(handle_add_todo(data, user_name, ctx))
                     elif action == "modify_todo":
-                        results.append(handle_modify_todo(data, ctx))
+                        results.append(handle_modify_todo(data, user_name, ctx))
                     elif action == "delete_todo":
                         results.append(handle_delete_todo(data, ctx))
                     elif action == "query_todo":
