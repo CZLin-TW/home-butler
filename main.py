@@ -75,7 +75,7 @@ action 定義：
 - 可一次多個 action
 - 有上下文先推斷，真的模糊才用 unclear 反問
 - modify_todo 不要用 delete+add 替代
-- 外部行事曆（Notion、Google Calendar 等）是唯讀，無法用 delete_todo 標記完成，請使用者到原本的日曆上更新
+- [唯讀] 開頭的待辦項目來自外部行事曆，無法用 delete_todo 或 modify_todo 操作，請告知使用者到原本的日曆上更新
 - 使用者要求調整回覆風格、語氣、說話方式、角色扮演時，使用 set_style action，不要直接用新風格回覆
 - set_style 時，將目前風格與新需求整合成一段精簡描述（改寫成正向具體的指令，不要照搬原話）；若訊息語意不完整或像打到一半就送出，務必用 unclear 反問，絕不猜測存入
 - IR 設備（類型為 IR）沒有狀態回饋，開/關是 toggle 訊號，重複送會反轉狀態。僅在使用者明確要求時才送 control_ir 指令
@@ -200,6 +200,10 @@ class RequestContext:
             self.load()
         return self._records.get(sheet_name, [])
     
+    def set(self, sheet_name, records):
+        """手動更新快取（例如 sync 後重新讀取）"""
+        self._records[sheet_name] = records
+    
     def get_worksheet(self, name):
         if name not in self._worksheets:
             ss = _get_spreadsheet()
@@ -239,7 +243,12 @@ def get_current_todo(ctx):
     for r in valid:
         time_part = f" {r['時間']}" if r.get("時間") else ""
         type_part = "（私人）" if r.get("類型") == "私人" else "（公開）"
-        lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
+        # 唯讀項目加 [唯讀] 前綴
+        prop = str(r.get("屬性", "")).strip()
+        if prop == "唯讀":
+            lines.append(f"[唯讀] {r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
+        else:
+            lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
     return "、".join(lines)
 
 def get_device_info(ctx):
@@ -326,6 +335,100 @@ def get_device_auth_by_name(device_name, ctx):
 
 def get_all_devices_by_type(device_type, ctx):
     return [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用" and r.get("類型") == device_type]
+
+
+# ══════════════════════════════════════════
+# 外部行事曆同步
+# ══════════════════════════════════════════
+
+def sync_external_events(ctx):
+    """
+    同步外部行事曆到待辦事項 Sheet：
+    1. 刪掉所有來源≠本地的項目
+    2. 拉 Notion API 寫入新事件
+    3. 更新 ctx 快取
+    """
+    try:
+        sheet = ctx.get_worksheet("待辦事項")
+        records = ctx.get("待辦事項")
+
+        # 1. 找出所有外部項目的行號（從下往上刪）
+        external_indices = []
+        for i, row in enumerate(records):
+            source = str(row.get("來源", "")).strip()
+            if source and source != "本地":
+                external_indices.append(i)
+
+        for i in sorted(external_indices, reverse=True):
+            sheet.delete_rows(i + 2)
+            records.pop(i)
+
+        if external_indices:
+            print(f"[SYNC] 已刪除 {len(external_indices)} 筆外部行事曆快取")
+
+        # 2. 遍歷成員，拉 Notion 事件寫入
+        members = ctx.get("家庭成員")
+        new_rows = []
+
+        for member in members:
+            if member.get("狀態") != "啟用":
+                continue
+            db_id = str(member.get("Notion Database ID", "")).strip()
+            if not db_id:
+                continue
+
+            member_name = member.get("名稱", "")
+            filters = str(member.get("Notion 篩選", "")).strip()
+            permission = str(member.get("Notion 權限", "唯讀")).strip()
+
+            events = notion_api.get_upcoming_events(db_id, filters)
+            if not events:
+                continue
+
+            for item in events:
+                name = item.get("Event", "")
+                if not name:
+                    continue
+
+                date_val = item.get("Date", {})
+                if not isinstance(date_val, dict):
+                    continue
+
+                start_str = date_val.get("start", "")
+                if not start_str:
+                    continue
+
+                # 拆日期和時間
+                if "T" in start_str:
+                    try:
+                        dt = datetime.fromisoformat(start_str)
+                        date_part = dt.strftime("%Y-%m-%d")
+                        time_part = dt.strftime("%H:%M")
+                    except (ValueError, TypeError):
+                        date_part = start_str[:10]
+                        time_part = ""
+                else:
+                    date_part = start_str
+                    time_part = ""
+
+                new_row = [name, date_part, time_part, member_name, "待辦", "公開", "Notion", permission]
+                new_rows.append(new_row)
+                records.append({
+                    "事項": name, "日期": date_part, "時間": time_part,
+                    "負責人": member_name, "狀態": "待辦", "類型": "公開",
+                    "來源": "Notion", "屬性": permission
+                })
+
+        if new_rows:
+            # 批次寫入所有新行
+            sheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            print(f"[SYNC] 已寫入 {len(new_rows)} 筆外部行事曆事件")
+
+        # 3. 更新 ctx 快取
+        ctx.set("待辦事項", records)
+
+    except Exception as e:
+        print(f"[SYNC ERROR] {e}")
 
 
 # ══════════════════════════════════════════
@@ -496,7 +599,9 @@ def handle_add_todo(data, user_name, ctx):
         data.get("time", ""),
         person,
         "待辦",
-        todo_type
+        todo_type,
+        "本地",
+        "讀寫"
     ])
     date_str = data.get("date", "")
     time_str = data.get("time", "")
@@ -521,6 +626,10 @@ def handle_modify_todo(data, user_name, ctx):
     records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
+            # 檢查屬性：唯讀項目不可修改
+            prop = str(row.get("屬性", "")).strip()
+            if prop == "唯讀":
+                return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
             if data.get("item_new"):
                 sheet.update_cell(i + 2, 1, data.get("item_new"))
             if data.get("date"):
@@ -553,6 +662,10 @@ def handle_delete_todo(data, ctx):
     records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
+            # 檢查屬性：唯讀項目不可刪除
+            prop = str(row.get("屬性", "")).strip()
+            if prop == "唯讀":
+                return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
             archive.append_row([
                 row.get("事項"), row.get("日期"), row.get("時間"),
                 row.get("負責人"), "已完成", row.get("類型")
@@ -563,6 +676,9 @@ def handle_delete_todo(data, ctx):
     return f"❌ 找不到「{data.get('item')}」"
 
 def handle_query_todo(user_name, ctx):
+    # 先同步外部行事曆到 Sheet
+    sync_external_events(ctx)
+
     valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
     lines = []
     for r in valid:
@@ -571,30 +687,17 @@ def handle_query_todo(user_name, ctx):
         if todo_type == "私人" and person != user_name:
             continue
         time_part = f" {r['時間']}" if r.get("時間") else ""
-        lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
+        # 唯讀項目加 [唯讀] 前綴
+        prop = str(r.get("屬性", "")).strip()
+        if prop == "唯讀":
+            lines.append(f"• [唯讀] {r['事項']}（{r['日期']}{time_part}）")
+        else:
+            lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
 
-    notion_text = ""
-    for member in ctx.get("家庭成員"):
-        if member.get("名稱") == user_name and member.get("狀態") == "啟用":
-            print(f"[NOTION DEBUG] member keys: {list(member.keys())}, db_id: {member.get('Notion Database ID', 'NOT FOUND')}")
-            db_id = str(member.get("Notion Database ID", "")).strip()
-            filters = str(member.get("Notion 篩選", "")).strip()
-            print(f"[NOTION DEBUG] filters: {repr(filters)}")
-            if db_id:
-                events = notion_api.get_upcoming_events(db_id, filters)
-                if events:
-                    notion_text = "\n\nNotion 行事曆：\n" + notion_api.format_events_for_claude(events)
-            break
-
-    if not lines and not notion_text:
+    if not lines:
         return "目前沒有待辦事項"
 
-    result = ""
-    if lines:
-        result = "待辦事項：\n" + "\n".join(lines)
-    if notion_text:
-        result += notion_text
-    return result
+    return "待辦事項：\n" + "\n".join(lines)
 
 
 # ── 智能居家 handlers ──
@@ -906,6 +1009,9 @@ async def notify():
         ctx = RequestContext()
         ctx.load()
 
+        # 同步外部行事曆
+        sync_external_events(ctx)
+
         today = now_taipei().date()
 
         expired = []
@@ -954,6 +1060,7 @@ async def notify():
         except Exception as e:
             print(f"[NOTIFY WEATHER ERROR] {e}")
 
+        # 從待辦 Sheet 讀取所有待辦（已包含外部行事曆）
         todo_public = []
         todo_private = {}
         for r in ctx.get("待辦事項"):
@@ -971,7 +1078,10 @@ async def notify():
             if days_left <= 7:
                 time_part = f" {r['時間']}" if r.get("時間") else ""
                 overdue_mark = "⚠️ 未完成 " if days_left < 0 else ""
-                label = f"{overdue_mark}{r['事項']}（{date_str}{time_part}）"
+                # 外部行事曆項目加 📅 標記
+                source = str(r.get("來源", "")).strip()
+                source_mark = "📅 " if source and source != "本地" else ""
+                label = f"{overdue_mark}{source_mark}{r['事項']}（{date_str}{time_part}）"
                 if r.get("類型") == "私人":
                     person = r.get("負責人", "")
                     if person not in todo_private:
@@ -1000,42 +1110,9 @@ async def notify():
                 if sensor_lines:
                     data_parts.append("室內溫濕度：" + "、".join(sensor_lines))
                 if todo_public:
-                    data_parts.append("本週公開待辦：" + "、".join(todo_public))
+                    data_parts.append("本週待辦：" + "、".join(todo_public))
                 if member_name in todo_private:
                     data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
-
-                try:
-                    db_id = str(member.get("Notion Database ID", "")).strip()
-                    filters = str(member.get("Notion 篩選", "")).strip()
-                    if db_id:
-                        events = notion_api.get_upcoming_events(db_id, filters)
-                        if events:
-                            today_events = []
-                            week_events = []
-                            for item in events:
-                                date_val = item.get("Date", {})
-                                if not isinstance(date_val, dict):
-                                    continue
-                                start_str = date_val.get("start", "")
-                                try:
-                                    if "T" in start_str:
-                                        event_date = datetime.fromisoformat(start_str).date()
-                                    else:
-                                        event_date = datetime.strptime(start_str, "%Y-%m-%d").date()
-                                except (ValueError, TypeError):
-                                    continue
-                                name = item.get("Event", "")
-                                days_left = (event_date - today).days
-                                if days_left == 0:
-                                    today_events.append(name)
-                                elif days_left <= 7:
-                                    week_events.append(f"{name}（{start_str[:10]}）")
-                            if today_events:
-                                data_parts.append("今日行事曆📅：" + "、".join(today_events))
-                            if week_events:
-                                data_parts.append("本週行事曆📅：" + "、".join(week_events))
-                except Exception as e:
-                    print(f"[NOTIFY NOTION ERROR] {e}")
 
                 if not data_parts:
                     continue
@@ -1106,6 +1183,10 @@ async def notify_realtime():
 
         ctx = RequestContext()
         ctx.load()
+
+        # 同步外部行事曆
+        sync_external_events(ctx)
+
         todo_records = ctx.get("待辦事項")
         members = ctx.get("家庭成員")
 
@@ -1445,7 +1526,7 @@ def handle_message(event):
                         style_block = get_style_instruction(user_name, ctx)
                         action_types = {d.get("action") for d in actions}
                         if action_types & {"query_todo"}:
-                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項和行事曆數據回覆。依日期分組，格式如下：\n2026-03-18（三）\nemoji 事項1\nemoji 事項2（HH:MM）\n\n日期標題：若該日期與今天在同一週（週一到週日），請在日期後加上中文星期，格式為「YYYY-MM-DD（一/二/三/四/五/六/日）」；不同週則只顯示日期。來自外部行事曆的事項在後面加上「📅」標記即可，不要另起標題行。不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。" + style_block
+                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n2026-03-18（三）\nemoji 事項1\nemoji 事項2（HH:MM）\n\n日期標題：若該日期與今天在同一週（週一到週日），請在日期後加上中文星期，格式為「YYYY-MM-DD（一/二/三/四/五/六/日）」；不同週則只顯示日期。[唯讀] 開頭的項目保留 [唯讀] 標記。不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。" + style_block
                             semantic_max_tokens = 500
                         elif action_types & {"query_food"}:
                             semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。依過期日由近到遠排序，每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項後面補簡短提醒，其餘不加評語。" + style_block
