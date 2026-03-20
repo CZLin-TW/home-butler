@@ -75,7 +75,7 @@ action 定義：
 - 可一次多個 action
 - 有上下文先推斷，真的模糊才用 unclear 反問
 - modify_todo 不要用 delete+add 替代
-- [唯讀] 開頭的待辦項目來自外部行事曆，可用 delete_todo 標記完成（系統會記住，下次同步不再顯示），但無法用 modify_todo 修改
+- 所有待辦項目都可以用 delete_todo 標記完成。部分來自外部行事曆的項目無法用 modify_todo 修改，系統會自動判斷並回覆提示
 - 使用者要求調整回覆風格、語氣、說話方式、角色扮演時，使用 set_style action，不要直接用新風格回覆
 - set_style 時，將目前風格與新需求整合成一段精簡描述（改寫成正向具體的指令，不要照搬原話）；若訊息語意不完整或像打到一半就送出，務必用 unclear 反問，絕不猜測存入
 - IR 設備（類型為 IR）沒有狀態回饋，開/關是 toggle 訊號，重複送會反轉狀態。僅在使用者明確要求時才送 control_ir 指令
@@ -243,12 +243,7 @@ def get_current_todo(ctx):
     for r in valid:
         time_part = f" {r['時間']}" if r.get("時間") else ""
         type_part = "（私人）" if r.get("類型") == "私人" else "（公開）"
-        # 唯讀項目加 [唯讀] 前綴
-        prop = str(r.get("屬性", "")).strip()
-        if prop == "唯讀":
-            lines.append(f"[唯讀] {r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
-        else:
-            lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
+        lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
     return "、".join(lines)
 
 def get_device_info(ctx):
@@ -657,8 +652,9 @@ def handle_add_todo(data, user_name, ctx):
 def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     records = ctx.get("待辦事項")
+    item_name = data.get("item", "")
     for i, row in enumerate(records):
-        if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
+        if row.get("事項") == item_name and row.get("狀態") == "待辦":
             # 檢查屬性：唯讀項目不可修改
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
@@ -693,8 +689,9 @@ def handle_delete_todo(data, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     archive = ctx.get_worksheet("待辦封存")
     records = ctx.get("待辦事項")
+    item_name = data.get("item", "")
     for i, row in enumerate(records):
-        if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
+        if row.get("事項") == item_name and row.get("狀態") == "待辦":
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
                 # 唯讀項目：只改狀態為已完成，不刪除不封存
@@ -728,12 +725,7 @@ def handle_query_todo(user_name, ctx):
         if todo_type == "私人" and person != user_name:
             continue
         time_part = f" {r['時間']}" if r.get("時間") else ""
-        # 唯讀項目加 [唯讀] 前綴
-        prop = str(r.get("屬性", "")).strip()
-        if prop == "唯讀":
-            lines.append(f"• [唯讀] {r['事項']}（{r['日期']}{time_part}）")
-        else:
-            lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
+        lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
 
     if not lines:
         return "目前沒有待辦事項"
@@ -1567,7 +1559,7 @@ def handle_message(event):
                         style_block = get_style_instruction(user_name, ctx)
                         action_types = {d.get("action") for d in actions}
                         if action_types & {"query_todo"}:
-                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n2026-03-18（三）\nemoji 事項1\nemoji 事項2（HH:MM）\n\n日期標題：若該日期與今天在同一週（週一到週日），請在日期後加上中文星期，格式為「YYYY-MM-DD（一/二/三/四/五/六/日）」；不同週則只顯示日期。[唯讀] 開頭的項目保留 [唯讀] 標記。不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。" + style_block
+                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n2026-03-18（三）\nemoji 事項1\nemoji 事項2（HH:MM）\n\n日期標題：若該日期與今天在同一週（週一到週日），請在日期後加上中文星期，格式為「YYYY-MM-DD（一/二/三/四/五/六/日）」；不同週則只顯示日期。不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。" + style_block
                             semantic_max_tokens = 500
                         elif action_types & {"query_food"}:
                             semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。依過期日由近到遠排序，每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項後面補簡短提醒，其餘不加評語。" + style_block
