@@ -75,7 +75,7 @@ action 定義：
 - 可一次多個 action
 - 有上下文先推斷，真的模糊才用 unclear 反問
 - modify_todo 不要用 delete+add 替代
-- [唯讀] 開頭的待辦項目來自外部行事曆，無法用 delete_todo 或 modify_todo 操作，請告知使用者到原本的日曆上更新
+- [唯讀] 開頭的待辦項目來自外部行事曆，可用 delete_todo 標記完成（系統會記住，下次同步不再顯示），但無法用 modify_todo 修改
 - 使用者要求調整回覆風格、語氣、說話方式、角色扮演時，使用 set_style action，不要直接用新風格回覆
 - set_style 時，將目前風格與新需求整合成一段精簡描述（改寫成正向具體的指令，不要照搬原話）；若訊息語意不完整或像打到一半就送出，務必用 unclear 反問，絕不猜測存入
 - IR 設備（類型為 IR）沒有狀態回饋，開/關是 toggle 訊號，重複送會反轉狀態。僅在使用者明確要求時才送 control_ir 指令
@@ -344,31 +344,43 @@ def get_all_devices_by_type(device_type, ctx):
 def sync_external_events(ctx):
     """
     同步外部行事曆到待辦事項 Sheet：
-    1. 刪掉所有來源≠本地的項目
-    2. 拉 Notion API 寫入新事件
-    3. 更新 ctx 快取
+    1. 收集已完成的外部事項名稱（用於比對跳過）
+    2. 刪掉所有來源≠本地且狀態=待辦的項目
+    3. 拉 Notion API 寫入新事件（跳過已完成的）
+    4. 清理已完成但 Notion 已不存在的項目
+    5. 更新 ctx 快取
     """
     try:
         sheet = ctx.get_worksheet("待辦事項")
         records = ctx.get("待辦事項")
 
-        # 1. 找出所有外部項目的行號（從下往上刪）
-        external_indices = []
+        # 1. 收集已完成的外部事項名稱
+        completed_external = set()
+        completed_indices = []
         for i, row in enumerate(records):
             source = str(row.get("來源", "")).strip()
-            if source and source != "本地":
-                external_indices.append(i)
+            if source and source != "本地" and row.get("狀態") == "已完成":
+                completed_external.add(row.get("事項", ""))
+                completed_indices.append(i)
 
-        for i in sorted(external_indices, reverse=True):
+        # 2. 刪掉所有外部且狀態=待辦的項目（從下往上刪）
+        pending_external_indices = []
+        for i, row in enumerate(records):
+            source = str(row.get("來源", "")).strip()
+            if source and source != "本地" and row.get("狀態") == "待辦":
+                pending_external_indices.append(i)
+
+        for i in sorted(pending_external_indices, reverse=True):
             sheet.delete_rows(i + 2)
             records.pop(i)
 
-        if external_indices:
-            print(f"[SYNC] 已刪除 {len(external_indices)} 筆外部行事曆快取")
+        if pending_external_indices:
+            print(f"[SYNC] 已刪除 {len(pending_external_indices)} 筆外部行事曆快取")
 
-        # 2. 遍歷成員，拉 Notion 事件寫入
+        # 3. 遍歷成員，拉 Notion 事件寫入（跳過已完成的）
         members = ctx.get("家庭成員")
         new_rows = []
+        new_event_names = set()
 
         for member in members:
             if member.get("狀態") != "啟用":
@@ -388,6 +400,11 @@ def sync_external_events(ctx):
             for item in events:
                 name = item.get("Event", "")
                 if not name:
+                    continue
+
+                # 跳過已標記完成的事件
+                if name in completed_external:
+                    new_event_names.add(name)
                     continue
 
                 date_val = item.get("Date", {})
@@ -413,6 +430,7 @@ def sync_external_events(ctx):
 
                 new_row = [name, date_part, time_part, member_name, "待辦", "公開", "Notion", permission]
                 new_rows.append(new_row)
+                new_event_names.add(name)
                 records.append({
                     "事項": name, "日期": date_part, "時間": time_part,
                     "負責人": member_name, "狀態": "待辦", "類型": "公開",
@@ -420,11 +438,26 @@ def sync_external_events(ctx):
                 })
 
         if new_rows:
-            # 批次寫入所有新行
             sheet.append_rows(new_rows, value_input_option='USER_ENTERED')
             print(f"[SYNC] 已寫入 {len(new_rows)} 筆外部行事曆事件")
 
-        # 3. 更新 ctx 快取
+        # 4. 清理已完成但 Notion 已不存在的項目（過期或被刪了）
+        # 需要重新掃描 records，因為上面的刪除已經改變了索引
+        stale_indices = []
+        for i, row in enumerate(records):
+            source = str(row.get("來源", "")).strip()
+            if source and source != "本地" and row.get("狀態") == "已完成":
+                if row.get("事項", "") not in new_event_names:
+                    stale_indices.append(i)
+
+        for i in sorted(stale_indices, reverse=True):
+            sheet.delete_rows(i + 2)
+            records.pop(i)
+
+        if stale_indices:
+            print(f"[SYNC] 已清理 {len(stale_indices)} 筆過期的已完成外部事件")
+
+        # 5. 更新 ctx 快取
         ctx.set("待辦事項", records)
 
     except Exception as e:
@@ -662,10 +695,18 @@ def handle_delete_todo(data, ctx):
     records = ctx.get("待辦事項")
     for i, row in enumerate(records):
         if row.get("事項") == data.get("item") and row.get("狀態") == "待辦":
-            # 檢查屬性：唯讀項目不可刪除
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
-                return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
+                # 唯讀項目：只改狀態為已完成，不刪除不封存
+                # 找到狀態欄位位置
+                header = sheet.row_values(1)
+                try:
+                    status_col = header.index("狀態") + 1
+                except ValueError:
+                    status_col = 5  # fallback
+                sheet.update_cell(i + 2, status_col, "已完成")
+                row["狀態"] = "已完成"
+                return f"✅ 已標記「{data.get('item')}」為已完成（下次同步後不再顯示）"
             archive.append_row([
                 row.get("事項"), row.get("日期"), row.get("時間"),
                 row.get("負責人"), "已完成", row.get("類型")
