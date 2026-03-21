@@ -94,7 +94,7 @@ def sync_external_events(ctx):
                 new_event_names.add(name)
                 records.append({
                     "事項": name, "日期": date_part, "時間": time_part,
-                    "負責人": member_name, "狀態": "待辦", "類型": "公開",
+                    "負責人": member_name, "狀態": "待辦", "類型": "私人",
                     "來源": "Notion", "屬性": permission
                 })
 
