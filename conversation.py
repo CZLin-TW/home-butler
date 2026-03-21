@@ -4,7 +4,7 @@ from sheets import get_sheet
 from prompt import (
     SYSTEM_PROMPT, DEFAULT_STYLE,
     get_family_members_info, get_current_food, get_current_todo,
-    get_device_info, get_ir_device_info, get_schedule_info, get_style_instruction,
+    get_device_info, get_schedule_info, get_style_instruction,
 )
 
 
@@ -56,7 +56,6 @@ def ask_claude(user_id, user_message, user_name, ctx):
         food_info=get_current_food(ctx),
         todo_info=get_current_todo(ctx),
         device_info=get_device_info(ctx),
-        ir_device_info=get_ir_device_info(ctx),
         schedule_info=get_schedule_info(ctx),
         current_user=user_name,
         user_style=style_instruction
