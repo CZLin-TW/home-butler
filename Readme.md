@@ -27,9 +27,8 @@
 | 溫濕度查詢 | 即時讀取室內溫度與濕度 |
 | 天氣預報 | 全台鄉鎮一週天氣（含體感溫度），支援自然語言查詢 |
 | 廣播訊息 | `@all` 開頭可對全體家庭成員發送訊息 |
-| 每日推播 | 早上：過期提醒 + 待辦 + 溫濕度 + 今日天氣（含體感溫度） |
+| 晚間綜合推播 | 晚上：明日天氣預報 + 食品過期提醒 + 明日與未完成待辦 |
 | 即時提醒 | 每 15 分鐘檢查即將到來的待辦 |
-| 晚間天氣 | 晚上推播明日天氣，提醒溫差變化 |
 | 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
@@ -77,7 +76,7 @@
 - **大腦**：Claude API（claude-sonnet-4-6）
 - **資料庫**：Google Sheets
 - **Server**：Render.com（Python + FastAPI）
-- **排程**：Google Apps Script（每日推播 + 即時提醒 + 晚間天氣）
+- **排程**：Google Apps Script（晚間綜合推播 + 即時提醒）
 - **防冷啟動**：UptimeRobot（每 5 分鐘 ping）
 - **智能居家**：SwitchBot API v1.1（空調 IR 控制 + Hub 溫濕度 + DIY IR 設備）
 - **除濕機**：Panasonic Smart App API（電源 / 模式 / 目標濕度控制）
@@ -386,23 +385,11 @@ function sendRealtimeNotification() {
   Logger.log(response.getContentText());
 }
 
-function sendWeatherNotification() {
-  var url = "https://home-butler.onrender.com/notify_weather";
-  var options = {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify({}),
-    muteHttpExceptions: true
-  };
-  var response = UrlFetchApp.fetch(url, options);
-  Logger.log(response.getContentText());
-}
 ```
 
 設定觸發條件（左邊時鐘圖示 →「新增觸發條件」）：
-- `sendDailyNotification`：日計時器，上午 10~11 點
+- `sendDailyNotification`：日計時器，晚上 9~10 點（晚間綜合推播，含明日天氣 + 食品過期 + 待辦提醒）
 - `sendRealtimeNotification`：分鐘計時器，每 15 分鐘
-- `sendWeatherNotification`：日計時器，晚上 9~10 點
 
 ---
 
@@ -440,9 +427,8 @@ function sendWeatherNotification() {
 |------|------|------|
 | / | GET / HEAD | 健康檢查（UptimeRobot 用） |
 | /callback | POST | Line Webhook 接收訊息 |
-| /notify | POST | GAS 呼叫，觸發每日推播（食品過期 + 待辦 + 溫濕度 + 今日天氣含體感溫度） |
-| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒 |
-| /notify_weather | POST | GAS 呼叫，晚上推播明日天氣（含今天比較與體感溫度，Claude 可提醒溫差） |
+| /notify | POST | GAS 呼叫，晚間綜合推播（明日天氣預報 + 食品過期提醒 + 明日與未完成待辦） |
+| /notify_realtime | POST | GAS 呼叫，每 15 分鐘檢查即時提醒 + 排程執行 |
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
@@ -548,11 +534,10 @@ function sendWeatherNotification() {
 
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
-| 每日推播 | 早上 10 點 | 食品過期提醒 + 本週待辦（含外部行事曆）+ 溫濕度 + 今日天氣（含體感溫度） |
+| 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦 |
 | 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
-| 晚間天氣 | 晚上 9 點 | 明日天氣預報（含體感溫度與今天比較，Claude 可提醒溫差變化） |
 
-推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。
+推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。
 
 ---
 
@@ -642,9 +627,20 @@ function sendWeatherNotification() {
 
 | 檔案 | 說明 |
 |------|------|
-| main.py | FastAPI 主程式（Webhook、Claude 串接、所有 handler、推播邏輯、外部行事曆同步） |
+| main.py | FastAPI 主程式（Webhook、Claude 串接、action 路由） |
+| config.py | 環境變數、LINE/Claude 初始化、時區設定 |
+| sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取） |
+| prompt.py | SYSTEM_PROMPT 與 Claude 提示詞組裝 |
+| conversation.py | 對話暫存管理、Claude API 呼叫、推播訊息生成 |
+| notify.py | 推播端點（/notify 晚間綜合推播、/notify_realtime 即時提醒與排程執行） |
+| calendar_sync.py | 外部行事曆同步（Notion → 待辦 Sheet） |
+| handlers/food.py | 食品庫存 handler（新增、刪除、修改、查詢） |
+| handlers/todo.py | 待辦事項 handler（新增、刪除、修改、查詢） |
+| handlers/device.py | 智能居家 handler（空調、IR、感應器、除濕機、天氣） |
+| handlers/schedule.py | 排程指令 handler（新增、刪除、查詢） |
+| handlers/style.py | 自訂風格 handler |
 | switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取、DIY IR） |
-| panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢）。API 參考：https://github.com/osk2/panasonic_smart_app |
+| panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
 | requirements.txt | Python 套件 |
@@ -654,13 +650,14 @@ function sendWeatherNotification() {
 
 ## 後續維護
 
-**調整 Bot 行為**：修改 main.py 裡的 SYSTEM_PROMPT，push 後自動重新部署。
+**調整 Bot 行為**：修改 prompt.py 裡的 SYSTEM_PROMPT，push 後自動重新部署。
 
 **新增功能**：
 1. Google Sheets 新增對應分頁
-2. 更新 SYSTEM_PROMPT 加入新功能描述
-3. 在 main.py 加入對應的 handle 函數
-4. 更新 /notify 端點加入新的推播邏輯
+2. 更新 prompt.py 的 SYSTEM_PROMPT 加入新功能描述
+3. 在 handlers/ 目錄加入對應的 handle 函數
+4. 在 main.py 註冊新的 action 路由
+5. 如需推播，更新 notify.py 的推播邏輯
 
 **新增 SwitchBot 設備**：
 1. 在 SwitchBot App 新增設備
