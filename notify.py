@@ -4,12 +4,11 @@ from datetime import datetime, timedelta
 import json
 
 from config import line_bot_api, TZ, now_taipei
-from sheets import RequestContext, get_all_devices_by_type
+from sheets import RequestContext
 from prompt import get_style_instruction, _format_schedule_params
-from conversation import save_conversation, cleanup_conversation, generate_notify_message
+from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
 from handlers.device import handle_control_ac, handle_control_ir, handle_control_dehumidifier
-import switchbot_api
 import weather_api
 
 router = APIRouter()
@@ -25,10 +24,10 @@ async def notify():
         sync_external_events(ctx)
 
         today = now_taipei().date()
+        tomorrow = today + timedelta(days=1)
 
-        expired = []
-        soon = []
-        this_week = []
+        # 食品到期提醒：到期日 <= 今天+2天（已過期 + 今明後天到期）
+        food_alert = []
         for r in ctx.get("食品庫存"):
             if r.get("狀態") != "有效":
                 continue
@@ -41,38 +40,22 @@ async def notify():
                 print(f"[WARN] 無法解析食品過期日 {expiry_str!r}: {e}")
                 continue
             days_left = (expiry - today).days
-            label = f"{r['品名']}（{expiry_str}）"
-            if days_left <= 0:
-                expired.append(label)
-            elif days_left <= 3:
-                soon.append(label)
-            elif days_left <= 7:
-                this_week.append(label)
+            if days_left <= 2:
+                label = f"{r['品名']}（{expiry_str}）"
+                food_alert.append(label)
 
         members = ctx.get("家庭成員")
 
-        sensor_lines = []
+        # 明日天氣預報（與今日比較）
+        today_weather = None
+        tomorrow_weather = None
         try:
-            sensor_devices = get_all_devices_by_type("感應器", ctx)
-            for dev in sensor_devices:
-                dev_id = dev.get("Device ID", "")
-                dev_name = dev.get("名稱", "感應器")
-                if dev_id:
-                    result = switchbot_api.get_hub_sensor(dev_id)
-                    if "error" not in result:
-                        temp = result.get("temperature", "N/A")
-                        humidity = result.get("humidity", "N/A")
-                        sensor_lines.append(f"{dev_name}：{temp}°C / {humidity}%")
-        except Exception as e:
-            print(f"[WARN] 讀取感應器失敗: {e}")
-
-        weather_text = None
-        try:
-            weather_text = weather_api.get_weather_data_for_notify("today")
+            today_weather = weather_api.get_weather_data_for_notify("today")
+            tomorrow_weather = weather_api.get_weather_data_for_notify("tomorrow")
         except Exception as e:
             print(f"[NOTIFY WEATHER ERROR] {e}")
 
-        # 從待辦 Sheet 讀取所有待辦（已包含外部行事曆）
+        # 明天待辦 + 未完成任務
         todo_public = []
         todo_private = {}
         for r in ctx.get("待辦事項"):
@@ -86,11 +69,10 @@ async def notify():
             except (ValueError, TypeError) as e:
                 print(f"[WARN] 無法解析待辦日期 {date_str!r}: {e}")
                 continue
-            days_left = (todo_date - today).days
-            if days_left <= 7:
+            # 未完成（今天及之前）或明天的待辦
+            if todo_date <= tomorrow:
                 time_part = f" {r['時間']}" if r.get("時間") else ""
-                overdue_mark = "⚠️ 未完成 " if days_left < 0 else ""
-                # 外部行事曆項目加 📅 標記
+                overdue_mark = "⚠️ 未完成 " if todo_date <= today else ""
                 source = str(r.get("來源", "")).strip()
                 source_mark = "📅 " if source and source != "本地" else ""
                 label = f"{overdue_mark}{source_mark}{r['事項']}（{date_str}{time_part}）"
@@ -103,77 +85,36 @@ async def notify():
                     todo_public.append(label)
 
         for member in members:
-                if member.get("狀態") != "啟用":
-                    continue
-                user_id = member.get("Line User ID")
-                member_name = member.get("名稱", "")
-                if not user_id:
-                    continue
-
-                data_parts = []
-                if weather_text:
-                    data_parts.append(f"今日天氣：{weather_text}")
-                if expired:
-                    data_parts.append("今天到期：" + "、".join(expired))
-                if soon:
-                    data_parts.append("3天內到期：" + "、".join(soon))
-                if this_week:
-                    data_parts.append("本週到期：" + "、".join(this_week))
-                if sensor_lines:
-                    data_parts.append("室內溫濕度：" + "、".join(sensor_lines))
-                if todo_public:
-                    data_parts.append("本週待辦：" + "、".join(todo_public))
-                if member_name in todo_private:
-                    data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
-
-                if not data_parts:
-                    continue
-
-                data_summary = "\n".join(data_parts)
-                member_style = get_style_instruction(member_name, ctx)
-                message = generate_notify_message(data_summary, member_style)
-                if not message:
-                    message = data_summary
-
-                line_bot_api.push_message(user_id, TextSendMessage(text=message))
-                save_conversation(user_id, "assistant", message)
-                cleanup_conversation(user_id)
-
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-@router.post("/notify_weather")
-async def notify_weather():
-    try:
-        today_weather = weather_api.get_weather_data_for_notify("today")
-        tomorrow_weather = weather_api.get_weather_data_for_notify("tomorrow")
-        if not tomorrow_weather:
-            return {"status": "ok", "message": "無天氣資料，跳過推播"}
-
-        ctx = RequestContext()
-        ctx.load()
-        members = ctx.get("家庭成員")
-
-        data_parts = []
-        data_parts.append(f"【重點】明日天氣預報：{tomorrow_weather}")
-        if today_weather:
-            data_parts.append(f"（參考）今日天氣：{today_weather}")
-        data_parts.append("請以明日天氣為主，今日僅供比較溫差變化。如果明天比今天冷很多或會下雨，主動提醒。")
-        data_summary = "\n".join(data_parts)
-
-        for member in members:
             if member.get("狀態") != "啟用":
                 continue
             user_id = member.get("Line User ID")
+            member_name = member.get("名稱", "")
             if not user_id:
                 continue
-            member_name = member.get("名稱", "")
+
+            data_parts = []
+            if tomorrow_weather:
+                data_parts.append(f"【重點】明日天氣預報：{tomorrow_weather}")
+            if today_weather:
+                data_parts.append(f"（參考）今日天氣：{today_weather}")
+            if tomorrow_weather and today_weather:
+                data_parts.append("請以明日天氣為主，今日僅供比較溫差變化。如果明天比今天冷很多或會下雨，主動提醒。")
+            if food_alert:
+                data_parts.append("食品到期提醒：" + "、".join(food_alert))
+            if todo_public:
+                data_parts.append("明日與未完成待辦：" + "、".join(todo_public))
+            if member_name in todo_private:
+                data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
+
+            if not data_parts:
+                continue
+
+            data_summary = "\n".join(data_parts)
             member_style = get_style_instruction(member_name, ctx)
             message = generate_notify_message(data_summary, member_style)
             if not message:
-                message = weather_api.get_tomorrow_weather_text()
+                message = data_summary
+
             line_bot_api.push_message(user_id, TextSendMessage(text=message))
             save_conversation(user_id, "assistant", message)
             cleanup_conversation(user_id)
@@ -181,6 +122,7 @@ async def notify_weather():
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 @router.post("/notify_realtime")
@@ -201,7 +143,7 @@ async def notify_realtime():
         todo_records = ctx.get("待辦事項")
         members = ctx.get("家庭成員")
 
-        def push_to_member(person, todo_type, data_summary, fallback_message):
+        def push_to_member(person, todo_type, todo_item, data_summary, fallback_message):
             target_members = []
             if todo_type == "私人":
                 for member in members:
@@ -212,6 +154,15 @@ async def notify_realtime():
             for member in target_members:
                 user_id = member.get("Line User ID")
                 if not user_id:
+                    continue
+                # 去重：檢查對話暫存中是否已有該待辦的提醒
+                recent = get_recent_conversation(user_id, ctx)
+                already_notified = any(
+                    msg.get("role") == "assistant" and todo_item in msg.get("content", "")
+                    for msg in recent
+                )
+                if already_notified:
+                    print(f"[SKIP] 已提醒過 {user_id}: {todo_item}")
                     continue
                 member_name = member.get("名稱", "")
                 member_style = get_style_instruction(member_name, ctx)
@@ -242,12 +193,12 @@ async def notify_realtime():
             if window_start <= todo_dt <= window_end:
                 data_summary = f"即時提醒：{r['事項']}，時間 {time_str}"
                 fallback = f"⏰ 提醒：{r['事項']}（{time_str}）"
-                push_to_member(person, todo_type, data_summary, fallback)
+                push_to_member(person, todo_type, r['事項'], data_summary, fallback)
 
             elif is_near_hour and todo_dt.date() == today and todo_dt < now:
                 data_summary = f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成"
                 fallback = f"⚠️ 未完成：{r['事項']}（原訂 {time_str}）"
-                push_to_member(person, todo_type, data_summary, fallback)
+                push_to_member(person, todo_type, r['事項'], data_summary, fallback)
 
         # ── 排程執行 ──
         schedule_records = ctx.get("排程指令")
