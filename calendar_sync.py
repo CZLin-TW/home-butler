@@ -89,7 +89,7 @@ def sync_external_events(ctx):
                     date_part = start_str
                     time_part = ""
 
-                new_row = [name, date_part, time_part, member_name, "待辦", "公開", "Notion", permission]
+                new_row = [name, date_part, time_part, member_name, "待辦", "私人", "Notion", permission]
                 new_rows.append(new_row)
                 new_event_names.add(name)
                 records.append({
