@@ -24,10 +24,14 @@ import switchbot_api
 app = FastAPI()
 app.include_router(notify_router)
 
+# Web Dashboard REST API
+from web_api import router as web_api_router
+app.include_router(web_api_router)
 
-# ══════════════════════════════════════════
+
+# ════════════════════════════════════════════
 # HTTP 端點
-# ══════════════════════════════════════════
+# ════════════════════════════════════════════
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
@@ -79,9 +83,9 @@ def test_switchbot_turnon(device_id: str):
     return {"status": "ok" if result.get("success") else "error", "result": result}
 
 
-# ══════════════════════════════════════════
+# ════════════════════════════════════════════
 # LINE Webhook
-# ══════════════════════════════════════════
+# ════════════════════════════════════════════
 
 @app.post("/callback")
 async def callback(request: Request):
