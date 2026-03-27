@@ -14,7 +14,7 @@ from handlers.device import (
     handle_control_ac, handle_control_ir, handle_query_sensor,
     handle_control_dehumidifier, handle_query_dehumidifier,
 )
-from handlers.schedule import handle_delete_schedule, handle_query_schedule
+from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
 import switchbot_api
 import panasonic_api
 import weather_api
@@ -324,6 +324,31 @@ def api_get_schedules():
     ctx.load()
     schedules = [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
     return schedules
+
+
+class ScheduleAddRequest(BaseModel):
+    device_name: str
+    target_action: str  # control_ac, control_ir, control_dehumidifier
+    params: dict
+    trigger_time: str  # YYYY-MM-DD HH:MM
+    person: str
+
+
+@router.post("/schedules")
+def api_add_schedule(req: ScheduleAddRequest):
+    """新增排程"""
+    ctx = RequestContext()
+    ctx.load()
+    data = {
+        "device_name": req.device_name,
+        "target_action": req.target_action,
+        "params": req.params,
+        "trigger_time": req.trigger_time,
+    }
+    result = handle_add_schedule(data, req.person, ctx)
+    if "❌" in result:
+        raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
 
 
 class ScheduleDeleteRequest(BaseModel):
