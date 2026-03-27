@@ -82,6 +82,7 @@
 - **除濕機**：Panasonic Smart App API（電源 / 模式 / 目標濕度控制）
 - **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報，含體感溫度）
 - **外部行事曆**：Notion API（同步到待辦 Sheet，支援每人獨立篩選條件與權限設定）
+- **Dashboard API**：REST API（供網頁版 Dashboard 直接操作裝置、待辦、食品、排程等）
 
 ---
 
@@ -433,6 +434,32 @@ function sendRealtimeNotification() {
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
 
+### Dashboard REST API（/api）
+
+供網頁版 Dashboard 使用，所有業務邏輯重用現有 handlers，不重複實作。
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| /api/devices | GET | 列出所有啟用裝置及即時狀態（感應器溫濕度、除濕機狀態） |
+| /api/devices/options | GET | 各類裝置的可用選項（空調模式/風速、除濕機模式/濕度），供前端動態渲染 |
+| /api/devices/control/ac | POST | 控制空調（power, temperature, mode, fan_speed） |
+| /api/devices/control/ir | POST | 控制 IR 裝置（device_name, button） |
+| /api/devices/control/dehumidifier | POST | 控制除濕機（power, mode, humidity） |
+| /api/devices/sensor | GET | 查詢感測器（device_name） |
+| /api/todos | GET | 列出所有待辦事項 |
+| /api/todos | POST | 新增待辦事項 |
+| /api/todos | PATCH | 修改待辦事項 |
+| /api/todos | DELETE | 完成（刪除）待辦事項 |
+| /api/food | GET | 列出所有有效食品庫存 |
+| /api/food | POST | 新增食品 |
+| /api/food | PATCH | 修改食品 |
+| /api/food | DELETE | 消耗（刪除）食品 |
+| /api/schedules | GET | 列出所有待執行排程 |
+| /api/schedules | POST | 新增排程 |
+| /api/schedules | DELETE | 取消排程 |
+| /api/weather | GET | 查詢天氣（date, location） |
+| /api/members | GET | 列出所有啟用的家庭成員 |
+
 ---
 
 ## Claude API 支援的 action
@@ -643,6 +670,7 @@ function sendRealtimeNotification() {
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
+| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢） |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 
