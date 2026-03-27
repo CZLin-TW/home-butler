@@ -372,3 +372,37 @@ def api_get_members():
         if r.get("狀態") == "啟用"
     ]
     return members
+
+
+# ── 裝置選項 ──
+
+@router.get("/devices/options")
+def api_get_device_options():
+    """回傳各類裝置的可用選項，供 Dashboard 動態渲染按鈕"""
+    # AC: 用 value 去重，保留第一個 key 作為 label（中文優先）
+    ac_modes = {}
+    for k, v in switchbot_api.AC_MODE_MAP.items():
+        if v not in ac_modes:
+            ac_modes[v] = k  # 第一個出現的是中文
+    ac_fans = {}
+    for k, v in switchbot_api.AC_FAN_MAP.items():
+        if v not in ac_fans:
+            ac_fans[v] = k
+
+    # 除濕機: 同樣去重
+    dh_modes = {}
+    for k, v in panasonic_api.DEHUMIDIFIER_MODE_MAP.items():
+        if v not in dh_modes:
+            dh_modes[v] = k
+
+    return {
+        "ac": {
+            "modes": [{"value": label, "label": label} for _, label in sorted(ac_modes.items())],
+            "fan_speeds": [{"value": label, "label": label} for _, label in sorted(ac_fans.items())],
+            "temperature": {"min": 16, "max": 30},
+        },
+        "dehumidifier": {
+            "modes": [{"value": label, "label": label} for _, label in sorted(dh_modes.items())],
+            "humidity": sorted(panasonic_api.HUMIDITY_VALUE_MAP.keys()),
+        },
+    }
