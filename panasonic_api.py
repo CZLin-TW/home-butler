@@ -103,6 +103,9 @@ def _request_with_retry(method: str, url: str, **kwargs):
                 return None
 
         if resp.status_code == 200:
+            if not resp.text or not resp.text.strip():
+                print(f"[PANASONIC] Empty response body")
+                return None
             return resp.json()
         else:
             print(f"[PANASONIC] Unexpected status {resp.status_code}: {resp.text}")
