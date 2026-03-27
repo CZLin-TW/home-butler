@@ -78,42 +78,44 @@ def _ensure_token() -> bool:
 
 
 def _request_with_retry(method: str, url: str, **kwargs):
-    """發送請求，token 過期自動重試一次"""
+    """發送請求，token 過期自動重試一次，網路錯誤亦重試一次"""
     global _cp_token
     if not _ensure_token():
         return None
 
-    try:
-        resp = httpx.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+    for attempt in range(2):
+        try:
+            resp = httpx.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
 
-        # Token 過期（417 狀態碼）
-        if resp.status_code == 417:
-            body = resp.json()
-            state_msg = body.get("StateMsg", "")
-            if "RefreshToken" in state_msg or "CPToken" in state_msg or "逾時" in state_msg:
-                # 先嘗試 refresh，失敗再重新登入
-                if not refresh_token():
-                    login()
-                # 更新 header 裡的 cptoken 後重試
-                if "headers" in kwargs:
-                    kwargs["headers"]["cptoken"] = _cp_token
-                resp = httpx.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+            # Token 過期（417 狀態碼）：不論 StateMsg 內容，統一嘗試 refresh 後重試
+            if resp.status_code == 417:
+                if attempt == 0:
+                    state_msg = resp.json().get("StateMsg", "")
+                    print(f"[PANASONIC] 417 token error: {state_msg}, refreshing...")
+                    if not refresh_token():
+                        login()
+                    if "headers" in kwargs:
+                        kwargs["headers"]["cptoken"] = _cp_token
+                    continue
+                else:
+                    print(f"[PANASONIC] 417 persists after token refresh")
+                    return None
+
+            if resp.status_code == 200:
+                if not resp.text or not resp.text.strip():
+                    print(f"[PANASONIC] Empty response body")
+                    return None
+                return resp.json()
             else:
-                print(f"[PANASONIC] API error: {state_msg}")
+                print(f"[PANASONIC] Unexpected status {resp.status_code}: {resp.text}")
                 return None
 
-        if resp.status_code == 200:
-            if not resp.text or not resp.text.strip():
-                print(f"[PANASONIC] Empty response body")
-                return None
-            return resp.json()
-        else:
-            print(f"[PANASONIC] Unexpected status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            if attempt == 0:
+                print(f"[PANASONIC] Request error (will retry): {e}")
+                continue
+            print(f"[PANASONIC] Request error (gave up): {e}")
             return None
-
-    except Exception as e:
-        print(f"[PANASONIC] Request error: {e}")
-        return None
 
 
 # ── 設備列表 ──
