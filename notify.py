@@ -20,6 +20,18 @@ async def notify():
         ctx = RequestContext()
         ctx.load()
 
+        # 查詢本月推播額度
+        quota_info = ""
+        try:
+            quota = line_bot_api.get_message_quota()
+            consumption = line_bot_api.get_message_quota_consumption()
+            total = quota.value if hasattr(quota, 'value') else 200
+            used = consumption.total_usage
+            remaining = total - used
+            quota_info = f"\n\n📊 本月推播額度：剩餘 {remaining}/{total} 則"
+        except Exception as e:
+            print(f"[NOTIFY] Failed to get quota: {e}")
+
         # 同步外部行事曆
         sync_external_events(ctx)
 
@@ -114,6 +126,8 @@ async def notify():
             message = generate_notify_message(data_summary, member_style)
             if not message:
                 message = data_summary
+            if quota_info:
+                message += quota_info
 
             line_bot_api.push_message(user_id, TextSendMessage(text=message))
             save_conversation(user_id, "assistant", message)
