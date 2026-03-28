@@ -60,7 +60,7 @@ def _login() -> bool:
             return False
 
 
-def _refresh_token() -> bool:
+def _do_token_refresh() -> bool:
     """用 RefreshToken 換新的 CPToken（需在 _token_lock 內呼叫）"""
     global _cp_token, _refresh_token
     try:
@@ -89,13 +89,13 @@ def _ensure_token() -> bool:
 def _renew_token() -> str:
     """refresh 或重新登入，回傳新 token"""
     with _token_lock:
-        if not _refresh_token():
+        if not _do_token_refresh():
             _login()
         return _cp_token
 
 
 def _request_with_retry(method: str, url: str, **kwargs):
-    """發送請求，token 過期自動重試一次，網路錯誤亦重試一次"""
+    """發送請求，token 過期自動重試一次，空 response 重新登入後重試，網路錯誤亦重試一次"""
     if not _ensure_token():
         return None
 
@@ -119,7 +119,12 @@ def _request_with_retry(method: str, url: str, **kwargs):
 
             if resp.status_code == 200:
                 if not resp.text or not resp.text.strip():
-                    print(f"[PANASONIC] Empty response body")
+                    # 空 response 可能是 token 失效，重新登入後重試
+                    if attempt == 0:
+                        print(f"[PANASONIC] Empty response, re-login and retry...")
+                        _renew_token()
+                        continue
+                    print(f"[PANASONIC] Empty response persists after retry")
                     return None
                 return resp.json()
             else:
