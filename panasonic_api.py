@@ -17,6 +17,13 @@ REQUEST_TIMEOUT = 20
 PANASONIC_ACCOUNT = os.environ.get("PANASONIC_ACCOUNT", "")
 PANASONIC_PASSWORD = os.environ.get("PANASONIC_PASSWORD", "")
 
+# 持久 HTTP Client（連線池 + keep-alive，避免每次冷連線）
+_client = httpx.Client(
+    base_url=BASE_URL,
+    headers={"user-agent": USER_AGENT, "Content-Type": "application/json"},
+    timeout=REQUEST_TIMEOUT,
+)
+
 # Token 快取（服務運行期間保持登入狀態）
 # 注意：無 thread lock，理論上並發時可能重複登入。
 # 家庭使用情境下發生機率極低，暫不處理。
@@ -25,7 +32,7 @@ _refresh_token = None
 
 
 def _headers(extra: dict = {}) -> dict:
-    h = {"user-agent": USER_AGENT, "Content-Type": "application/json"}
+    h = {}
     h.update(extra)
     return h
 
@@ -35,34 +42,34 @@ def _headers(extra: dict = {}) -> dict:
 def login() -> bool:
     """用帳密登入，取得 CPToken 和 RefreshToken"""
     global _cp_token, _refresh_token
-    try:
-        resp = httpx.post(
-            f"{BASE_URL}/userlogin1",
-            json={"MemId": PANASONIC_ACCOUNT, "PW": PANASONIC_PASSWORD, "AppToken": APP_TOKEN},
-            headers=_headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
-        data = resp.json()
-        _cp_token = data["CPToken"]       # KeyError 會被下方 except 捕捉
-        _refresh_token = data["RefreshToken"]
-        return True
-    except Exception as e:
-        print(f"[PANASONIC] Login failed: {e}")
-        return False
+    for attempt in range(2):
+        try:
+            resp = _client.post(
+                "/userlogin1",
+                json={"MemId": PANASONIC_ACCOUNT, "PW": PANASONIC_PASSWORD, "AppToken": APP_TOKEN},
+            )
+            data = resp.json()
+            _cp_token = data["CPToken"]
+            _refresh_token = data["RefreshToken"]
+            return True
+        except Exception as e:
+            if attempt == 0:
+                print(f"[PANASONIC] Login failed (will retry): {e}")
+                continue
+            print(f"[PANASONIC] Login failed (gave up): {e}")
+            return False
 
 
 def refresh_token() -> bool:
     """用 RefreshToken 換新的 CPToken"""
     global _cp_token, _refresh_token
     try:
-        resp = httpx.post(
-            f"{BASE_URL}/RefreshToken1",
+        resp = _client.post(
+            "/RefreshToken1",
             json={"RefreshToken": _refresh_token},
-            headers=_headers(),
-            timeout=REQUEST_TIMEOUT,
         )
         data = resp.json()
-        _cp_token = data["CPToken"]       # KeyError 會被下方 except 捕捉
+        _cp_token = data["CPToken"]
         _refresh_token = data["RefreshToken"]
         return True
     except Exception as e:
@@ -85,7 +92,7 @@ def _request_with_retry(method: str, url: str, **kwargs):
 
     for attempt in range(2):
         try:
-            resp = httpx.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+            resp = _client.request(method, url, **kwargs)
 
             # Token 過期（417 狀態碼）：不論 StateMsg 內容，統一嘗試 refresh 後重試
             if resp.status_code == 417:
@@ -124,7 +131,7 @@ def get_devices() -> list:
     """取得帳號下所有設備列表"""
     data = _request_with_retry(
         "GET",
-        f"{BASE_URL}/UserGetRegisteredGwList2",
+        "/UserGetRegisteredGwList2",
         headers=_headers({"cptoken": _cp_token}),
     )
     if data is None:
@@ -149,7 +156,7 @@ def get_dehumidifier_status(device_auth: str, gwid: str) -> dict:
     }
     data = _request_with_retry(
         "POST",
-        f"{BASE_URL}/DeviceGetInfo",
+        "/DeviceGetInfo",
         headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         json=[commands],
     )
@@ -177,7 +184,7 @@ def set_dehumidifier_command(device_auth: str, gwid: str, command_type: str, val
     _ensure_token()
     data = _request_with_retry(
         "GET",
-        f"{BASE_URL}/DeviceSetCommand",
+        "/DeviceSetCommand",
         headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         params={"DeviceID": 1, "CommandType": command_type, "Value": value},
     )
