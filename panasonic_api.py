@@ -8,6 +8,7 @@ Panasonic Smart App API 封裝模組
 import httpx
 import os
 import json
+import threading
 
 BASE_URL = "https://ems2.panasonic.com.tw/api"
 APP_TOKEN = "D8CBFF4C-2824-4342-B22D-189166FEF503"
@@ -19,16 +20,15 @@ PANASONIC_PASSWORD = os.environ.get("PANASONIC_PASSWORD", "")
 
 # 持久 HTTP Client（連線池 + keep-alive，避免每次冷連線）
 _client = httpx.Client(
-    base_url=BASE_URL,
+    base_url=f"{BASE_URL}/",
     headers={"user-agent": USER_AGENT, "Content-Type": "application/json"},
     timeout=REQUEST_TIMEOUT,
 )
 
 # Token 快取（服務運行期間保持登入狀態）
-# 注意：無 thread lock，理論上並發時可能重複登入。
-# 家庭使用情境下發生機率極低，暫不處理。
 _cp_token = None
 _refresh_token = None
+_token_lock = threading.Lock()
 
 
 def _headers(extra: dict = {}) -> dict:
@@ -39,13 +39,13 @@ def _headers(extra: dict = {}) -> dict:
 
 # ── 登入 / Token ──
 
-def login() -> bool:
-    """用帳密登入，取得 CPToken 和 RefreshToken"""
+def _login() -> bool:
+    """用帳密登入，取得 CPToken 和 RefreshToken（需在 _token_lock 內呼叫）"""
     global _cp_token, _refresh_token
     for attempt in range(2):
         try:
             resp = _client.post(
-                "/userlogin1",
+                "userlogin1",
                 json={"MemId": PANASONIC_ACCOUNT, "PW": PANASONIC_PASSWORD, "AppToken": APP_TOKEN},
             )
             data = resp.json()
@@ -60,12 +60,12 @@ def login() -> bool:
             return False
 
 
-def refresh_token() -> bool:
-    """用 RefreshToken 換新的 CPToken"""
+def _refresh_token() -> bool:
+    """用 RefreshToken 換新的 CPToken（需在 _token_lock 內呼叫）"""
     global _cp_token, _refresh_token
     try:
         resp = _client.post(
-            "/RefreshToken1",
+            "RefreshToken1",
             json={"RefreshToken": _refresh_token},
         )
         data = resp.json()
@@ -80,29 +80,38 @@ def refresh_token() -> bool:
 def _ensure_token() -> bool:
     """確保 token 存在，沒有就登入"""
     if _cp_token is None:
-        return login()
+        with _token_lock:
+            if _cp_token is None:  # double-check after acquiring lock
+                return _login()
     return True
+
+
+def _renew_token() -> str:
+    """refresh 或重新登入，回傳新 token"""
+    with _token_lock:
+        if not _refresh_token():
+            _login()
+        return _cp_token
 
 
 def _request_with_retry(method: str, url: str, **kwargs):
     """發送請求，token 過期自動重試一次，網路錯誤亦重試一次"""
-    global _cp_token
     if not _ensure_token():
         return None
 
     for attempt in range(2):
         try:
+            # 每次用最新的 token 建 header
+            if "headers" in kwargs:
+                kwargs["headers"]["cptoken"] = _cp_token
             resp = _client.request(method, url, **kwargs)
 
-            # Token 過期（417 狀態碼）：不論 StateMsg 內容，統一嘗試 refresh 後重試
+            # Token 過期（417 狀態碼）：統一嘗試 refresh 後重試
             if resp.status_code == 417:
                 if attempt == 0:
                     state_msg = resp.json().get("StateMsg", "")
                     print(f"[PANASONIC] 417 token error: {state_msg}, refreshing...")
-                    if not refresh_token():
-                        login()
-                    if "headers" in kwargs:
-                        kwargs["headers"]["cptoken"] = _cp_token
+                    _renew_token()
                     continue
                 else:
                     print(f"[PANASONIC] 417 persists after token refresh")
@@ -131,7 +140,7 @@ def get_devices() -> list:
     """取得帳號下所有設備列表"""
     data = _request_with_retry(
         "GET",
-        "/UserGetRegisteredGwList2",
+        "UserGetRegisteredGwList2",
         headers=_headers({"cptoken": _cp_token}),
     )
     if data is None:
@@ -149,14 +158,13 @@ def get_dehumidifier_status(device_auth: str, gwid: str) -> dict:
     回傳 dict，key 為 CommandType，value 為目前數值
     例如：{"0x00": "1", "0x01": "1", "0x04": "3"}
     """
-    _ensure_token()
     commands = {
         "CommandTypes": [{"CommandType": c} for c in DEHUMIDIFIER_STATUS_COMMANDS],
         "DeviceID": 1,
     }
     data = _request_with_retry(
         "POST",
-        "/DeviceGetInfo",
+        "DeviceGetInfo",
         headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         json=[commands],
     )
@@ -181,10 +189,9 @@ def set_dehumidifier_command(device_auth: str, gwid: str, command_type: str, val
     command_type: "0x00"（電源）, "0x01"（模式）, "0x04"（目標濕度）等
     value: 對應的整數值
     """
-    _ensure_token()
     data = _request_with_retry(
         "GET",
-        "/DeviceSetCommand",
+        "DeviceSetCommand",
         headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         params={"DeviceID": 1, "CommandType": command_type, "Value": value},
     )
