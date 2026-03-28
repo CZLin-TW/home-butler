@@ -109,7 +109,10 @@ def _request_with_retry(method: str, url: str, **kwargs):
             # Token 過期（417 狀態碼）：統一嘗試 refresh 後重試
             if resp.status_code == 417:
                 if attempt == 0:
-                    state_msg = resp.json().get("StateMsg", "")
+                    try:
+                        state_msg = resp.json().get("StateMsg", "")
+                    except Exception:
+                        state_msg = "(empty body)"
                     print(f"[PANASONIC] 417 token error: {state_msg}, refreshing...")
                     _renew_token()
                     continue
@@ -134,6 +137,7 @@ def _request_with_retry(method: str, url: str, **kwargs):
         except Exception as e:
             if attempt == 0:
                 print(f"[PANASONIC] Request error (will retry): {e}")
+                _renew_token()
                 continue
             print(f"[PANASONIC] Request error (gave up): {e}")
             return None
