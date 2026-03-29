@@ -7,6 +7,7 @@ Web Dashboard REST API
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sheets import RequestContext, get_all_devices_by_type, get_device_id_by_name, get_device_auth_by_name
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo
@@ -24,47 +25,72 @@ router = APIRouter(prefix="/api")
 
 # ── 裝置 ──
 
+def _fetch_sensor_status(device_id):
+    """查詢感測器狀態（供平行執行）"""
+    try:
+        status = switchbot_api.get_hub_sensor(device_id)
+        if "error" not in status:
+            return {"temperature": status.get("temperature"), "humidity": status.get("humidity")}
+    except Exception as e:
+        print(f"[WEB API] Sensor error: {e}")
+    return {}
+
+
+def _fetch_dehumidifier_status(auth, device_id):
+    """查詢除濕機狀態（供平行執行）"""
+    try:
+        status = panasonic_api.get_dehumidifier_status(auth, device_id)
+        if "error" not in status:
+            return {
+                "power": status.get("0x00") == "1",
+                "mode": panasonic_api.MODE_DISPLAY.get(str(status.get("0x01", "")), ""),
+                "targetHumidity": panasonic_api.HUMIDITY_DISPLAY.get(str(status.get("0x04", "")), ""),
+            }
+    except Exception as e:
+        print(f"[WEB API] Dehumidifier error: {e}")
+    return {}
+
+
 @router.get("/devices")
 def api_get_devices():
-    """列出所有啟用裝置及即時狀態"""
+    """列出所有啟用裝置及即時狀態（平行查詢感測器和除濕機）"""
     ctx = RequestContext()
     ctx.load()
     devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
+
+    # 建立基本裝置列表
     result = []
+    futures = {}
 
-    for d in devices:
-        device = {
-            "name": d.get("名稱"),
-            "type": d.get("類型"),
-            "location": d.get("位置", ""),
-            "deviceId": d.get("Device ID", ""),
-            "buttons": d.get("按鈕", ""),
-        }
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for i, d in enumerate(devices):
+            device = {
+                "name": d.get("名稱"),
+                "type": d.get("類型"),
+                "location": d.get("位置", ""),
+                "deviceId": d.get("Device ID", ""),
+                "buttons": d.get("按鈕", ""),
+            }
+            result.append(device)
 
-        # 感測器：讀即時溫濕度
-        if d.get("類型") == "感應器" and d.get("Device ID"):
+            # 平行提交感測器查詢
+            if d.get("類型") == "感應器" and d.get("Device ID"):
+                future = executor.submit(_fetch_sensor_status, d["Device ID"])
+                futures[future] = i
+
+            # 平行提交除濕機查詢
+            if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
+                future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
+                futures[future] = i
+
+        # 收集平行查詢結果
+        for future in as_completed(futures):
+            idx = futures[future]
             try:
-                status = switchbot_api.get_hub_sensor(d["Device ID"])
-                if "error" not in status:
-                    device["temperature"] = status.get("temperature")
-                    device["humidity"] = status.get("humidity")
+                status = future.result(timeout=15)
+                result[idx].update(status)
             except Exception as e:
-                print(f"[WEB API] Sensor error: {e}")
-
-        # 除濕機：讀即時狀態
-        if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
-            try:
-                status = panasonic_api.get_dehumidifier_status(d["Auth"], d["Device ID"])
-                if "error" not in status:
-                    device["power"] = status.get("0x00") == "1"
-                    mode_val = status.get("0x01", "")
-                    device["mode"] = panasonic_api.MODE_DISPLAY.get(str(mode_val), "")
-                    hum_val = status.get("0x04", "")
-                    device["targetHumidity"] = panasonic_api.HUMIDITY_DISPLAY.get(str(hum_val), "")
-            except Exception as e:
-                print(f"[WEB API] Dehumidifier error: {e}")
-
-        result.append(device)
+                print(f"[WEB API] Parallel query error: {e}")
 
     return result
 
@@ -147,8 +173,6 @@ def api_query_sensor(device_name: str = ""):
     result = handle_query_sensor({"device_name": device_name}, ctx)
     if "❌" in result:
         raise HTTPException(status_code=400, detail=result)
-    # Parse temperature and humidity from the formatted string
-    # Fallback: return raw text
     return {"message": result}
 
 
@@ -196,7 +220,7 @@ class TodoModifyRequest(BaseModel):
     time: Optional[str] = None
     person: Optional[str] = None
     type: Optional[str] = None
-    requester: str  # 操作者名稱
+    requester: str
 
 
 @router.patch("/todos")
@@ -252,7 +276,7 @@ class FoodAddRequest(BaseModel):
     quantity: Optional[int] = 1
     unit: Optional[str] = "個"
     expiry: str
-    person: str  # 新增者
+    person: str
 
 
 @router.post("/food")
@@ -328,9 +352,9 @@ def api_get_schedules():
 
 class ScheduleAddRequest(BaseModel):
     device_name: str
-    target_action: str  # control_ac, control_ir, control_dehumidifier
+    target_action: str
     params: dict
-    trigger_time: str  # YYYY-MM-DD HH:MM
+    trigger_time: str
     person: str
 
 
@@ -404,17 +428,15 @@ def api_get_members():
 @router.get("/devices/options")
 def api_get_device_options():
     """回傳各類裝置的可用選項，供 Dashboard 動態渲染按鈕"""
-    # AC: 用 value 去重，保留第一個 key 作為 label（中文優先）
     ac_modes = {}
     for k, v in switchbot_api.AC_MODE_MAP.items():
         if v not in ac_modes:
-            ac_modes[v] = k  # 第一個出現的是中文
+            ac_modes[v] = k
     ac_fans = {}
     for k, v in switchbot_api.AC_FAN_MAP.items():
         if v not in ac_fans:
             ac_fans[v] = k
 
-    # 除濕機: 同樣去重
     dh_modes = {}
     for k, v in panasonic_api.DEHUMIDIFIER_MODE_MAP.items():
         if v not in dh_modes:
