@@ -109,10 +109,12 @@ def get_device_info(ctx):
     lines = []
     for r in valid:
         buttons = r.get("按鈕", "")
+        control = r.get("控制類型", "")
+        control_part = f"，控制類型：{control}" if control else ""
         if buttons:
-            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}）")
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}{control_part}）")
         else:
-            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}）")
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}{control_part}）")
     return "、".join(lines)
 
 

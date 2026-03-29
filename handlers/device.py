@@ -87,7 +87,11 @@ def handle_query_devices(ctx):
     valid = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
     if not valid:
         return "目前沒有已設定的智能居家設備"
-    lines = [f"• {r['名稱']}（{r['類型']}，{r.get('位置', '未設定')}）" for r in valid]
+    def _device_line(r):
+        control = r.get("控制類型", "")
+        control_part = f"，{control}" if control else ""
+        return f"• {r['名稱']}（{r['類型']}，{r.get('位置', '未設定')}{control_part}）"
+    lines = [_device_line(r) for r in valid]
     return "已設定的設備：\n" + "\n".join(lines)
 
 
