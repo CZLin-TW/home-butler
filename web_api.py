@@ -23,6 +23,66 @@ import weather_api
 router = APIRouter(prefix="/api")
 
 
+# ── 首頁彙整 ──
+
+@router.get("/dashboard")
+def api_dashboard():
+    """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）"""
+    ctx = RequestContext()
+    ctx.load()
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
+        weather_tomorrow_future = executor.submit(weather_api.get_weather_summary, "tomorrow", None)
+
+        devices_raw = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
+        device_list = []
+        device_futures = {}
+
+        for i, d in enumerate(devices_raw):
+            device = {
+                "name": d.get("名稱"),
+                "type": d.get("類型"),
+                "location": d.get("位置", ""),
+                "deviceId": d.get("Device ID", ""),
+                "buttons": d.get("按鈕", ""),
+            }
+            device_list.append(device)
+
+            if d.get("類型") == "感應器" and d.get("Device ID"):
+                future = executor.submit(_fetch_sensor_status, d["Device ID"])
+                device_futures[future] = i
+
+            if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
+                future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
+                device_futures[future] = i
+
+        for future in as_completed(device_futures):
+            idx = device_futures[future]
+            try:
+                status = future.result(timeout=15)
+                device_list[idx].update(status)
+            except Exception as e:
+                print(f"[DASHBOARD] Device query error: {e}")
+
+        try:
+            results["weatherToday"] = weather_today_future.result(timeout=15)
+        except Exception:
+            results["weatherToday"] = None
+        try:
+            results["weatherTomorrow"] = weather_tomorrow_future.result(timeout=15)
+        except Exception:
+            results["weatherTomorrow"] = None
+
+    results["devices"] = device_list
+    results["todos"] = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    results["food"] = [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
+    results["options"] = api_get_device_options()
+
+    return results
+
+
 # ── 裝置 ──
 
 def _fetch_sensor_status(device_id):
@@ -58,7 +118,6 @@ def api_get_devices():
     ctx.load()
     devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
 
-    # 建立基本裝置列表
     result = []
     futures = {}
 
@@ -73,17 +132,14 @@ def api_get_devices():
             }
             result.append(device)
 
-            # 平行提交感測器查詢
             if d.get("類型") == "感應器" and d.get("Device ID"):
                 future = executor.submit(_fetch_sensor_status, d["Device ID"])
                 futures[future] = i
 
-            # 平行提交除濕機查詢
             if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
                 future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
                 futures[future] = i
 
-        # 收集平行查詢結果
         for future in as_completed(futures):
             idx = futures[future]
             try:
@@ -105,22 +161,14 @@ class AcControlRequest(BaseModel):
 
 @router.post("/devices/control/ac")
 def api_control_ac(req: AcControlRequest):
-    """控制冷氣"""
     ctx = RequestContext()
     ctx.load()
-    data = {
-        "device_name": req.device_name,
-        "power": req.power,
-    }
-    if req.temperature is not None:
-        data["temperature"] = req.temperature
-    if req.mode is not None:
-        data["mode"] = req.mode
-    if req.fan_speed is not None:
-        data["fan_speed"] = req.fan_speed
+    data = {"device_name": req.device_name, "power": req.power}
+    if req.temperature is not None: data["temperature"] = req.temperature
+    if req.mode is not None: data["mode"] = req.mode
+    if req.fan_speed is not None: data["fan_speed"] = req.fan_speed
     result = handle_control_ac(data, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -131,12 +179,10 @@ class IrControlRequest(BaseModel):
 
 @router.post("/devices/control/ir")
 def api_control_ir(req: IrControlRequest):
-    """控制 IR 裝置"""
     ctx = RequestContext()
     ctx.load()
     result = handle_control_ir({"device_name": req.device_name, "button": req.button}, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -149,30 +195,23 @@ class DehumidifierControlRequest(BaseModel):
 
 @router.post("/devices/control/dehumidifier")
 def api_control_dehumidifier(req: DehumidifierControlRequest):
-    """控制除濕機"""
     ctx = RequestContext()
     ctx.load()
     data = {"device_name": req.device_name}
-    if req.power is not None:
-        data["power"] = req.power
-    if req.mode is not None:
-        data["mode"] = req.mode
-    if req.humidity is not None:
-        data["humidity"] = req.humidity
+    if req.power is not None: data["power"] = req.power
+    if req.mode is not None: data["mode"] = req.mode
+    if req.humidity is not None: data["humidity"] = req.humidity
     result = handle_control_dehumidifier(data, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
 @router.get("/devices/sensor")
 def api_query_sensor(device_name: str = ""):
-    """查詢感測器"""
     ctx = RequestContext()
     ctx.load()
     result = handle_query_sensor({"device_name": device_name}, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -180,11 +219,9 @@ def api_query_sensor(device_name: str = ""):
 
 @router.get("/todos")
 def api_get_todos():
-    """列出所有待辦事項"""
     ctx = RequestContext()
     ctx.load()
-    todos = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
-    return todos
+    return [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
 
 
 class TodoAddRequest(BaseModel):
@@ -197,19 +234,11 @@ class TodoAddRequest(BaseModel):
 
 @router.post("/todos")
 def api_add_todo(req: TodoAddRequest):
-    """新增待辦事項"""
     ctx = RequestContext()
     ctx.load()
-    data = {
-        "item": req.item,
-        "date": req.date,
-        "time": req.time or "",
-        "person": req.person,
-        "type": req.type or "私人",
-    }
+    data = {"item": req.item, "date": req.date, "time": req.time or "", "person": req.person, "type": req.type or "私人"}
     result = handle_add_todo(data, req.person, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -225,23 +254,16 @@ class TodoModifyRequest(BaseModel):
 
 @router.patch("/todos")
 def api_modify_todo(req: TodoModifyRequest):
-    """修改待辦事項"""
     ctx = RequestContext()
     ctx.load()
     data = {"item": req.item}
-    if req.item_new is not None:
-        data["item_new"] = req.item_new
-    if req.date is not None:
-        data["date"] = req.date
-    if req.time is not None:
-        data["time"] = req.time
-    if req.person is not None:
-        data["person"] = req.person
-    if req.type is not None:
-        data["type"] = req.type
+    if req.item_new is not None: data["item_new"] = req.item_new
+    if req.date is not None: data["date"] = req.date
+    if req.time is not None: data["time"] = req.time
+    if req.person is not None: data["person"] = req.person
+    if req.type is not None: data["type"] = req.type
     result = handle_modify_todo(data, req.requester, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -251,12 +273,10 @@ class TodoDeleteRequest(BaseModel):
 
 @router.delete("/todos")
 def api_delete_todo(req: TodoDeleteRequest):
-    """刪除（完成）待辦事項"""
     ctx = RequestContext()
     ctx.load()
     result = handle_delete_todo({"item": req.item}, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -264,11 +284,9 @@ def api_delete_todo(req: TodoDeleteRequest):
 
 @router.get("/food")
 def api_get_food():
-    """列出所有有效食品庫存"""
     ctx = RequestContext()
     ctx.load()
-    food = [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
-    return food
+    return [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
 
 
 class FoodAddRequest(BaseModel):
@@ -281,18 +299,11 @@ class FoodAddRequest(BaseModel):
 
 @router.post("/food")
 def api_add_food(req: FoodAddRequest):
-    """新增食品"""
     ctx = RequestContext()
     ctx.load()
-    data = {
-        "name": req.name,
-        "quantity": req.quantity,
-        "unit": req.unit or "個",
-        "expiry": req.expiry,
-    }
+    data = {"name": req.name, "quantity": req.quantity, "unit": req.unit or "個", "expiry": req.expiry}
     result = handle_add(data, req.person, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -306,21 +317,15 @@ class FoodModifyRequest(BaseModel):
 
 @router.patch("/food")
 def api_modify_food(req: FoodModifyRequest):
-    """修改食品"""
     ctx = RequestContext()
     ctx.load()
     data = {"name": req.name}
-    if req.name_new is not None:
-        data["name_new"] = req.name_new
-    if req.quantity is not None:
-        data["quantity"] = req.quantity
-    if req.unit is not None:
-        data["unit"] = req.unit
-    if req.expiry is not None:
-        data["expiry"] = req.expiry
+    if req.name_new is not None: data["name_new"] = req.name_new
+    if req.quantity is not None: data["quantity"] = req.quantity
+    if req.unit is not None: data["unit"] = req.unit
+    if req.expiry is not None: data["expiry"] = req.expiry
     result = handle_modify(data, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -330,12 +335,10 @@ class FoodDeleteRequest(BaseModel):
 
 @router.delete("/food")
 def api_delete_food(req: FoodDeleteRequest):
-    """刪除（消耗）食品"""
     ctx = RequestContext()
     ctx.load()
     result = handle_delete({"name": req.name}, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -343,11 +346,9 @@ def api_delete_food(req: FoodDeleteRequest):
 
 @router.get("/schedules")
 def api_get_schedules():
-    """列出所有待執行排程"""
     ctx = RequestContext()
     ctx.load()
-    schedules = [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
-    return schedules
+    return [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
 
 
 class ScheduleAddRequest(BaseModel):
@@ -360,18 +361,11 @@ class ScheduleAddRequest(BaseModel):
 
 @router.post("/schedules")
 def api_add_schedule(req: ScheduleAddRequest):
-    """新增排程"""
     ctx = RequestContext()
     ctx.load()
-    data = {
-        "device_name": req.device_name,
-        "target_action": req.target_action,
-        "params": req.params,
-        "trigger_time": req.trigger_time,
-    }
+    data = {"device_name": req.device_name, "target_action": req.target_action, "params": req.params, "trigger_time": req.trigger_time}
     result = handle_add_schedule(data, req.person, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -383,17 +377,13 @@ class ScheduleDeleteRequest(BaseModel):
 
 @router.delete("/schedules")
 def api_delete_schedule(req: ScheduleDeleteRequest):
-    """刪除排程"""
     ctx = RequestContext()
     ctx.load()
     data = {"device_name": req.device_name}
-    if req.trigger_time:
-        data["trigger_time"] = req.trigger_time
-    if req.all:
-        data["all"] = True
+    if req.trigger_time: data["trigger_time"] = req.trigger_time
+    if req.all: data["all"] = True
     result = handle_delete_schedule(data, ctx)
-    if "❌" in result:
-        raise HTTPException(status_code=400, detail=result)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
@@ -401,7 +391,6 @@ def api_delete_schedule(req: ScheduleDeleteRequest):
 
 @router.get("/weather")
 def api_get_weather(date: str = "today", location: Optional[str] = None):
-    """查詢天氣"""
     summary = weather_api.get_weather_summary(date, location)
     if isinstance(summary, dict) and "error" in summary:
         raise HTTPException(status_code=400, detail=summary["error"])
@@ -412,35 +401,28 @@ def api_get_weather(date: str = "today", location: Optional[str] = None):
 
 @router.get("/members")
 def api_get_members():
-    """列出所有啟用的家庭成員"""
     ctx = RequestContext()
     ctx.load()
-    members = [
+    return [
         {"name": r.get("名稱"), "lineUserId": r.get("Line User ID")}
         for r in ctx.get("家庭成員")
         if r.get("狀態") == "啟用"
     ]
-    return members
 
 
 # ── 裝置選項 ──
 
 @router.get("/devices/options")
 def api_get_device_options():
-    """回傳各類裝置的可用選項，供 Dashboard 動態渲染按鈕"""
     ac_modes = {}
     for k, v in switchbot_api.AC_MODE_MAP.items():
-        if v not in ac_modes:
-            ac_modes[v] = k
+        if v not in ac_modes: ac_modes[v] = k
     ac_fans = {}
     for k, v in switchbot_api.AC_FAN_MAP.items():
-        if v not in ac_fans:
-            ac_fans[v] = k
-
+        if v not in ac_fans: ac_fans[v] = k
     dh_modes = {}
     for k, v in panasonic_api.DEHUMIDIFIER_MODE_MAP.items():
-        if v not in dh_modes:
-            dh_modes[v] = k
+        if v not in dh_modes: dh_modes[v] = k
 
     return {
         "ac": {
