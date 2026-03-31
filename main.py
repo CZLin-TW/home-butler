@@ -242,7 +242,7 @@ def handle_message(event):
                         pass
 
                 has_error = any("❌" in r for r in results if r)
-                raw_actions = {"query_devices", "query_dehumidifier"}
+                raw_actions = {"query_devices", "query_dehumidifier", "query_schedule"}
                 has_realtime = any(d.get("action") in raw_actions for d in actions)
                 semantic_actions = {"query_weather", "query_sensor", "query_food", "query_todo"}
                 has_semantic = any(d.get("action") in semantic_actions for d in actions)
