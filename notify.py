@@ -96,6 +96,13 @@ async def notify():
                 else:
                     todo_public.append(label)
 
+        # 待執行排程
+        schedule_pending = []
+        for r in ctx.get("排程指令"):
+            if r.get("狀態") == "待執行":
+                params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
+                schedule_pending.append(f"{r.get('設備名稱', '')}｜{params_text}｜{r.get('觸發時間', '')}")
+
         for member in members:
             if member.get("狀態") != "啟用":
                 continue
@@ -117,6 +124,8 @@ async def notify():
                 data_parts.append("明日與未完成待辦：" + "、".join(todo_public))
             if member_name in todo_private:
                 data_parts.append("您的私人待辦：" + "、".join(todo_private[member_name]))
+            if schedule_pending:
+                data_parts.append("待執行排程：" + "、".join(schedule_pending))
 
             if not data_parts:
                 continue
@@ -265,50 +274,14 @@ async def notify_realtime():
                     schedule_sheet.update_cell(i + 2, status_col, "已執行")
                     print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
 
-        # 檢查有變動的設備是否還有待執行排程
+        # 檢查有變動的設備是否還有待執行排程，全部完成則封存
         if processed_devices:
             updated_records = schedule_sheet.get_all_records()
 
             for device_name in processed_devices:
                 device_records = [r for r in updated_records if r.get("設備名稱") == device_name]
                 if any(r.get("狀態") == "待執行" for r in device_records):
-                    continue  # 還有排程，不封存不通知
-
-                # 按觸發時間排序
-                device_records.sort(key=lambda r: r.get("觸發時間", ""))
-                executed = [r for r in device_records if r.get("狀態") == "已執行"]
-                expired_list = [r for r in device_records if r.get("狀態") == "已過期"]
-
-                # 組通知訊息
-                parts = []
-                if executed:
-                    exec_texts = [_format_schedule_params(r.get("動作", ""), r.get("參數", "")) for r in executed]
-                    parts.append(f"✅ {device_name}：{'、'.join(exec_texts)} 已執行")
-                if expired_list:
-                    expired_lines = [f"• {_format_schedule_params(r.get('動作',''), r.get('參數',''))}（原訂 {r.get('觸發時間','')}）" for r in expired_list]
-                    parts.append(f"⚠️ {device_name} 以下排程因超時已取消：\n" + "\n".join(expired_lines))
-
-                last = device_records[-1]
-                if last.get("狀態") == "已過期" and executed:
-                    last_exec = executed[-1]
-                    parts.append(f"ℹ️ {device_name} 目前狀態為上次執行的：{_format_schedule_params(last_exec.get('動作',''), last_exec.get('參數',''))}")
-                elif last.get("狀態") == "已過期" and not executed:
-                    parts.append(f"ℹ️ {device_name} 所有排程皆未執行，設備狀態未變更")
-
-                parts.append(f"📋 {device_name} 的排程已全部完成。")
-
-                # 通知建立者
-                creators = set(r.get("建立者", "") for r in device_records if r.get("建立者"))
-                for creator in creators:
-                    for member in members:
-                        if member.get("名稱") == creator and member.get("狀態") == "啟用":
-                            user_id = member.get("Line User ID")
-                            if user_id:
-                                msg = "\n".join(parts)
-                                line_bot_api.push_message(user_id, TextSendMessage(text=msg))
-                                save_conversation(user_id, "assistant", msg)
-                                cleanup_conversation(user_id)
-                            break
+                    continue  # 還有排程，不封存
 
                 # 封存該設備所有排程（倒序刪除）
                 final_records = schedule_sheet.get_all_records()
