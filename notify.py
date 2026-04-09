@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from linebot.models import TextSendMessage
 from datetime import datetime, timedelta
 import json
@@ -9,9 +9,10 @@ from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
 from handlers.device import handle_control_ac, handle_control_ir, handle_control_dehumidifier
+from auth import verify_api_key
 import weather_api
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.post("/notify")

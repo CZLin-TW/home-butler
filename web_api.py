@@ -4,7 +4,7 @@ Web Dashboard REST API
 所有業務邏輯重用現有 handlers，不重複實作。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,11 +16,12 @@ from handlers.device import (
     handle_control_dehumidifier, handle_query_dehumidifier,
 )
 from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
+from auth import verify_api_key
 import switchbot_api
 import panasonic_api
 import weather_api
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
 
 # ── 首頁彙整 ──

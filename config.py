@@ -10,6 +10,7 @@ LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+HOME_BUTLER_API_KEY = os.environ.get("HOME_BUTLER_API_KEY", "")
 panasonic_api.PANASONIC_ACCOUNT = os.environ.get("PANASONIC_ACCOUNT", "")
 panasonic_api.PANASONIC_PASSWORD = os.environ.get("PANASONIC_PASSWORD", "")
 

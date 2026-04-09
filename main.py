@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import json
 import re
@@ -19,6 +19,7 @@ from handlers.device import (
 from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
 from handlers.style import handle_set_style
 from notify import router as notify_router
+from auth import verify_api_key
 import switchbot_api
 
 app = FastAPI()
@@ -38,7 +39,7 @@ def root():
     return {"status": "ok"}
 
 
-@app.get("/switchbot/devices")
+@app.get("/switchbot/devices", dependencies=[Depends(verify_api_key)])
 def list_switchbot_devices():
     result = switchbot_api.get_devices()
     if "error" in result:
@@ -62,7 +63,7 @@ def list_switchbot_devices():
     return {"status": "ok", "設備數量": len(devices), "設備列表": devices}
 
 
-@app.get("/switchbot/test/{device_id}/{button_name}")
+@app.get("/switchbot/test/{device_id}/{button_name}", dependencies=[Depends(verify_api_key)])
 def test_switchbot_command(device_id: str, button_name: str):
     print(f"[TEST] device_id={device_id}, button={button_name}")
     result = switchbot_api.send_command(device_id, button_name, "default", "customize")
@@ -76,7 +77,7 @@ def test_switchbot_command(device_id: str, button_name: str):
     }
 
 
-@app.get("/switchbot/test_turnon/{device_id}")
+@app.get("/switchbot/test_turnon/{device_id}", dependencies=[Depends(verify_api_key)])
 def test_switchbot_turnon(device_id: str):
     result = switchbot_api.send_command(device_id, "turnOn", "default", "command")
     print(f"[TEST] turnOn result: {result}")
