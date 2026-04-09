@@ -47,6 +47,11 @@ def api_dashboard():
                 "location": d.get("位置", ""),
                 "deviceId": d.get("Device ID", ""),
                 "buttons": d.get("按鈕", ""),
+                "lastPower": d.get("最後電源", ""),
+                "lastTemperature": d.get("最後溫度", ""),
+                "lastMode": d.get("最後模式", ""),
+                "lastFanSpeed": d.get("最後風速", ""),
+                "lastUpdatedAt": d.get("最後更新時間", ""),
             }
             device_list.append(device)
 
@@ -129,6 +134,11 @@ def api_get_devices():
                 "location": d.get("位置", ""),
                 "deviceId": d.get("Device ID", ""),
                 "buttons": d.get("按鈕", ""),
+                "lastPower": d.get("最後電源", ""),
+                "lastTemperature": d.get("最後溫度", ""),
+                "lastMode": d.get("最後模式", ""),
+                "lastFanSpeed": d.get("最後風速", ""),
+                "lastUpdatedAt": d.get("最後更新時間", ""),
             }
             result.append(device)
 

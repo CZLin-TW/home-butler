@@ -102,6 +102,30 @@ def get_current_todo(ctx):
     return "、".join(lines)
 
 
+def _format_ac_last_state(r):
+    """空調最後一次透過 Home Butler 送出的指令。讓 Claude 在收到「調低1度」這類
+    相對指令時能據此推算絕對溫度。若從未操作過則回傳空字串。"""
+    power = str(r.get("最後電源", "")).strip()
+    if not power:
+        return ""
+    updated = str(r.get("最後更新時間", "")).strip()
+    updated_part = f"，更新於 {updated}" if updated else ""
+    if power == "off":
+        return f"，上次透過我設定：已關閉{updated_part}"
+    temp = r.get("最後溫度", "")
+    mode = str(r.get("最後模式", "")).strip()
+    fan = str(r.get("最後風速", "")).strip()
+    parts = []
+    if temp != "" and temp is not None:
+        parts.append(f"{temp}°C")
+    if mode:
+        parts.append(mode)
+    if fan:
+        parts.append(f"風速{fan}")
+    state_text = " ".join(parts) if parts else "開啟"
+    return f"，上次透過我設定：{state_text}{updated_part}"
+
+
 def get_device_info(ctx):
     valid = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
     if not valid:
@@ -111,10 +135,11 @@ def get_device_info(ctx):
         buttons = r.get("按鈕", "")
         control = r.get("控制類型", "")
         control_part = f"，控制類型：{control}" if control else ""
+        last_state = _format_ac_last_state(r) if r.get("類型") == "空調" else ""
         if buttons:
-            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}{control_part}）")
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}，按鈕：{buttons}{control_part}{last_state}）")
         else:
-            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}{control_part}）")
+            lines.append(f"{r['名稱']}（類型：{r['類型']}，位置：{r.get('位置', '')}{control_part}{last_state}）")
     return "、".join(lines)
 
 
