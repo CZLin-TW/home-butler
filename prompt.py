@@ -109,9 +109,9 @@ def _format_ac_last_state(r):
     if not power:
         return ""
     updated = str(r.get("最後更新時間", "")).strip()
-    updated_part = f"，更新於 {updated}" if updated else ""
+    updated_part = f"（最後更新 {updated}）" if updated else ""
     if power == "off":
-        return f"，上次透過我設定：已關閉{updated_part}"
+        return f"，目前狀態：關閉{updated_part}"
     temp = r.get("最後溫度", "")
     mode = str(r.get("最後模式", "")).strip()
     fan = str(r.get("最後風速", "")).strip()
@@ -123,7 +123,7 @@ def _format_ac_last_state(r):
     if fan:
         parts.append(f"風速{fan}")
     state_text = " ".join(parts) if parts else "開啟"
-    return f"，上次透過我設定：{state_text}{updated_part}"
+    return f"，目前狀態：開機 {state_text}{updated_part}"
 
 
 def get_device_info(ctx):
