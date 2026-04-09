@@ -1,7 +1,71 @@
+import gspread
+from config import now_taipei
 from sheets import get_device_id_by_name, get_device_auth_by_name, get_all_devices_by_type
 import switchbot_api
 import panasonic_api
 import weather_api
+
+# 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
+# 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
+# 下次 Claude 組 prompt 時就能看到上一次的設定並據此推算新值。
+_AC_MODE_LABEL = {1: "自動", 2: "冷氣", 3: "除濕", 4: "送風", 5: "暖氣"}
+_AC_FAN_LABEL = {1: "自動", 2: "低", 3: "中", 4: "高"}
+_AC_STATE_COLUMNS = ["最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間"]
+
+
+def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, fan_int=None):
+    """把最後一次 AC 指令寫回「智能居家」分頁，供下次相對調整使用。
+
+    使用 batch_update 一次更新多格，避免多次 API 呼叫。
+    若欄位尚未在 sheet 上建立會自動略過，不會中斷主流程。
+    """
+    try:
+        sheet = ctx.get_worksheet("智能居家")
+        records = ctx.get("智能居家")
+        row_idx = None
+        for i, row in enumerate(records):
+            if row.get("Device ID") == device_id:
+                row_idx = i + 2  # 第 1 列為 header，records 從第 2 列開始
+                break
+        if row_idx is None:
+            return
+
+        headers = sheet.row_values(1)
+        header_to_col = {h: idx + 1 for idx, h in enumerate(headers)}
+        if not any(col in header_to_col for col in _AC_STATE_COLUMNS):
+            # sheet 還沒新增任何狀態欄位，使用者尚未設定，安靜跳過
+            return
+
+        now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
+        new_values = {"最後更新時間": now_str, "最後電源": power}
+        if power == "on":
+            if temperature is not None:
+                new_values["最後溫度"] = temperature
+            if mode_int is not None:
+                new_values["最後模式"] = _AC_MODE_LABEL.get(mode_int, "")
+            if fan_int is not None:
+                new_values["最後風速"] = _AC_FAN_LABEL.get(fan_int, "")
+        # power == "off" 時刻意保留先前的溫度/模式/風速，方便下次重新開機時沿用
+
+        updates = []
+        for header, value in new_values.items():
+            col = header_to_col.get(header)
+            if col is None:
+                continue
+            cell = gspread.utils.rowcol_to_a1(row_idx, col)
+            updates.append({"range": cell, "values": [[value]]})
+
+        if not updates:
+            return
+        sheet.batch_update(updates)
+
+        # 同步更新 ctx 快取，讓同一 request 後續（例如排程或連續 action）能讀到新值
+        rec = records[row_idx - 2]
+        for header, value in new_values.items():
+            if header in header_to_col:
+                rec[header] = value
+    except Exception as e:
+        print(f"[AC STATE SAVE ERROR] device={device_id}: {e}")
 
 
 def handle_control_ac(data, ctx):
@@ -20,6 +84,9 @@ def handle_control_ac(data, ctx):
             return "❌ 找不到空調設備，請先在「智能居家」分頁設定"
 
     power = data.get("power", "on")
+    temperature = None
+    mode = None
+    fan = None
     if power == "off":
         result = switchbot_api.ac_turn_off(device_id)
     else:
@@ -31,6 +98,7 @@ def handle_control_ac(data, ctx):
         result = switchbot_api.ac_set_all(device_id, temperature, mode, fan, "on")
 
     if result.get("success"):
+        _save_ac_last_state(ctx, device_id, power, temperature, mode, fan)
         return f"✅ {device_name} 指令已送出"
     else:
         return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
@@ -80,7 +148,7 @@ def handle_query_sensor(data, ctx):
 
     temp = result.get("temperature", "N/A")
     humidity = result.get("humidity", "N/A")
-    return f"🌡️ {device_name}：溫度 {temp}°C，濕度 {humidity}%"
+    return f"🌡️ {device_name}:溫度 {temp}°C，濕度 {humidity}%"
 
 
 def handle_query_devices(ctx):
