@@ -276,27 +276,28 @@ async def notify_realtime():
                     print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
 
         # 檢查有變動的設備是否還有待執行排程，全部完成則封存
+        # 只 fetch 一次 sheet，所有 archival 統一在最後倒序刪除，避免：
+        #   1. 多次 get_all_records 之間外部來源（LINE bot）改動造成索引不一致
+        #   2. 邊刪邊讀導致 row 偏移
         if processed_devices:
-            updated_records = schedule_sheet.get_all_records()
-
+            current_records = schedule_sheet.get_all_records()
+            rows_to_archive = []  # list of (sheet_row_number, record)
             for device_name in processed_devices:
-                device_records = [r for r in updated_records if r.get("設備名稱") == device_name]
+                device_records = [r for r in current_records if r.get("設備名稱") == device_name]
                 if any(r.get("狀態") == "待執行" for r in device_records):
                     continue  # 還有排程，不封存
+                for i, r in enumerate(current_records):
+                    if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期"):
+                        rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
 
-                # 封存該設備所有排程（倒序刪除）
-                final_records = schedule_sheet.get_all_records()
-                indices_to_archive = [
-                    (i, r) for i, r in enumerate(final_records)
-                    if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期")
-                ]
-                for i, row in sorted(indices_to_archive, key=lambda x: x[0], reverse=True):
-                    schedule_archive.append_row([
-                        row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                        row.get("觸發時間"), row.get("建立者"),
-                        row.get("建立時間"), row.get("狀態")
-                    ])
-                    schedule_sheet.delete_rows(i + 2)
+            # 倒序刪除避免 index 偏移
+            for sheet_row, row in sorted(rows_to_archive, key=lambda x: x[0], reverse=True):
+                schedule_archive.append_row([
+                    row.get("設備名稱"), row.get("動作"), row.get("參數"),
+                    row.get("觸發時間"), row.get("建立者"),
+                    row.get("建立時間"), row.get("狀態")
+                ])
+                schedule_sheet.delete_rows(sheet_row)
 
         return {"status": "ok"}
     except Exception as e:

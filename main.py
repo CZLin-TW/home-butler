@@ -176,13 +176,16 @@ def handle_message(event):
                 print(f"[WARN] JSON parse failed: {je}, raw: {repr(result)}")
                 json_match = re.search(r'\{.*\}', result, re.DOTALL)
                 if json_match:
+                    extracted = json_match.group()
                     try:
-                        parsed = json.loads(json_match.group())
-                        print(f"[WARN] JSON extracted from partial response")
-                    except json.JSONDecodeError:
+                        parsed = json.loads(extracted)
+                        print(f"[WARN] JSON extracted from partial response: {repr(extracted)}")
+                    except json.JSONDecodeError as je2:
+                        print(f"[WARN] regex fallback also failed: {je2}, extracted: {repr(extracted)}")
                         parsed = None
                         reply = "抱歉，系統處理時發生了一點問題，請再試一次。"
                 else:
+                    print(f"[WARN] no JSON object found in response, returning raw text to user")
                     reply = result
                     parsed = None
 

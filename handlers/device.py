@@ -11,6 +11,7 @@ import weather_api
 _AC_MODE_LABEL = {1: "自動", 2: "冷氣", 3: "除濕", 4: "送風", 5: "暖氣"}
 _AC_FAN_LABEL = {1: "自動", 2: "低", 3: "中", 4: "高"}
 _AC_STATE_COLUMNS = ["最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間"]
+_ac_columns_warning_printed = False
 
 
 def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, fan_int=None):
@@ -33,7 +34,16 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
         headers = sheet.row_values(1)
         header_to_col = {h: idx + 1 for idx, h in enumerate(headers)}
         if not any(col in header_to_col for col in _AC_STATE_COLUMNS):
-            # sheet 還沒新增任何狀態欄位，使用者尚未設定，安靜跳過
+            # sheet 還沒新增任何狀態欄位 → 不寫入但留下一次性警告，避免使用者好奇
+            # 「為什麼 Dashboard 永遠顯示『尚無使用記錄』」卻沒線索可查。
+            global _ac_columns_warning_printed
+            if not _ac_columns_warning_printed:
+                print(
+                    f"[WARN] AC state columns not found in 智能居家 sheet "
+                    f"({_AC_STATE_COLUMNS}). Last state will not be persisted; "
+                    f"add these columns to enable Dashboard last-state display."
+                )
+                _ac_columns_warning_printed = True
             return
 
         now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
