@@ -48,16 +48,22 @@ def handle_modify_todo(data, user_name, ctx):
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
                 return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
+            update_count = 0
             if data.get("item_new"):
                 sheet.update_cell(i + 2, 1, data.get("item_new"))
+                update_count += 1
             if data.get("date"):
                 sheet.update_cell(i + 2, 2, data.get("date"))
+                update_count += 1
             if data.get("time") is not None:
                 sheet.update_cell(i + 2, 3, data.get("time"))
+                update_count += 1
             if data.get("person"):
                 sheet.update_cell(i + 2, 4, data.get("person"))
+                update_count += 1
             if data.get("type"):
                 sheet.update_cell(i + 2, 6, data.get("type"))
+                update_count += 1
             new_person = data.get("person")
             if new_person and new_person != row.get("負責人") and new_person != user_name:
                 def _notify(person=new_person, item=data.get("item_new") or data.get("item"), date_str=data.get("date") or row.get("日期")):
@@ -71,6 +77,8 @@ def handle_modify_todo(data, user_name, ctx):
                                 cleanup_conversation(mid)
                             break
                 threading.Thread(target=_notify, daemon=True).start()
+            if update_count == 0:
+                return f"❌ 找到「{data.get('item')}」但沒收到任何要更新的欄位（收到參數：{list(data.keys())}）"
             return f"✅ 已更新「{data.get('item')}」"
     return f"❌ 找不到「{data.get('item')}」"
 
