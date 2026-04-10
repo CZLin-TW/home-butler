@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 
 from config import line_bot_api, TZ, now_taipei
-from sheets import RequestContext
+from sheets import RequestContext, build_row
 from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
@@ -291,12 +291,9 @@ async def notify_realtime():
                         rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
 
             # 倒序刪除避免 index 偏移
+            archive_headers = schedule_archive.row_values(1)
             for sheet_row, row in sorted(rows_to_archive, key=lambda x: x[0], reverse=True):
-                schedule_archive.append_row([
-                    row.get("設備名稱"), row.get("動作"), row.get("參數"),
-                    row.get("觸發時間"), row.get("建立者"),
-                    row.get("建立時間"), row.get("狀態")
-                ])
+                schedule_archive.append_row(build_row(archive_headers, row))
                 schedule_sheet.delete_rows(sheet_row)
 
         return {"status": "ok"}

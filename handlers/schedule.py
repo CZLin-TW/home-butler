@@ -1,6 +1,6 @@
 import json
 from config import now_taipei
-from sheets import get_all_devices_by_type
+from sheets import get_all_devices_by_type, build_row
 from prompt import _format_schedule_params
 
 
@@ -21,10 +21,16 @@ def handle_add_schedule(data, user_name, ctx):
         else:
             return "❌ 請指定設備名稱"
 
-    sheet.append_row([
-        device_name, target_action, params, trigger_time,
-        user_name, now, "待執行"
-    ])
+    headers = sheet.row_values(1)
+    sheet.append_row(build_row(headers, {
+        "設備名稱": device_name,
+        "動作": target_action,
+        "參數": params,
+        "觸發時間": trigger_time,
+        "建立者": user_name,
+        "建立時間": now,
+        "狀態": "待執行",
+    }))
 
     return f"✅ 已新增排程：{device_name} {trigger_time}"
 
@@ -49,13 +55,10 @@ def handle_delete_schedule(data, ctx):
             continue
         indices_to_delete.append(i)
 
+    archive_headers = archive.row_values(1)
     for i in sorted(indices_to_delete, reverse=True):
         row = records[i]
-        archive.append_row([
-            row.get("設備名稱"), row.get("動作"), row.get("參數"),
-            row.get("觸發時間"), row.get("建立者"),
-            row.get("建立時間"), "已取消"
-        ])
+        archive.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
         sheet.delete_rows(i + 2)
         records.pop(i)
         deleted += 1

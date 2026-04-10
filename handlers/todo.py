@@ -3,22 +3,24 @@ from linebot.models import TextSendMessage
 from config import line_bot_api
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
+from sheets import build_row
 
 
 def handle_add_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
-    sheet.append_row([
-        data.get("item", ""),
-        data.get("date", ""),
-        data.get("time", ""),
-        person,
-        "待辦",
-        todo_type,
-        "本地",
-        "讀寫"
-    ])
+    headers = sheet.row_values(1)
+    sheet.append_row(build_row(headers, {
+        "事項": data.get("item", ""),
+        "日期": data.get("date", ""),
+        "時間": data.get("time", ""),
+        "負責人": person,
+        "狀態": "待辦",
+        "類型": todo_type,
+        "來源": "本地",
+        "屬性": "讀寫",
+    }))
     date_str = data.get("date", "")
     time_str = data.get("time", "")
     time_part = f" {time_str}" if time_str else ""
@@ -48,21 +50,22 @@ def handle_modify_todo(data, user_name, ctx):
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
                 return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
+            col = {h: idx + 1 for idx, h in enumerate(sheet.row_values(1))}
             update_count = 0
             if data.get("item_new"):
-                sheet.update_cell(i + 2, 1, data.get("item_new"))
+                sheet.update_cell(i + 2, col["事項"], data.get("item_new"))
                 update_count += 1
             if data.get("date"):
-                sheet.update_cell(i + 2, 2, data.get("date"))
+                sheet.update_cell(i + 2, col["日期"], data.get("date"))
                 update_count += 1
             if data.get("time") is not None:
-                sheet.update_cell(i + 2, 3, data.get("time"))
+                sheet.update_cell(i + 2, col["時間"], data.get("time"))
                 update_count += 1
             if data.get("person"):
-                sheet.update_cell(i + 2, 4, data.get("person"))
+                sheet.update_cell(i + 2, col["負責人"], data.get("person"))
                 update_count += 1
             if data.get("type"):
-                sheet.update_cell(i + 2, 6, data.get("type"))
+                sheet.update_cell(i + 2, col["類型"], data.get("type"))
                 update_count += 1
             new_person = data.get("person")
             if new_person and new_person != row.get("負責人") and new_person != user_name:
@@ -101,10 +104,8 @@ def handle_delete_todo(data, ctx):
                 sheet.update_cell(i + 2, status_col, "已完成")
                 row["狀態"] = "已完成"
                 return f"✅ 已標記「{data.get('item')}」為已完成（下次同步後不再顯示）"
-            archive.append_row([
-                row.get("事項"), row.get("日期"), row.get("時間"),
-                row.get("負責人"), "已完成", row.get("類型")
-            ])
+            archive_headers = archive.row_values(1)
+            archive.append_row(build_row(archive_headers, {**row, "狀態": "已完成"}))
             sheet.delete_rows(i + 2)
             records.pop(i)
             return f"✅ 已標記「{data.get('item')}」為已完成"

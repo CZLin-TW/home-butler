@@ -120,3 +120,12 @@ def get_device_auth_by_name(device_name, ctx):
 
 def get_all_devices_by_type(device_type, ctx):
     return [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用" and r.get("類型") == device_type]
+
+
+def build_row(headers, data):
+    """Build a positional row list matching header order from a dict.
+
+    Unknown keys in data are silently ignored (only headers present in the
+    sheet matter).  Missing keys default to empty string.
+    """
+    return [data.get(h, "") for h in headers]
