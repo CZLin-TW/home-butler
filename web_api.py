@@ -14,6 +14,7 @@ from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_tod
 from handlers.device import (
     handle_control_ac, handle_control_ir, handle_query_sensor,
     handle_control_dehumidifier, handle_query_dehumidifier,
+    apply_sensor_compensation,
 )
 from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
@@ -68,6 +69,10 @@ def api_dashboard():
             idx = device_futures[future]
             try:
                 status = future.result(timeout=15)
+                if "temperature" in status or "humidity" in status:
+                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), devices_raw[idx])
+                    status["temperature"] = t
+                    status["humidity"] = h
                 device_list[idx].update(status)
             except Exception as e:
                 print(f"[DASHBOARD] Device query error: {e}")
@@ -155,6 +160,10 @@ def api_get_devices():
             idx = futures[future]
             try:
                 status = future.result(timeout=15)
+                if "temperature" in status or "humidity" in status:
+                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), devices[idx])
+                    status["temperature"] = t
+                    status["humidity"] = h
                 result[idx].update(status)
             except Exception as e:
                 print(f"[WEB API] Parallel query error: {e}")

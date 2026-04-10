@@ -8,6 +8,33 @@ import weather_api
 # 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
 # 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
 # 下次 Claude 組 prompt 時就能看到上一次的設定並據此推算新值。
+def _parse_offset(value):
+    """Parse a compensation offset from a Sheet cell value (int, float, str, or empty)."""
+    if value is None or value == "":
+        return 0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0
+
+
+def apply_sensor_compensation(temp, humidity, device_row):
+    """Apply temperature/humidity offset from the device's Sheet config.
+
+    Sign convention: offset is ADDED to the raw value.
+    e.g. 濕度補償 = -5 means 'sensor reads 5% high' → actual = raw + (-5).
+    Humidity is clamped to [0, 100]. Temperature is not clamped (can be negative).
+    Non-numeric raw values (e.g. "N/A") are returned unchanged.
+    """
+    temp_offset = _parse_offset(device_row.get("溫度補償"))
+    hum_offset = _parse_offset(device_row.get("濕度補償"))
+    if isinstance(temp, (int, float)) and temp_offset:
+        temp = round(temp + temp_offset, 1)
+    if isinstance(humidity, (int, float)) and hum_offset:
+        humidity = max(0, min(100, round(humidity + hum_offset, 1)))
+    return temp, humidity
+
+
 _AC_MODE_LABEL = {1: "自動", 2: "冷氣", 3: "除濕", 4: "送風", 5: "暖氣"}
 _AC_FAN_LABEL = {1: "自動", 2: "低", 3: "中", 4: "高"}
 _AC_STATE_COLUMNS = ["最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間"]
@@ -158,6 +185,8 @@ def handle_query_sensor(data, ctx):
 
     temp = result.get("temperature", "N/A")
     humidity = result.get("humidity", "N/A")
+    device_row = next((r for r in ctx.get("智能居家") if r.get("Device ID") == device_id and r.get("狀態") == "啟用"), {})
+    temp, humidity = apply_sensor_compensation(temp, humidity, device_row)
     return f"🌡️ {device_name}:溫度 {temp}°C，濕度 {humidity}%"
 
 
