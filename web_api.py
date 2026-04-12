@@ -30,13 +30,14 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 @router.get("/dashboard")
 def api_dashboard():
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）"""
-    ctx = RequestContext()
-    ctx.load()
-
     results = {}
     with ThreadPoolExecutor(max_workers=6) as executor:
+        # 天氣不需要 Sheet 資料，跟 ctx.load() 同時開始跑
         weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
         weather_tomorrow_future = executor.submit(weather_api.get_weather_summary, "tomorrow", None)
+
+        ctx = RequestContext()
+        ctx.load()  # 跟天氣 API 平行執行
 
         devices_raw = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
         device_list = []
