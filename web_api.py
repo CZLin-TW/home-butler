@@ -29,22 +29,18 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
 @router.get("/dashboard")
 def api_dashboard():
-    """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）"""
+    """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
+    不含感測器/除濕機即時狀態——前端另呼叫 /api/devices/status 補齊。"""
     results = {}
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        # 天氣不需要 Sheet 資料，跟 ctx.load() 同時開始跑
+    with ThreadPoolExecutor(max_workers=2) as executor:
         weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
         weather_tomorrow_future = executor.submit(weather_api.get_weather_summary, "tomorrow", None)
 
         ctx = RequestContext()
-        ctx.load()  # 跟天氣 API 平行執行
+        ctx.load()
 
-        devices_raw = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
-        device_list = []
-        device_futures = {}
-
-        for i, d in enumerate(devices_raw):
-            device = {
+        device_list = [
+            {
                 "name": d.get("名稱"),
                 "type": d.get("類型"),
                 "location": d.get("位置", ""),
@@ -56,27 +52,8 @@ def api_dashboard():
                 "lastFanSpeed": d.get("最後風速", ""),
                 "lastUpdatedAt": d.get("最後更新時間", ""),
             }
-            device_list.append(device)
-
-            if d.get("類型") == "感應器" and d.get("Device ID"):
-                future = executor.submit(_fetch_sensor_status, d["Device ID"])
-                device_futures[future] = i
-
-            if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
-                future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
-                device_futures[future] = i
-
-        for future in as_completed(device_futures):
-            idx = device_futures[future]
-            try:
-                status = future.result(timeout=15)
-                if "temperature" in status or "humidity" in status:
-                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), devices_raw[idx])
-                    status["temperature"] = t
-                    status["humidity"] = h
-                device_list[idx].update(status)
-            except Exception as e:
-                print(f"[DASHBOARD] Device query error: {e}")
+            for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
+        ]
 
         try:
             results["weatherToday"] = weather_today_future.result(timeout=15)
@@ -125,51 +102,61 @@ def _fetch_dehumidifier_status(auth, device_id):
 
 @router.get("/devices")
 def api_get_devices():
-    """列出所有啟用裝置及即時狀態（平行查詢感測器和除濕機）"""
+    """列出所有啟用裝置（Sheet 資料，不含即時狀態）"""
+    ctx = RequestContext()
+    ctx.load()
+    return [
+        {
+            "name": d.get("名稱"),
+            "type": d.get("類型"),
+            "location": d.get("位置", ""),
+            "deviceId": d.get("Device ID", ""),
+            "buttons": d.get("按鈕", ""),
+            "lastPower": d.get("最後電源", ""),
+            "lastTemperature": d.get("最後溫度", ""),
+            "lastMode": d.get("最後模式", ""),
+            "lastFanSpeed": d.get("最後風速", ""),
+            "lastUpdatedAt": d.get("最後更新時間", ""),
+        }
+        for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
+    ]
+
+
+@router.get("/devices/status")
+def api_get_device_status():
+    """查詢感測器/除濕機即時狀態，回傳 {裝置名稱: 狀態}。
+    前端在裝置清單載入後非同步呼叫此 endpoint 補齊即時數值。"""
     ctx = RequestContext()
     ctx.load()
     devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
 
-    result = []
+    status_map = {}
     futures = {}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        for i, d in enumerate(devices):
-            device = {
-                "name": d.get("名稱"),
-                "type": d.get("類型"),
-                "location": d.get("位置", ""),
-                "deviceId": d.get("Device ID", ""),
-                "buttons": d.get("按鈕", ""),
-                "lastPower": d.get("最後電源", ""),
-                "lastTemperature": d.get("最後溫度", ""),
-                "lastMode": d.get("最後模式", ""),
-                "lastFanSpeed": d.get("最後風速", ""),
-                "lastUpdatedAt": d.get("最後更新時間", ""),
-            }
-            result.append(device)
-
+        for d in devices:
+            name = d.get("名稱", "")
             if d.get("類型") == "感應器" and d.get("Device ID"):
                 future = executor.submit(_fetch_sensor_status, d["Device ID"])
-                futures[future] = i
-
+                futures[future] = (name, d)
             if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
                 future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
-                futures[future] = i
+                futures[future] = (name, d)
 
         for future in as_completed(futures):
-            idx = futures[future]
+            name, device_row = futures[future]
             try:
                 status = future.result(timeout=15)
                 if "temperature" in status or "humidity" in status:
-                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), devices[idx])
+                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), device_row)
                     status["temperature"] = t
                     status["humidity"] = h
-                result[idx].update(status)
+                if status:
+                    status_map[name] = status
             except Exception as e:
-                print(f"[WEB API] Parallel query error: {e}")
+                print(f"[DEVICE STATUS] {name} query error: {e}")
 
-    return result
+    return status_map
 
 
 class AcControlRequest(BaseModel):
