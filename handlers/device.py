@@ -1,6 +1,8 @@
 import gspread
+import json
+from datetime import timedelta
 from config import now_taipei
-from sheets import get_device_id_by_name, get_device_auth_by_name, get_all_devices_by_type
+from sheets import get_device_id_by_name, get_device_auth_by_name, get_all_devices_by_type, build_row
 import switchbot_api
 import panasonic_api
 import weather_api
@@ -105,7 +107,121 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
         print(f"[AC STATE SAVE ERROR] device={device_id}: {e}")
 
 
-def handle_control_ac(data, ctx):
+def _parse_int_safe(value):
+    """Parse an int from a Sheet cell value; returns 0 if invalid/empty."""
+    if value is None or value == "":
+        return 0
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
+
+
+def _is_ac_off_action(schedule_row):
+    """判斷某筆排程動作是否為『把 AC 關閉』。"""
+    if schedule_row.get("動作") != "control_ac":
+        return False
+    try:
+        params = json.loads(schedule_row.get("參數", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return params.get("power") == "off"
+
+
+def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
+    """維護某台 AC 的自動關機排程。
+
+    核心規則：AC 開著 AND 沒有使用者 pending off 排程 → 需要 auto，否則不需要。
+    timer anchor：只有從『關 → 開』的 transition 才重置計時，純調整（on → on）保留現有 auto。
+
+    transitioned_to_on=True 時視為開機事件（清掉舊 auto、加新 auto）
+    transitioned_to_on=False 時視為調整/重新評估（有舊 auto 就保留、沒舊 auto 就按需補）
+    """
+    try:
+        devices = ctx.get("智能居家")
+        device_row = next(
+            (d for d in devices
+             if d.get("名稱") == device_name
+             and d.get("類型") == "空調"
+             and d.get("狀態") == "啟用"),
+            None,
+        )
+        if not device_row:
+            return
+
+        power = str(device_row.get("最後電源", "")).strip()
+        hours = _parse_int_safe(device_row.get("自動關機小時數"))
+
+        schedule_sheet = ctx.get_worksheet("排程指令")
+        archive_sheet = ctx.get_worksheet("排程封存")
+        all_schedules = ctx.get("排程指令")
+
+        # 找這台 AC 的 auto 與 user-off 排程
+        existing_auto = [
+            (i, r) for i, r in enumerate(all_schedules)
+            if r.get("設備名稱") == device_name
+            and r.get("狀態") == "待執行"
+            and r.get("來源") == "自動"
+        ]
+        user_off = [
+            r for r in all_schedules
+            if r.get("設備名稱") == device_name
+            and r.get("狀態") == "待執行"
+            and (r.get("來源") or "使用者") == "使用者"
+            and _is_ac_off_action(r)
+        ]
+
+        need_auto = (power == "on" and hours > 0 and not user_off)
+
+        def _archive_and_delete(indices_rows):
+            """封存 + 刪除（倒序，避免 row index 偏移）。"""
+            if not indices_rows:
+                return
+            archive_headers = archive_sheet.row_values(1)
+            for i, row in sorted(indices_rows, key=lambda x: x[0], reverse=True):
+                archive_sheet.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
+                schedule_sheet.delete_rows(i + 2)
+                all_schedules.pop(i)
+
+        def _add_auto():
+            """產生一筆自動 off 排程。"""
+            trigger = (now_taipei() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+            now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
+            headers = schedule_sheet.row_values(1)
+            new_row = {
+                "設備名稱": device_name,
+                "動作": "control_ac",
+                "參數": json.dumps({"power": "off"}, ensure_ascii=False),
+                "觸發時間": trigger,
+                "建立者": "系統",
+                "建立時間": now_str,
+                "狀態": "待執行",
+                "來源": "自動",
+            }
+            schedule_sheet.append_row(build_row(headers, new_row))
+            all_schedules.append(new_row)  # 同步 ctx 快取
+            print(f"[AUTO SCHEDULE] {device_name} off @ {trigger}")
+
+        if need_auto:
+            if transitioned_to_on:
+                # 開機事件：清舊、加新（timer 重置）
+                _archive_and_delete(existing_auto)
+                _add_auto()
+            elif not existing_auto:
+                # 調整時沒有舊 auto（可能剛才 user off 排程被刪了）→ 補一筆
+                _add_auto()
+            # else: 調整時已有舊 auto → 保留不動（timer 不重置）
+        else:
+            # 不需要 auto（AC 關了、或已有 user off、或功能停用）→ 清掉現有
+            _archive_and_delete(existing_auto)
+    except Exception as e:
+        print(f"[MAINTAIN AUTO SCHEDULE ERROR] device={device_name}: {e}")
+
+
+def handle_control_ac(data, ctx, from_auto_schedule=False):
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name, ctx)
 
@@ -119,6 +235,13 @@ def handle_control_ac(data, ctx):
             return f"❌ 有多台空調（{names}），請指定要控制哪一台"
         else:
             return "❌ 找不到空調設備，請先在「智能居家」分頁設定"
+
+    # 記錄命令前的電源狀態，用於判斷是否為「關→開」transition（影響 auto-schedule timer 是否重置）
+    prior_power_on = False
+    for r in ctx.get("智能居家"):
+        if r.get("Device ID") == device_id and r.get("狀態") == "啟用":
+            prior_power_on = str(r.get("最後電源", "")).strip() == "on"
+            break
 
     power = data.get("power", "on")
     temperature = None
@@ -136,6 +259,11 @@ def handle_control_ac(data, ctx):
 
     if result.get("success"):
         _save_ac_last_state(ctx, device_id, power, temperature, mode, fan)
+        # 自動排程 safety net：非自動排程觸發時才重算（避免 auto 觸發 → auto 再生 auto 的無限循環）
+        if not from_auto_schedule:
+            new_power_on = (power == "on")
+            transitioned = new_power_on and not prior_power_on
+            maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=transitioned)
         return f"✅ {device_name} 指令已送出"
     else:
         return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"

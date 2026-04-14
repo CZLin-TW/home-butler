@@ -2,6 +2,7 @@ import json
 from config import now_taipei
 from sheets import get_all_devices_by_type, build_row
 from prompt import _format_schedule_params
+from handlers.device import maintain_ac_auto_schedule
 
 
 def handle_add_schedule(data, user_name, ctx):
@@ -22,7 +23,7 @@ def handle_add_schedule(data, user_name, ctx):
             return "❌ 請指定設備名稱"
 
     headers = sheet.row_values(1)
-    sheet.append_row(build_row(headers, {
+    new_row = {
         "設備名稱": device_name,
         "動作": target_action,
         "參數": params,
@@ -30,7 +31,15 @@ def handle_add_schedule(data, user_name, ctx):
         "建立者": user_name,
         "建立時間": now,
         "狀態": "待執行",
-    }))
+        "來源": "使用者",
+    }
+    sheet.append_row(build_row(headers, new_row))
+    # 同步 ctx 快取，讓接著呼叫的 maintain_ac_auto_schedule 看得到這筆新排程
+    ctx.get("排程指令").append(new_row)
+
+    # AC 相關排程異動後重算該 AC 的 auto（新增 off 排程會清掉 auto）
+    if target_action == "control_ac":
+        maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False)
 
     return f"✅ 已新增排程：{device_name} {trigger_time}"
 
@@ -56,14 +65,21 @@ def handle_delete_schedule(data, ctx):
         indices_to_delete.append(i)
 
     archive_headers = archive.row_values(1)
+    any_user_ac_deleted = False
     for i in sorted(indices_to_delete, reverse=True):
         row = records[i]
+        # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
+        if row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
+            any_user_ac_deleted = True
         archive.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
         sheet.delete_rows(i + 2)
         records.pop(i)
         deleted += 1
 
     if deleted:
+        # 只在刪到使用者 AC 排程時重算（避免使用者剛刪掉 auto 又被立刻加回來的困擾）
+        if any_user_ac_deleted:
+            maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False)
         return f"✅ 已取消 {deleted} 筆排程"
     return "❌ 找不到符合條件的排程"
 

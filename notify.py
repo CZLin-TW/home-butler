@@ -265,8 +265,10 @@ async def notify_realtime():
                     params["device_name"] = device_name
 
                     result = ""
+                    # 判斷此排程是否為系統自動產生 → 避免 auto 排程觸發後又觸發 auto 重算（無限循環）
+                    is_auto = r.get("來源") == "自動"
                     if action_type == "control_ac":
-                        result = handle_control_ac(params, ctx)
+                        result = handle_control_ac(params, ctx, from_auto_schedule=is_auto)
                     elif action_type == "control_ir":
                         result = handle_control_ir(params, ctx)
                     elif action_type == "control_dehumidifier":

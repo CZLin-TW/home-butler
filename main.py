@@ -95,6 +95,9 @@ async def callback(request: Request):
     try:
         webhook_handler.handle(body.decode(), signature)
     except Exception as e:
+        # 把完整 traceback 印出來，不然 FastAPI 只顯示 "400 Bad Request"、
+        # reply_message 之類底層失敗的原因會整個消失
+        print(f"[CALLBACK ERROR] {traceback.format_exc()}")
         raise HTTPException(status_code=400, detail=str(e))
     return "OK"
 
