@@ -144,8 +144,13 @@ def _get_value(period):
 
 
 def _find_current_value(time_series, now_naive):
-    """找涵蓋 now 的那一段（每段 12 小時），回傳該段的值；找不到回 None。
+    """回傳「最貼近現在」的預報值，依序嘗試：
+    1. 涵蓋 now 的那一段（每段 12 小時）
+    2. 最近一段過去的（StartTime ≤ now 中最晚的）
+    3. 最早的未來段（StartTime > now 中最早的）
+    只有 time_series 完全為空才回 None。確保跨日界線時濕度等欄位不會消失。
     now_naive: 不帶 tzinfo 的 datetime，跟 CWA StartTime 格式一致。"""
+    parsed = []
     for period in time_series:
         start_str = period.get("StartTime", "")
         if not start_str:
@@ -154,10 +159,25 @@ def _find_current_value(time_series, now_naive):
             start_dt = datetime.strptime(start_str[:19], "%Y-%m-%dT%H:%M:%S")
         except ValueError:
             continue
-        end_dt = start_dt + timedelta(hours=12)
-        if start_dt <= now_naive < end_dt:
+        parsed.append((start_dt, period))
+
+    if not parsed:
+        return None
+
+    # 1. 涵蓋 now
+    for start_dt, period in parsed:
+        if start_dt <= now_naive < start_dt + timedelta(hours=12):
             return _get_value(period)
-    return None
+
+    # 2. 最近過去段
+    past = [(s, p) for s, p in parsed if s <= now_naive]
+    if past:
+        past.sort(key=lambda x: x[0], reverse=True)
+        return _get_value(past[0][1])
+
+    # 3. 最早未來段
+    parsed.sort(key=lambda x: x[0])
+    return _get_value(parsed[0][1])
 
 
 def _collect_day(time_series, target_date):
