@@ -9,6 +9,7 @@ import httpx
 import os
 from datetime import datetime, timedelta
 import pytz
+from observation_api import get_observation_for_location
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore"
@@ -180,6 +181,49 @@ def _find_current_value(time_series, now_naive):
     return _get_value(parsed[0][1])
 
 
+def _segments_in_window(time_series, start_naive, end_naive):
+    """收集所有跟 [start, end) 有時間交集的預報段。
+    每段涵蓋 [StartTime, StartTime+12hr)。"""
+    results = []
+    for period in time_series:
+        start_str = period.get("StartTime", "")
+        if not start_str:
+            continue
+        try:
+            seg_start = datetime.strptime(start_str[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            continue
+        seg_end = seg_start + timedelta(hours=12)
+        if seg_start < end_naive and seg_end > start_naive:
+            value = _get_value(period)
+            if value is not None:
+                results.append({"value": value, "hour": seg_start.hour, "start": seg_start})
+    return results
+
+
+def _to_int(v):
+    """把 CWA 回的值轉 int；缺值/空字串/None 時回 None。"""
+    if v is None or v == "" or v == "-":
+        return None
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def _pick_notable_wx(items):
+    """從一堆 wx 候選中挑最突出的：下雨 > 陰 > 其他 > 第一個。"""
+    if not items:
+        return None
+    rainy = [i for i in items if "雨" in str(i.get("value", ""))]
+    if rainy:
+        return rainy[0]["value"]
+    cloudy = [i for i in items if "陰" in str(i.get("value", ""))]
+    if cloudy:
+        return cloudy[0]["value"]
+    return items[0]["value"]
+
+
 def _collect_day(time_series, target_date):
     """收集某天所有時段的值"""
     results = []
@@ -272,16 +316,41 @@ def get_weather_summary(date_str="today", location=None):
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_pop = max(pops) if pops else None
 
-    # 當下相對濕度 —— F-D0047 每 12 小時一段，抓涵蓋「現在」的那一段
-    # 註：看明天或更後的預報時 now 不在任何段裡，current_rh 會是 None（前端會隱藏）
+    # ── 「當下」類資料（跟 target_date 無關，永遠基於 now）─────────────
+    now_naive = now.replace(tzinfo=None)
+    wx_series = _parse_element(elements, "天氣現象")
+    mint_series = _parse_element(elements, "最低溫度")
+    maxt_series = _parse_element(elements, "最高溫度")
+    pop_series = _parse_element(elements, "12小時降雨機率")
     rh_series = _parse_element(elements, "平均相對濕度")
-    rh_raw = _find_current_value(rh_series, now.replace(tzinfo=None))
-    current_rh = None
-    if rh_raw not in (None, "", "-"):
-        try:
-            current_rh = int(float(rh_raw))
-        except (ValueError, TypeError):
-            current_rh = None
+
+    # 當前段（涵蓋 now 的那 12 小時段）
+    current_segment = {
+        "wx": _find_current_value(wx_series, now_naive),
+        "min_t": _to_int(_find_current_value(mint_series, now_naive)),
+        "max_t": _to_int(_find_current_value(maxt_series, now_naive)),
+        "pop": _to_int(_find_current_value(pop_series, now_naive)),
+        "rh": _to_int(_find_current_value(rh_series, now_naive)),
+    }
+
+    # 未來 24 小時 window 內的所有段 aggregate
+    win_end = now_naive + timedelta(hours=24)
+    next24_wx = _segments_in_window(wx_series, now_naive, win_end)
+    next24_mint = [_to_int(v["value"]) for v in _segments_in_window(mint_series, now_naive, win_end)]
+    next24_maxt = [_to_int(v["value"]) for v in _segments_in_window(maxt_series, now_naive, win_end)]
+    next24_pop = [_to_int(v["value"]) for v in _segments_in_window(pop_series, now_naive, win_end)]
+    next24_mint = [x for x in next24_mint if x is not None]
+    next24_maxt = [x for x in next24_maxt if x is not None]
+    next24_pop = [x for x in next24_pop if x is not None]
+    next_24h = {
+        "wx": _pick_notable_wx(next24_wx),
+        "min_t": min(next24_mint) if next24_mint else None,
+        "max_t": max(next24_maxt) if next24_maxt else None,
+        "pop": max(next24_pop) if next24_pop else None,
+    }
+
+    # 觀測（真實當下讀值，只對有對應測站的地點有效）
+    observation = get_observation_for_location(location)
 
     # 日期標籤
     if days_diff == 0:
@@ -299,13 +368,20 @@ def get_weather_summary(date_str="today", location=None):
         "city": city_name,
         "date_label": date_label,
         "date": target_date.strftime("%m/%d"),
+        # 目標日整天 aggregate（LINE bot 回答「今天/明天/某日」類查詢用）
         "wx": wx,
         "min_t": min_t,
         "max_t": max_t,
         "min_at": min_at,
         "max_at": max_at,
         "pop": max_pop,
-        "current_rh": current_rh,
+        # 當下觀測（跟 target_date 無關、永遠是 now）
+        "observation": observation,
+        # 基於 now 的預報 sub-structures
+        "forecast": {
+            "current_segment": current_segment,
+            "next_24h": next_24h,
+        },
     }
 
 
@@ -334,8 +410,15 @@ def format_weather(summary):
         elif summary["pop"] >= 40:
             lines.append("🌂 建議帶把傘以防萬一")
 
-    if summary.get("current_rh") is not None:
-        lines.append(f"當下濕度：{summary['current_rh']}%")
+    obs = summary.get("observation")
+    if obs:
+        parts = []
+        if obs.get("temp") is not None:
+            parts.append(f"{obs['temp']}°C")
+        if obs.get("humidity") is not None:
+            parts.append(f"{obs['humidity']}%")
+        if parts:
+            lines.append(f"當下（{obs.get('observed_at', '')} {obs.get('station', '')}測站）：" + " ".join(parts))
 
     return "\n".join(lines)
 

@@ -34,7 +34,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
 - query_dehumidifier：device_name
 - query_devices：無參數
-- query_weather：選填 date(YYYY-MM-DD,最多未來7天,預設今天), location(完整地名如「雲林縣莿桐鄉」,預設竹北市)
+- query_weather：選填 date(YYYY-MM-DD,最多未來7天,預設今天), location(完整地名如「雲林縣莿桐鄉」,預設竹北市)。回應會同時包含「當下觀測值」（若地點有對應測站）跟「當日預報」，使用者問「現在/目前」類問題優先用觀測值，問「明天/週末」類未來問題用預報
 - add_schedule：device_name, target_action(control_ac/control_ir/control_dehumidifier), params(與原 action 參數相同), trigger_time(YYYY-MM-DD HH:MM，根據現在時間自行計算)
 - delete_schedule：device_name, 選填 trigger_time(YYYY-MM-DD HH:MM), all(true=刪除該設備全部排程)
 - query_schedule：無參數
