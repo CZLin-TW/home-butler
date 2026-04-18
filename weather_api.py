@@ -235,8 +235,8 @@ def get_weather_summary(date_str="today", location=None):
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_pop = max(pops) if pops else None
 
-    # 相對濕度（RH）
-    rh_values = _collect_day(_parse_element(elements, "相對濕度"), target_date)
+    # 相對濕度（RH）—— F-D0047 回應的 ElementName 是「平均相對濕度」
+    rh_values = _collect_day(_parse_element(elements, "平均相對濕度"), target_date)
     rhs = [int(v["value"]) for v in rh_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     min_rh = min(rhs) if rhs else None
     max_rh = max(rhs) if rhs else None
