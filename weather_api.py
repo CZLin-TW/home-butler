@@ -143,6 +143,23 @@ def _get_value(period):
     return list(v.values())[0] if v else None  # v 為空字典時 if v 為 False，不會 IndexError
 
 
+def _find_current_value(time_series, now_naive):
+    """找涵蓋 now 的那一段（每段 12 小時），回傳該段的值；找不到回 None。
+    now_naive: 不帶 tzinfo 的 datetime，跟 CWA StartTime 格式一致。"""
+    for period in time_series:
+        start_str = period.get("StartTime", "")
+        if not start_str:
+            continue
+        try:
+            start_dt = datetime.strptime(start_str[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            continue
+        end_dt = start_dt + timedelta(hours=12)
+        if start_dt <= now_naive < end_dt:
+            return _get_value(period)
+    return None
+
+
 def _collect_day(time_series, target_date):
     """收集某天所有時段的值"""
     results = []
@@ -235,11 +252,16 @@ def get_weather_summary(date_str="today", location=None):
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_pop = max(pops) if pops else None
 
-    # 相對濕度（RH）—— F-D0047 回應的 ElementName 是「平均相對濕度」
-    rh_values = _collect_day(_parse_element(elements, "平均相對濕度"), target_date)
-    rhs = [int(v["value"]) for v in rh_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
-    min_rh = min(rhs) if rhs else None
-    max_rh = max(rhs) if rhs else None
+    # 當下相對濕度 —— F-D0047 每 12 小時一段，抓涵蓋「現在」的那一段
+    # 註：看明天或更後的預報時 now 不在任何段裡，current_rh 會是 None（前端會隱藏）
+    rh_series = _parse_element(elements, "平均相對濕度")
+    rh_raw = _find_current_value(rh_series, now.replace(tzinfo=None))
+    current_rh = None
+    if rh_raw not in (None, "", "-"):
+        try:
+            current_rh = int(float(rh_raw))
+        except (ValueError, TypeError):
+            current_rh = None
 
     # 日期標籤
     if days_diff == 0:
@@ -263,8 +285,7 @@ def get_weather_summary(date_str="today", location=None):
         "min_at": min_at,
         "max_at": max_at,
         "pop": max_pop,
-        "min_rh": min_rh,
-        "max_rh": max_rh,
+        "current_rh": current_rh,
     }
 
 
@@ -293,8 +314,8 @@ def format_weather(summary):
         elif summary["pop"] >= 40:
             lines.append("🌂 建議帶把傘以防萬一")
 
-    if summary.get("min_rh") is not None and summary.get("max_rh") is not None:
-        lines.append(f"濕度：{summary['min_rh']}~{summary['max_rh']}%")
+    if summary.get("current_rh") is not None:
+        lines.append(f"當下濕度：{summary['current_rh']}%")
 
     return "\n".join(lines)
 
