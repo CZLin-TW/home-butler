@@ -43,7 +43,7 @@ def _fetch_forecast(data_id, location_name=None):
     try:
         params = {
             "Authorization": CWA_API_KEY,
-            "elementName": "Wx,MinT,MaxT,MinAT,MaxAT,PoP12h,WeatherDescription",
+            "elementName": "Wx,MinT,MaxT,MinAT,MaxAT,PoP12h,RH,WeatherDescription",
             
         }
         if location_name:
@@ -235,6 +235,12 @@ def get_weather_summary(date_str="today", location=None):
     pops = [int(v["value"]) for v in pop_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
     max_pop = max(pops) if pops else None
 
+    # 相對濕度（RH）
+    rh_values = _collect_day(_parse_element(elements, "相對濕度"), target_date)
+    rhs = [int(v["value"]) for v in rh_values if v["value"] is not None and v["value"] != "" and v["value"] != "-"]
+    min_rh = min(rhs) if rhs else None
+    max_rh = max(rhs) if rhs else None
+
     # 日期標籤
     if days_diff == 0:
         date_label = "今天"
@@ -257,6 +263,8 @@ def get_weather_summary(date_str="today", location=None):
         "min_at": min_at,
         "max_at": max_at,
         "pop": max_pop,
+        "min_rh": min_rh,
+        "max_rh": max_rh,
     }
 
 
@@ -284,6 +292,9 @@ def format_weather(summary):
             lines.append("☔ 記得帶傘！")
         elif summary["pop"] >= 40:
             lines.append("🌂 建議帶把傘以防萬一")
+
+    if summary.get("min_rh") is not None and summary.get("max_rh") is not None:
+        lines.append(f"濕度：{summary['min_rh']}~{summary['max_rh']}%")
 
     return "\n".join(lines)
 
