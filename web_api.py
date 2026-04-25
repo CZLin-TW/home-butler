@@ -171,6 +171,7 @@ class AcControlRequest(BaseModel):
 def api_control_ac(req: AcControlRequest):
     ctx = RequestContext()
     ctx.load()
+    print(f"[DEBUG control_ac] device_name={req.device_name!r} sheet_names={[r.get('名稱') for r in ctx.get('智能居家') if r.get('狀態') == '啟用' and r.get('類型') == '空調']!r}")
     data = {"device_name": req.device_name, "power": req.power}
     if req.temperature is not None: data["temperature"] = req.temperature
     if req.mode is not None: data["mode"] = req.mode
