@@ -2,7 +2,12 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import time
+import unicodedata
 from config import SPREADSHEET_ID, GOOGLE_CREDENTIALS
+
+
+def _norm(s):
+    return unicodedata.normalize("NFC", str(s or "")).strip()
 
 _sheets_cache_ttl = 60
 _spreadsheet = None
@@ -105,15 +110,17 @@ class RequestContext:
 
 
 def get_device_id_by_name(device_name, ctx):
+    target = _norm(device_name)
     for r in ctx.get("智能居家"):
-        if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
+        if r.get("狀態") == "啟用" and _norm(r.get("名稱")) == target:
             return r.get("Device ID", "")
     return ""
 
 
 def get_device_auth_by_name(device_name, ctx):
+    target = _norm(device_name)
     for r in ctx.get("智能居家"):
-        if r.get("狀態") == "啟用" and r.get("名稱") == device_name:
+        if r.get("狀態") == "啟用" and _norm(r.get("名稱")) == target:
             return r.get("Auth", ""), r.get("Device ID", "")
     return "", ""
 
