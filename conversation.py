@@ -1,5 +1,5 @@
 import threading
-from config import claude, now_taipei
+from config import claude, now_taipei, APP_VERSION
 from sheets import get_sheet
 from prompt import (
     SYSTEM_PROMPT, DEFAULT_STYLE,
@@ -59,7 +59,8 @@ def ask_claude(user_id, user_message, user_name, ctx):
         device_info=get_device_info(ctx),
         schedule_info=get_schedule_info(ctx),
         current_user=user_name,
-        user_style=style_instruction
+        user_style=style_instruction,
+        app_version=APP_VERSION,
     )
     history = get_recent_conversation(user_id, ctx)
     messages = history + [{"role": "user", "content": user_message}]
