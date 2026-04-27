@@ -7,8 +7,10 @@
 **bump 流程**（兩 repo 必須同步）：
 1. Dashboard 改 `package.json:version`
 2. home-butler 改 `config.py:APP_VERSION` 成同一個值
-3. 兩邊各 commit、各 `git tag v<新版本>` 後 push（tag 也要 push：`git push origin v<新版本>`）
+3. 兩邊各 commit、push 到 `main`
 4. 若只動其中一邊，bot 跟 Dashboard 顯示的版本會對不上
+
+本專案不使用 git tag / GitHub Releases；版本以 `package.json` / `config.py` 內的字串為準，git history 自己就是版本軌跡。
 
 # Git push 環境差異
 
