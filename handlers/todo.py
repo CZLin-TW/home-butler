@@ -69,6 +69,9 @@ def handle_modify_todo(data, user_name, ctx):
                 update_count += 1
             new_person = data.get("person")
             if new_person and new_person != row.get("負責人") and new_person != user_name:
+                # default-arg 把外層的值「凍結」進函式簽名。
+                # 如果不這樣寫，thread 實際起跑時 closure 變數可能已被外層覆寫
+                # （例如 data 在同一請求裡被另一個 action 重用、或 row 被讀取彼時点的值）。
                 def _notify(person=new_person, item=data.get("item_new") or data.get("item"), date_str=data.get("date") or row.get("日期")):
                     for member in ctx.get("家庭成員"):
                         if member.get("名稱") == person and member.get("狀態") == "啟用":

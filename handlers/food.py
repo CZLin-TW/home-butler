@@ -33,6 +33,16 @@ def handle_delete(data, ctx):
 
 
 def handle_modify(data, ctx):
+    """修改食品。
+
+    特殊規則：若 quantity <= 0，視為「消耗光」，會自動把該品項從庫存表移到封存表。
+    這讓使用者可以說「牛奶喝完了」→ Claude 判斷後送 modify_food quantity=0。
+
+    其他欄位的語意：
+    - name：找目標的識別碼（必填）
+    - name_new：改名用的新名稱
+    - quantity / unit / expiry：直接寫新值
+    """
     sheet = ctx.get_worksheet("食品庫存")
     archive = ctx.get_worksheet("食品封存")
     records = ctx.get("食品庫存")
