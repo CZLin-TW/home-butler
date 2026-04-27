@@ -46,6 +46,16 @@ _ac_columns_warning_printed = False
 def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, fan_int=None):
     """把最後一次 AC 指令寫回「智能居家」分頁，供下次相對調整使用。
 
+    [AC 最後狀態 cache 總覽]
+    - 為什麼需要：紅外線 AC 是 write-only，SwitchBot 無法回讀真實狀態，
+      只能在自己這邊記下「上次送出的指令」當作 best-effort 狀態。
+    - 寫入端：本函式（每次成功送出 AC 指令後由 handle_control_ac 呼叫）。
+    - 消費端 1：prompt.py:_format_ac_last_state — 組 system prompt 給 Claude，
+      讓「調低 1 度」這類相對指令能據此推算絕對溫度。
+    - 消費端 2：web_api.py:api_get_devices / api_dashboard — 給 Dashboard
+      在卡片上顯示「目前 26°C 冷氣」之類的提示。
+    - power == "off" 時刻意保留先前的溫度/模式/風速，方便下次重新開機時沿用。
+
     使用 batch_update 一次更新多格，避免多次 API 呼叫。
     若欄位尚未在 sheet 上建立會自動略過，不會中斷主流程。
     """

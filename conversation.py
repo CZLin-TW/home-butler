@@ -3,6 +3,7 @@ from config import claude, now_taipei
 from sheets import get_sheet
 from prompt import (
     SYSTEM_PROMPT, DEFAULT_STYLE,
+    SEMANTIC_TODO_PROMPT, SEMANTIC_FOOD_PROMPT, SEMANTIC_DEFAULT_PROMPT,
     get_family_members_info, get_current_food, get_current_todo,
     get_device_info, get_schedule_info, get_style_instruction,
 )
@@ -76,6 +77,40 @@ def ask_claude(user_id, user_message, user_name, ctx):
     text = text.strip()
     print(f"[DEBUG] Claude raw: {repr(text)}")
     return text
+
+
+def ask_claude_semantic(user_text, raw_data, user_name, ctx, action_types):
+    """二次呼叫 Claude，把 query_* action 的 raw 結果包裝成自然語言回覆。
+
+    根據 action_types 選對應的 prompt 模板：
+      - query_todo  → SEMANTIC_TODO_PROMPT（依日期分組、加星期）
+      - query_food  → SEMANTIC_FOOD_PROMPT（依過期日排序）
+      - 其他        → SEMANTIC_DEFAULT_PROMPT（簡短回答 + 建議）
+
+    user 風格指令會 append 到 system 後面，讓使用者自訂風格也作用在 semantic 回覆上。
+    """
+    style_block = get_style_instruction(user_name, ctx)
+    today = now_taipei().strftime("%Y-%m-%d")
+
+    if action_types & {"query_todo"}:
+        system = SEMANTIC_TODO_PROMPT.format(today=today) + style_block
+        max_tokens = 500
+    elif action_types & {"query_food"}:
+        system = SEMANTIC_FOOD_PROMPT.format(today=today) + style_block
+        max_tokens = 500
+    else:
+        system = SEMANTIC_DEFAULT_PROMPT + style_block
+        max_tokens = 300
+
+    response = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=max_tokens,
+        system=system,
+        messages=[
+            {"role": "user", "content": f"使用者問：{user_text}\n\n數據：\n{raw_data}"}
+        ],
+    )
+    return response.content[0].text.strip()
 
 
 def generate_notify_message(data_summary, style_instruction=""):

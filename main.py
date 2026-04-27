@@ -6,10 +6,10 @@ import httpx
 import traceback
 import threading
 
-from config import line_bot_api, webhook_handler, claude, LINE_CHANNEL_ACCESS_TOKEN, now_taipei
+from config import line_bot_api, webhook_handler, LINE_CHANNEL_ACCESS_TOKEN
 from sheets import RequestContext, get_sheet
-from prompt import get_user_name, get_style_instruction
-from conversation import save_conversation, cleanup_conversation, ask_claude
+from prompt import get_user_name
+from conversation import save_conversation, cleanup_conversation, ask_claude, ask_claude_semantic
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo, handle_query_todo
 from handlers.device import (
@@ -21,6 +21,40 @@ from handlers.style import handle_set_style
 from notify import router as notify_router
 from auth import verify_api_key
 import switchbot_api
+
+
+# 把每個 action 統一成 (data, user_name, ctx) -> str 的簽名，
+# 用 lambda adapter 吸收掉各 handler 真實簽名的差異。新增 action 時只要在這註冊即可。
+# unclear 是「Claude 沒搞懂、要使用者再說」的特殊 action，不產生使用者可見的結果。
+ACTION_HANDLERS = {
+    "add_food":             lambda d, u, c: handle_add(d, u, c),
+    "delete_food":          lambda d, u, c: handle_delete(d, c),
+    "modify_food":          lambda d, u, c: handle_modify(d, c),
+    "query_food":           lambda d, u, c: handle_query(c),
+    "add_todo":             lambda d, u, c: handle_add_todo(d, u, c),
+    "modify_todo":          lambda d, u, c: handle_modify_todo(d, u, c),
+    "delete_todo":          lambda d, u, c: handle_delete_todo(d, c),
+    "query_todo":           lambda d, u, c: handle_query_todo(u, c),
+    "control_ac":           lambda d, u, c: handle_control_ac(d, c),
+    "control_ir":           lambda d, u, c: handle_control_ir(d, c),
+    "query_sensor":         lambda d, u, c: handle_query_sensor(d, c),
+    "control_dehumidifier": lambda d, u, c: handle_control_dehumidifier(d, c),
+    "query_dehumidifier":   lambda d, u, c: handle_query_dehumidifier(d, c),
+    "query_devices":        lambda d, u, c: handle_query_devices(c),
+    "query_weather":        lambda d, u, c: handle_query_weather(d),
+    "add_schedule":         lambda d, u, c: handle_add_schedule(d, u, c),
+    "delete_schedule":      lambda d, u, c: handle_delete_schedule(d, c),
+    "query_schedule":       lambda d, u, c: handle_query_schedule(c),
+    "set_style":            lambda d, u, c: handle_set_style(d, u, c),
+    "unclear":              lambda d, u, c: None,
+}
+
+# 三類 action 對應的後處理路徑：
+# - SEMANTIC：把 raw 結果再丟回 Claude 包裝成自然句子（query_food 排序、query_todo 分組等）
+# - REALTIME：直接回 raw 結果，避免 Claude 重新組句把即時資訊改寫掉
+# 沒列在這兩組的 action 是純寫入，reply 走 Claude 第一輪生成的 claude_reply。
+SEMANTIC_ACTIONS = {"query_weather", "query_sensor", "query_food", "query_todo"}
+REALTIME_ACTIONS = {"query_devices", "query_dehumidifier", "query_schedule"}
 
 app = FastAPI()
 app.include_router(notify_router)
@@ -206,81 +240,25 @@ def handle_message(event):
 
                 results = []
                 for data in actions:
-                    action = data.get("action")
-                    if action == "add_food":
-                        results.append(handle_add(data, user_name, ctx))
-                    elif action == "delete_food":
-                        results.append(handle_delete(data, ctx))
-                    elif action == "modify_food":
-                        results.append(handle_modify(data, ctx))
-                    elif action == "query_food":
-                        results.append(handle_query(ctx))
-                    elif action == "add_todo":
-                        results.append(handle_add_todo(data, user_name, ctx))
-                    elif action == "modify_todo":
-                        results.append(handle_modify_todo(data, user_name, ctx))
-                    elif action == "delete_todo":
-                        results.append(handle_delete_todo(data, ctx))
-                    elif action == "query_todo":
-                        results.append(handle_query_todo(user_name, ctx))
-                    elif action == "control_ac":
-                        results.append(handle_control_ac(data, ctx))
-                    elif action == "control_ir":
-                        results.append(handle_control_ir(data, ctx))
-                    elif action == "query_sensor":
-                        results.append(handle_query_sensor(data, ctx))
-                    elif action == "control_dehumidifier":
-                        results.append(handle_control_dehumidifier(data, ctx))
-                    elif action == "query_dehumidifier":
-                        results.append(handle_query_dehumidifier(data, ctx))
-                    elif action == "query_devices":
-                        results.append(handle_query_devices(ctx))
-                    elif action == "query_weather":
-                        results.append(handle_query_weather(data))
-                    elif action == "add_schedule":
-                        results.append(handle_add_schedule(data, user_name, ctx))
-                    elif action == "delete_schedule":
-                        results.append(handle_delete_schedule(data, ctx))
-                    elif action == "query_schedule":
-                        results.append(handle_query_schedule(ctx))
-                    elif action == "set_style":
-                        results.append(handle_set_style(data, user_name, ctx))
-                    elif action == "unclear":
-                        pass
+                    handler = ACTION_HANDLERS.get(data.get("action"))
+                    if handler is None:
+                        continue  # 未知 action：跳過，避免 Claude 偶爾捏造的 action 讓整個 request 壞掉
+                    result = handler(data, user_name, ctx)
+                    if result is not None:
+                        results.append(result)
 
                 has_error = any("❌" in r for r in results if r)
-                raw_actions = {"query_devices", "query_dehumidifier", "query_schedule"}
-                has_realtime = any(d.get("action") in raw_actions for d in actions)
-                semantic_actions = {"query_weather", "query_sensor", "query_food", "query_todo"}
-                has_semantic = any(d.get("action") in semantic_actions for d in actions)
+                action_types = {d.get("action") for d in actions}
+                has_realtime = bool(action_types & REALTIME_ACTIONS)
+                has_semantic = bool(action_types & SEMANTIC_ACTIONS)
 
                 if has_error:
                     reply = "\n".join(results)
                 elif has_semantic and not has_realtime:
                     raw_data = "\n".join(r for r in results if r and "❌" not in r)
                     if raw_data:
-                        # 風格注入（統一由 get_style_instruction 處理，已含預設/自訂邏輯）
-                        style_block = get_style_instruction(user_name, ctx)
-                        action_types = {d.get("action") for d in actions}
-                        if action_types & {"query_todo"}:
-                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下待辦事項數據回覆。依日期分組，格式如下：\n2026-03-18（三）\nemoji 事項1\nemoji 事項2（HH:MM）\n\n日期標題：若該日期與今天在同一週（週一到週日），請在日期後加上中文星期，格式為「YYYY-MM-DD（一/二/三/四/五/六/日）」；不同週則只顯示日期。不要用 markdown 標題、粗體或分隔線。有時間的事項在後面括號註明時間。只在今天或過期的事項補一句簡短提醒，其餘不加評語。最後可用一句話總結。" + style_block
-                            semantic_max_tokens = 500
-                        elif action_types & {"query_food"}:
-                            semantic_system = f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。今天是 {now_taipei().strftime('%Y-%m-%d')}。根據以下庫存數據回覆。依過期日由近到遠排序，每項一行，格式為「emoji 品名 數量單位（過期日）」。不要用 markdown 標題或分隔線。只在快過期（3天內）或已過期的品項後面補簡短提醒，其餘不加評語。" + style_block
-                            semantic_max_tokens = 500
-                        else:
-                            semantic_system = "你負責管理家庭的食品庫存、待辦事項和智能居家設備。根據以下數據，用自然、簡潔的語氣回覆使用者的問題。不要重複列出所有數據，挑重點回答。如果使用者問的是「冷嗎」「會下雨嗎」「濕度高嗎」這類問題，直接回答並給建議。" + style_block
-                            semantic_max_tokens = 300
                         try:
-                            semantic_reply = claude.messages.create(
-                                model="claude-sonnet-4-6",
-                                max_tokens=semantic_max_tokens,
-                                system=semantic_system,
-                                messages=[
-                                    {"role": "user", "content": f"使用者問：{text}\n\n數據：\n{raw_data}"}
-                                ]
-                            )
-                            reply = semantic_reply.content[0].text.strip()
+                            reply = ask_claude_semantic(text, raw_data, user_name, ctx, action_types)
                         except Exception as e:
                             print(f"[SEMANTIC CLAUDE ERROR] {e}")
                             reply = raw_data

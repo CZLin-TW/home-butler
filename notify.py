@@ -149,154 +149,192 @@ async def notify():
 
 
 
+def _push_todo_reminder(person, todo_type, todo_item, data_summary, fallback, ctx, members):
+    """把 todo 提醒推給對應的成員（私人 → 負責人本人；公開 → 全部啟用成員）。
+
+    內含「同一則 todo 不重複提醒」的去重：檢查對話暫存近 6 則，若 assistant
+    已經提過這個 item 就跳過。
+    """
+    if todo_type == "私人":
+        targets = [m for m in members if m.get("狀態") == "啟用" and m.get("名稱") == person]
+    else:
+        targets = [m for m in members if m.get("狀態") == "啟用"]
+
+    for member in targets:
+        user_id = member.get("Line User ID")
+        if not user_id:
+            continue
+
+        recent = get_recent_conversation(user_id, ctx)
+        already_notified = any(
+            msg.get("role") == "assistant" and todo_item in msg.get("content", "")
+            for msg in recent
+        )
+        if already_notified:
+            print(f"[SKIP] 已提醒過 {user_id}: {todo_item}")
+            continue
+
+        member_style = get_style_instruction(member.get("名稱", ""), ctx)
+        message = generate_notify_message(data_summary, member_style) or fallback
+        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        save_conversation(user_id, "assistant", message)
+        cleanup_conversation(user_id)
+
+
+def _process_todo_reminders(now, today, is_near_hour, ctx):
+    """掃過所有待辦，對符合時間條件的觸發推播。
+
+    兩種觸發條件：
+    1. 即將到期：未來 20 分鐘內（即時提醒）
+    2. 整點前後（55~04 分）且當日已過時間：未完成提醒
+    """
+    window_end = now + timedelta(minutes=20)
+    todo_records = ctx.get("待辦事項")
+    members = ctx.get("家庭成員")
+
+    for r in todo_records:
+        if r.get("狀態") != "待辦":
+            continue
+        date_str = r.get("日期", "")
+        time_str = r.get("時間", "")
+        if not date_str or not time_str:
+            continue
+
+        try:
+            todo_dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
+        except (ValueError, TypeError) as e:
+            print(f"[WARN] 無法解析即時提醒時間 {date_str!r} {time_str!r}: {e}")
+            continue
+
+        person = r.get("負責人", "")
+        todo_type = r.get("類型", "公開")
+
+        if now <= todo_dt <= window_end:
+            _push_todo_reminder(
+                person, todo_type, r["事項"],
+                f"即時提醒：{r['事項']}，時間 {time_str}",
+                f"⏰ 提醒：{r['事項']}（{time_str}）",
+                ctx, members,
+            )
+        elif is_near_hour and todo_dt.date() == today and todo_dt < now:
+            _push_todo_reminder(
+                person, todo_type, r["事項"],
+                f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成",
+                f"⚠️ 未完成：{r['事項']}（原訂 {time_str}）",
+                ctx, members,
+            )
+
+
+def _execute_pending_schedules(now, ctx):
+    """執行到時間的排程，回傳被處理過的設備名稱集合。
+
+    超時 2 小時以上的排程標為「已過期」不執行（避免使用者離線太久回來突然冷氣全開）。
+    is_auto 標記用來避免「auto 排程觸發 → 又觸發 auto 重算 → 無限循環」。
+    """
+    schedule_records = ctx.get("排程指令")
+    schedule_sheet = ctx.get_worksheet("排程指令")
+
+    header = schedule_sheet.row_values(1)
+    try:
+        status_col = header.index("狀態") + 1
+    except ValueError:
+        status_col = 7  # fallback
+
+    processed_devices = set()
+    for i, r in enumerate(schedule_records):
+        if r.get("狀態") != "待執行":
+            continue
+        trigger_str = r.get("觸發時間", "")
+        if not trigger_str:
+            continue
+        try:
+            trigger_dt = TZ.localize(datetime.strptime(str(trigger_str), "%Y-%m-%d %H:%M"))
+        except (ValueError, TypeError):
+            continue
+        if trigger_dt > now:
+            continue
+
+        device_name = r.get("設備名稱", "")
+        processed_devices.add(device_name)
+        hours_late = (now - trigger_dt).total_seconds() / 3600
+
+        if hours_late > 2:
+            schedule_sheet.update_cell(i + 2, status_col, "已過期")
+            print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
+            continue
+
+        action_type = r.get("動作", "")
+        try:
+            params = json.loads(r.get("參數", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            params = {}
+        params["device_name"] = device_name
+
+        is_auto = r.get("來源") == "自動"
+        result = ""
+        if action_type == "control_ac":
+            result = handle_control_ac(params, ctx, from_auto_schedule=is_auto)
+        elif action_type == "control_ir":
+            result = handle_control_ir(params, ctx)
+        elif action_type == "control_dehumidifier":
+            result = handle_control_dehumidifier(params, ctx)
+
+        schedule_sheet.update_cell(i + 2, status_col, "已執行")
+        print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
+
+    return processed_devices
+
+
+def _archive_processed_schedules(processed_devices, ctx):
+    """把已執行/已過期的排程搬到封存表（前提：該設備所有排程都已收尾）。
+
+    刻意只 fetch 一次 sheet 後在記憶體裡計算要刪的 row index，再倒序刪。
+    這樣可以避免：
+      1. 多次 get_all_records 之間外部來源（LINE bot 同時操作）造成索引不一致
+      2. 邊刪邊讀導致 row 偏移
+    """
+    if not processed_devices:
+        return
+
+    schedule_sheet = ctx.get_worksheet("排程指令")
+    schedule_archive = ctx.get_worksheet("排程封存")
+
+    current_records = schedule_sheet.get_all_records()
+    rows_to_archive = []  # list of (sheet_row_number, record)
+    for device_name in processed_devices:
+        device_records = [r for r in current_records if r.get("設備名稱") == device_name]
+        if any(r.get("狀態") == "待執行" for r in device_records):
+            continue  # 還有排程，這台先不封存
+        for i, r in enumerate(current_records):
+            if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期"):
+                rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
+
+    archive_headers = schedule_archive.row_values(1)
+    for sheet_row, row in sorted(rows_to_archive, key=lambda x: x[0], reverse=True):
+        schedule_archive.append_row(build_row(archive_headers, row))
+        schedule_sheet.delete_rows(sheet_row)
+
+
 @router.post("/notify_realtime")
 async def notify_realtime():
+    """每分鐘由 cron 呼叫的 endpoint：
+    1. 同步外部行事曆
+    2. 推播即將到期/未完成的待辦提醒
+    3. 執行到時間的設備排程
+    4. 把收尾完的排程封存
+    """
     try:
         now = now_taipei()
         today = now.date()
-        window_start = now
-        window_end = now + timedelta(minutes=20)
         is_near_hour = now.minute <= 4 or now.minute >= 55
 
         ctx = RequestContext()
         ctx.load()
 
-        # 同步外部行事曆
         sync_external_events(ctx)
-
-        todo_records = ctx.get("待辦事項")
-        members = ctx.get("家庭成員")
-
-        def push_to_member(person, todo_type, todo_item, data_summary, fallback_message):
-            target_members = []
-            if todo_type == "私人":
-                for member in members:
-                    if member.get("狀態") == "啟用" and member.get("名稱") == person:
-                        target_members.append(member)
-            else:
-                target_members = [m for m in members if m.get("狀態") == "啟用"]
-            for member in target_members:
-                user_id = member.get("Line User ID")
-                if not user_id:
-                    continue
-                # 去重：檢查對話暫存中是否已有該待辦的提醒
-                recent = get_recent_conversation(user_id, ctx)
-                already_notified = any(
-                    msg.get("role") == "assistant" and todo_item in msg.get("content", "")
-                    for msg in recent
-                )
-                if already_notified:
-                    print(f"[SKIP] 已提醒過 {user_id}: {todo_item}")
-                    continue
-                member_name = member.get("名稱", "")
-                member_style = get_style_instruction(member_name, ctx)
-                message = generate_notify_message(data_summary, member_style)
-                if not message:
-                    message = fallback_message
-                line_bot_api.push_message(user_id, TextSendMessage(text=message))
-                save_conversation(user_id, "assistant", message)
-                cleanup_conversation(user_id)
-
-        for r in todo_records:
-            if r.get("狀態") != "待辦":
-                continue
-            date_str = r.get("日期", "")
-            time_str = r.get("時間", "")
-            person = r.get("負責人", "")
-            todo_type = r.get("類型", "公開")
-
-            if not date_str or not time_str:
-                continue
-
-            try:
-                todo_dt = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
-            except (ValueError, TypeError) as e:
-                print(f"[WARN] 無法解析即時提醒時間 {date_str!r} {time_str!r}: {e}")
-                continue
-
-            if window_start <= todo_dt <= window_end:
-                data_summary = f"即時提醒：{r['事項']}，時間 {time_str}"
-                fallback = f"⏰ 提醒：{r['事項']}（{time_str}）"
-                push_to_member(person, todo_type, r['事項'], data_summary, fallback)
-
-            elif is_near_hour and todo_dt.date() == today and todo_dt < now:
-                data_summary = f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成"
-                fallback = f"⚠️ 未完成：{r['事項']}（原訂 {time_str}）"
-                push_to_member(person, todo_type, r['事項'], data_summary, fallback)
-
-        # ── 排程執行 ──
-        schedule_records = ctx.get("排程指令")
-        schedule_sheet = ctx.get_worksheet("排程指令")
-        schedule_archive = ctx.get_worksheet("排程封存")
-        processed_devices = set()
-
-        # 找出狀態欄位的位置
-        header = schedule_sheet.row_values(1)
-        try:
-            status_col = header.index("狀態") + 1
-        except ValueError:
-            status_col = 7  # fallback
-
-        for i, r in enumerate(schedule_records):
-            if r.get("狀態") != "待執行":
-                continue
-            trigger_str = r.get("觸發時間", "")
-            if not trigger_str:
-                continue
-            try:
-                trigger_dt = TZ.localize(datetime.strptime(str(trigger_str), "%Y-%m-%d %H:%M"))
-            except (ValueError, TypeError):
-                continue
-
-            if trigger_dt <= now:
-                hours_late = (now - trigger_dt).total_seconds() / 3600
-                device_name = r.get("設備名稱", "")
-                processed_devices.add(device_name)
-
-                if hours_late > 2:
-                    schedule_sheet.update_cell(i + 2, status_col, "已過期")
-                    print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
-                else:
-                    action_type = r.get("動作", "")
-                    try:
-                        params = json.loads(r.get("參數", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        params = {}
-                    params["device_name"] = device_name
-
-                    result = ""
-                    # 判斷此排程是否為系統自動產生 → 避免 auto 排程觸發後又觸發 auto 重算（無限循環）
-                    is_auto = r.get("來源") == "自動"
-                    if action_type == "control_ac":
-                        result = handle_control_ac(params, ctx, from_auto_schedule=is_auto)
-                    elif action_type == "control_ir":
-                        result = handle_control_ir(params, ctx)
-                    elif action_type == "control_dehumidifier":
-                        result = handle_control_dehumidifier(params, ctx)
-
-                    schedule_sheet.update_cell(i + 2, status_col, "已執行")
-                    print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
-
-        # 檢查有變動的設備是否還有待執行排程，全部完成則封存
-        # 只 fetch 一次 sheet，所有 archival 統一在最後倒序刪除，避免：
-        #   1. 多次 get_all_records 之間外部來源（LINE bot）改動造成索引不一致
-        #   2. 邊刪邊讀導致 row 偏移
-        if processed_devices:
-            current_records = schedule_sheet.get_all_records()
-            rows_to_archive = []  # list of (sheet_row_number, record)
-            for device_name in processed_devices:
-                device_records = [r for r in current_records if r.get("設備名稱") == device_name]
-                if any(r.get("狀態") == "待執行" for r in device_records):
-                    continue  # 還有排程，不封存
-                for i, r in enumerate(current_records):
-                    if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期"):
-                        rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
-
-            # 倒序刪除避免 index 偏移
-            archive_headers = schedule_archive.row_values(1)
-            for sheet_row, row in sorted(rows_to_archive, key=lambda x: x[0], reverse=True):
-                schedule_archive.append_row(build_row(archive_headers, row))
-                schedule_sheet.delete_rows(sheet_row)
+        _process_todo_reminders(now, today, is_near_hour, ctx)
+        processed_devices = _execute_pending_schedules(now, ctx)
+        _archive_processed_schedules(processed_devices, ctx)
 
         return {"status": "ok"}
     except Exception as e:

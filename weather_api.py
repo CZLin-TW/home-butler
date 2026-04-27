@@ -50,6 +50,8 @@ def _fetch_forecast(data_id, location_name=None):
         if location_name:
             params["locationName"] = location_name
 
+        # TODO: verify=False 跳過 TLS 驗證；歷史原因待釐清，待研究後改為 verify=True。
+        # observation_api.py 有相同的問題，記得一併處理。
         resp = httpx.get(
             f"{BASE_URL}/{data_id}",
             params=params,
