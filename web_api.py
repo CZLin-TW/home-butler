@@ -30,7 +30,11 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 @router.get("/dashboard")
 def api_dashboard():
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
-    不含感測器/除濕機即時狀態——前端另呼叫 /api/devices/status 補齊。"""
+    不含感測器/除濕機即時狀態——前端另呼叫 /api/devices/status 補齊。
+
+    註：ThreadPoolExecutor 內同時跑兩個天氣 future，主緒程並行跑 ctx.load()
+    （同步）拉 Sheet。進入 with 區塊後才 .result()，讓這三件事重疊起來。
+    """
     results = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
@@ -171,7 +175,6 @@ class AcControlRequest(BaseModel):
 def api_control_ac(req: AcControlRequest):
     ctx = RequestContext()
     ctx.load()
-    print(f"[DEBUG control_ac] device_name={req.device_name!r} sheet_names={[r.get('名稱') for r in ctx.get('智能居家') if r.get('狀態') == '啟用' and r.get('類型') == '空調']!r}")
     data = {"device_name": req.device_name, "power": req.power}
     if req.temperature is not None: data["temperature"] = req.temperature
     if req.mode is not None: data["mode"] = req.mode
