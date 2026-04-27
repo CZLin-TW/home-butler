@@ -31,9 +31,10 @@ _refresh_token = None
 _token_lock = threading.Lock()
 
 
-def _headers(extra: dict = {}) -> dict:
+def _headers(extra: dict | None = None) -> dict:
     h = {}
-    h.update(extra)
+    if extra:
+        h.update(extra)
     return h
 
 
