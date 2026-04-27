@@ -34,10 +34,10 @@ LOCATION_STATION_MAP = {
     "嘉義縣": "嘉義", "嘉義市": "嘉義",
     "臺南市": "臺南", "台南市": "臺南",
     "高雄市": "高雄",
-    "屏東縣": "恆春",
+    "屏東縣": "恒春",
     # 東部
     "宜蘭縣": "宜蘭",
-    "花蓮縣": "花蓮",
+    "花蜿縣": "花蜿",
     "臺東縣": "臺東", "台東縣": "臺東",
     # 離島
     "澎湖縣": "澎湖",
@@ -97,6 +97,8 @@ def get_observation(station_name):
     if not station_name:
         return None
     try:
+        # TODO: verify=False 跳過 TLS 驗證。歷史原因待釐清（可能是 CWA 憑證鎖見過問題），
+        # 待研究後改為 verify=True。並修訂 weather_api.py 同一安全障隄。
         resp = httpx.get(
             BASE_URL,
             params={"Authorization": CWA_API_KEY, "StationName": station_name},
