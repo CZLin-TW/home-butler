@@ -317,11 +317,13 @@ def _archive_processed_schedules(processed_devices, ctx):
 
 @router.post("/notify_realtime")
 async def notify_realtime():
-    """每分鐘由 cron 呼叫的 endpoint：
+    """每 15 分鐘由 GAS cron 呼叫的 endpoint：
     1. 同步外部行事曆
     2. 推播即將到期/未完成的待辦提醒
     3. 執行到時間的設備排程
     4. 把收尾完的排程封存
+
+    is_near_hour 寬鬆容忍 ±5 分鐘，避免 cron 漂移漏掉整點提醒。
     """
     try:
         now = now_taipei()
