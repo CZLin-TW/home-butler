@@ -13,7 +13,11 @@ HOME_BUTLER_API_KEY = os.environ.get("HOME_BUTLER_API_KEY", "")
 
 # 使用者體感版本：與 Dashboard package.json 的 version 同步維護。
 # Dashboard 那邊 bump 時，這裡也要跟著改（見 AGENTS.md 版本管理章節）。
+<<<<<<< HEAD
 APP_VERSION = "1.4.9"
+=======
+APP_VERSION = "1.5.7"
+>>>>>>> 4a05d40 (feat(schedule): add modify_schedule for full-row edit (device/action/params/time))
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)

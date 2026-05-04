@@ -16,7 +16,7 @@ from handlers.device import (
     handle_control_ac, handle_control_ir, handle_query_sensor,
     handle_query_devices, handle_control_dehumidifier, handle_query_dehumidifier, handle_query_weather,
 )
-from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
+from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from handlers.style import handle_set_style
 from notify import router as notify_router
 from auth import verify_api_key
@@ -43,6 +43,7 @@ ACTION_HANDLERS = {
     "query_devices":        lambda d, u, c: handle_query_devices(c),
     "query_weather":        lambda d, u, c: handle_query_weather(d),
     "add_schedule":         lambda d, u, c: handle_add_schedule(d, u, c),
+    "modify_schedule":      lambda d, u, c: handle_modify_schedule(d, u, c),
     "delete_schedule":      lambda d, u, c: handle_delete_schedule(d, c),
     "query_schedule":       lambda d, u, c: handle_query_schedule(c),
     "set_style":            lambda d, u, c: handle_set_style(d, u, c),

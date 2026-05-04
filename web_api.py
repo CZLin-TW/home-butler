@@ -16,7 +16,7 @@ from handlers.device import (
     handle_control_dehumidifier, handle_query_dehumidifier,
     apply_sensor_compensation,
 )
-from handlers.schedule import handle_add_schedule, handle_delete_schedule, handle_query_schedule
+from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
 import switchbot_api
 import panasonic_api
@@ -377,6 +377,32 @@ def api_add_schedule(req: ScheduleAddRequest):
     ctx.load()
     data = {"device_name": req.device_name, "target_action": req.target_action, "params": req.params, "trigger_time": req.trigger_time}
     result = handle_add_schedule(data, req.person, ctx)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
+
+
+class ScheduleModifyRequest(BaseModel):
+    # 找目標：原值
+    device_name: str
+    trigger_time: str
+    # 新值（全部選填，至少要有一個）
+    device_name_new: Optional[str] = None
+    target_action_new: Optional[str] = None
+    params_new: Optional[dict] = None
+    trigger_time_new: Optional[str] = None
+    person: str
+
+
+@router.patch("/schedules")
+def api_modify_schedule(req: ScheduleModifyRequest):
+    ctx = RequestContext()
+    ctx.load()
+    data: dict = {"device_name": req.device_name, "trigger_time": req.trigger_time}
+    if req.device_name_new is not None: data["device_name_new"] = req.device_name_new
+    if req.target_action_new is not None: data["target_action_new"] = req.target_action_new
+    if req.params_new is not None: data["params_new"] = req.params_new
+    if req.trigger_time_new is not None: data["trigger_time_new"] = req.trigger_time_new
+    result = handle_modify_schedule(data, req.person, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
