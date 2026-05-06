@@ -446,6 +446,7 @@ function sendRealtimeNotification() {
 | GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） | 必要 |
 | ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） | 必要 |
 | HOME_BUTLER_API_KEY | 自訂的 API 認證金鑰，保護 `/api/*` `/notify*` `/switchbot/*` 端點。建議用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生 | 必要 |
+| DASHBOARD_URL | Dashboard 部署網址（例如 `https://dashboard.example.com`）。home-butler 啟動後會 runtime 從 `{DASHBOARD_URL}/api/version` 撈使用者體感版本（1 小時 cache）注入到 LINE bot 的 SYSTEM_PROMPT。沒設或撈不到時 LINE 回答版本會是「未知」，其他功能不受影響 | 建議 |
 | SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
 | SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
 | PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
