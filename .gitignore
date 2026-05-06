@@ -2,3 +2,4 @@ credentials.json
 venv/
 __pycache__/
 .claude/
+agent/agent_config.py
