@@ -13,10 +13,20 @@ Setup：
 import json
 import socket
 import subprocess
+import sys
 import time
 
 import httpx
 import psutil
+
+# 強制 stdout/stderr line-buffered。給 task scheduler / cron / nohup 之類 stdout
+# 被 redirect 到檔案的部署情境：python 預設 block buffer (4KB)，每分鐘一行
+# heartbeat 大概要 ~50 分鐘才 flush 一次，看 log 完全來不及。
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except (AttributeError, OSError):
+    pass
 
 try:
     import agent_config
