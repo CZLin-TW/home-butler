@@ -32,6 +32,7 @@
 | 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
+| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖 |
 
 ---
 ## 需要的資源
@@ -83,6 +84,7 @@
 - **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報，含體感溫度）
 - **外部行事曆**：Notion API（同步到待辦 Sheet，支援每人獨立篩選條件與權限設定）
 - **Dashboard API**：REST API（供網頁版 Dashboard 直接操作裝置、待辦、食品、排程等）
+- **PC 監控**：每台 PC 跑 `agent/agent.py`（psutil + pynvml + LibreHardwareMonitor + lufah），每 60 秒 push 指標到 `/api/computers/heartbeat`；home-butler 端用 in-memory ring buffer（24h × 60s）暫存，Dashboard 透過 `/api/computers/status` 拉
 
 ---
 
@@ -498,6 +500,8 @@ function sendRealtimeNotification() {
 | /api/schedules | DELETE | 取消排程 |
 | /api/weather | GET | 查詢天氣（date, location） |
 | /api/members | GET | 列出所有啟用的家庭成員 |
+| /api/computers/heartbeat | POST | PC agent 每 60 秒 push 指標（cpu_pct, ram_pct, gpu_pct, gpu_temp_c, cpu_temp_c, fah, ip, hostname, cpu_model, gpu_model）|
+| /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
 
 ---
 
@@ -709,7 +713,9 @@ function sendRealtimeNotification() {
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
-| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢） |
+| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控） |
+| pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
+| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）。Render 部署不會 import 這個目錄 |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 
@@ -736,6 +742,12 @@ function sendRealtimeNotification() {
 1. 在 Render.com 設定對應的環境變數（如 NOTION_TOKEN）
 2. 在 Google Sheets「家庭成員」分頁填入對應欄位和權限設定
 3. 若是新的行事曆來源（如 Google Calendar），需新增 API 封裝模組並更新 sync_external_events
+
+**新增監控 PC**：
+1. 在那台 PC 上 clone 本 repo
+2. 依 `agent/README.md` 流程設置（裝 Python、LibreHardwareMonitor、agent_config.py 填本機 model + API key）
+3. Task Scheduler 註冊 ButlerAgent 開機自啟
+4. Dashboard `/devices` 頁的「電腦」區塊會自動出現新卡（按 IP 字串排序）
 
 **費用控管**：
 - Claude API 按用量計費，每月約 NT$10~30

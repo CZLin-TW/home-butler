@@ -11,6 +11,9 @@ Setup：
 """
 
 import json
+import logging
+import logging.handlers
+import os
 import socket
 import subprocess
 import sys
@@ -20,8 +23,8 @@ import httpx
 import psutil
 
 # 強制 stdout/stderr line-buffered。給 task scheduler / cron / nohup 之類 stdout
-# 被 redirect 到檔案的部署情境：python 預設 block buffer (4KB)，每分鐘一行
-# heartbeat 大概要 ~50 分鐘才 flush 一次，看 log 完全來不及。
+# 被 redirect 到檔案的部署情境（雖然新版 agent 自己管 file log，已不再依賴外部
+# redirect，但保留這一層避免使用者 ad-hoc 跑時看不到輸出）。
 try:
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)
@@ -43,11 +46,35 @@ GPU_MODEL = agent_config.GPU_MODEL
 HOME_BUTLER_URL = getattr(agent_config, "HOME_BUTLER_URL", "https://home-butler.onrender.com")
 LHM_URL = getattr(agent_config, "LHM_URL", "http://localhost:8085/data.json")
 TICK_SECONDS = getattr(agent_config, "TICK_SECONDS", 60)
+LOG_PATH = getattr(
+    agent_config,
+    "LOG_PATH",
+    os.path.join(os.path.expanduser("~"), "butler-agent.log"),
+)
 
 if not HOME_BUTLER_API_KEY:
     raise SystemExit("agent_config.HOME_BUTLER_API_KEY 是空的，請填上 home-butler 的 API key。")
 if not CPU_MODEL or not GPU_MODEL:
     raise SystemExit("agent_config.CPU_MODEL / GPU_MODEL 必填（顯示用簡化型號，例如 'Xeon-1230v2'）。")
+
+
+# ── Logging ──────────────────────────────────────────
+# 兩個 handler：Rotating file（保 ~15MB 上限）+ stdout（前台跑時看得到）。
+# 不再依賴外部 bat redirect，bat 維持單純 `python agent.py` 即可。
+log = logging.getLogger("agent")
+log.setLevel(logging.INFO)
+log.propagate = False  # 避免被 root logger 重複輸出
+
+_fmt = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+_file_handler = logging.handlers.RotatingFileHandler(
+    LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
+)
+_file_handler.setFormatter(_fmt)
+log.addHandler(_file_handler)
+
+_stream_handler = logging.StreamHandler(sys.stdout)
+_stream_handler.setFormatter(logging.Formatter("%(message)s"))  # terminal 不重複秀時間
+log.addHandler(_stream_handler)
 
 
 def detect_local_ip() -> str:
@@ -72,7 +99,7 @@ def read_cpu_temp_from_lhm() -> float | None:
         r = httpx.get(LHM_URL, timeout=2.0)
         data = r.json()
     except Exception as e:
-        print(f"[lhm] {e}")
+        log.info(f"[lhm] {e}")
         return None
 
     def find_cpu_temps_node(root):
@@ -125,7 +152,7 @@ def read_gpu_via_pynvml() -> dict:
         finally:
             pynvml.nvmlShutdown()
     except Exception as e:
-        print(f"[gpu] {e}")
+        log.info(f"[gpu] {e}")
         return {}
 
 
@@ -136,7 +163,7 @@ def read_fah_via_lufah() -> dict | None:
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
-            print(f"[fah] lufah rc={result.returncode}: {result.stderr.strip()}")
+            log.info(f"[fah] lufah rc={result.returncode}: {result.stderr.strip()}")
             return None
         out = result.stdout
         i = out.find("{")  # 跳過開頭的 DeprecationWarning
@@ -144,13 +171,13 @@ def read_fah_via_lufah() -> dict | None:
             return None
         data = json.loads(out[i:])
     except subprocess.TimeoutExpired:
-        print("[fah] lufah timeout")
+        log.info("[fah] lufah timeout")
         return None
     except FileNotFoundError:
-        print("[fah] lufah not installed")
+        log.info("[fah] lufah not installed")
         return None
     except Exception as e:
-        print(f"[fah] {e}")
+        log.info(f"[fah] {e}")
         return None
 
     group = data.get("groups", {}).get("", {})
@@ -200,24 +227,26 @@ def push(payload: dict) -> None:
             timeout=15.0,
         )
         if r.status_code >= 300:
-            print(f"[push] HTTP {r.status_code}: {r.text[:200]}")
+            log.info(f"[push] HTTP {r.status_code}: {r.text[:200]}")
         else:
             fah = payload.get("fah") or {}
-            print(f"[push] ok cpu={payload['cpu_pct']}% gpu={payload.get('gpu_pct')}% "
-                  f"cpu_t={payload.get('cpu_temp_c')}C gpu_t={payload.get('gpu_temp_c')}C "
-                  f"fah_paused={fah.get('paused', 'n/a')}")
+            log.info(
+                f"[push] ok cpu={payload['cpu_pct']}% gpu={payload.get('gpu_pct')}% "
+                f"cpu_t={payload.get('cpu_temp_c')}C gpu_t={payload.get('gpu_temp_c')}C "
+                f"fah_paused={fah.get('paused', 'n/a')}"
+            )
     except Exception as e:
-        print(f"[push] {e}")
+        log.info(f"[push] {e}")
 
 
 def main():
-    print(f"agent start: {HOSTNAME} ({THIS_PC_IP}) → {HOME_BUTLER_URL}")
+    log.info(f"agent start: {HOSTNAME} ({THIS_PC_IP}) → {HOME_BUTLER_URL}  log={LOG_PATH}")
     while True:
         t0 = time.time()
         try:
             push(collect_payload())
         except Exception as e:
-            print(f"[tick] {e}")
+            log.info(f"[tick] {e}")
         elapsed = time.time() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
 

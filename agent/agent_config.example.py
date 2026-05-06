@@ -20,3 +20,8 @@ GPU_MODEL = ""    # 例如 "GTX-1650S"、"RTX-4070Ti"
 # HOME_BUTLER_URL = "https://home-butler.onrender.com"
 # LHM_URL = "http://localhost:8085/data.json"
 # TICK_SECONDS = 60
+
+# Log 檔位置（會 rotate：5MB × 3 份輪替）。預設 ~/butler-agent.log，
+# Windows 上會解到 C:\Users\<你>\butler-agent.log。要改別處例如 C:\butler-agent\agent.log
+# 取消下面註解：
+# LOG_PATH = r"C:\butler-agent\agent.log"
