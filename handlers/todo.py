@@ -40,12 +40,30 @@ def handle_add_todo(data, user_name, ctx):
     return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
 
 
+def _matches_todo(row, item_name, date_orig, time_orig):
+    """三元組定位 row：(事項, 日期, 時間)。
+    向後兼容：date_orig / time_orig 為空字串或 None 時跳過該欄比對（fallback 找第一筆）。
+    狀態必須是「待辦」。
+    """
+    if row.get("事項") != item_name:
+        return False
+    if row.get("狀態") != "待辦":
+        return False
+    if date_orig and row.get("日期") != date_orig:
+        return False
+    if time_orig and str(row.get("時間", "")) != time_orig:
+        return False
+    return True
+
+
 def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     records = ctx.get("待辦事項")
     item_name = data.get("item", "")
+    date_orig = data.get("date_orig") or ""
+    time_orig = data.get("time_orig") or ""
     for i, row in enumerate(records):
-        if row.get("事項") == item_name and row.get("狀態") == "待辦":
+        if _matches_todo(row, item_name, date_orig, time_orig):
             # 檢查屬性：唯讀項目不可修改
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
@@ -95,8 +113,10 @@ def handle_delete_todo(data, ctx):
     archive = ctx.get_worksheet("待辦封存")
     records = ctx.get("待辦事項")
     item_name = data.get("item", "")
+    date_orig = data.get("date_orig") or ""
+    time_orig = data.get("time_orig") or ""
     for i, row in enumerate(records):
-        if row.get("事項") == item_name and row.get("狀態") == "待辦":
+        if _matches_todo(row, item_name, date_orig, time_orig):
             prop = str(row.get("屬性", "")).strip()
             if prop == "唯讀":
                 # 唯讀項目：只改狀態為已完成，不刪除不封存

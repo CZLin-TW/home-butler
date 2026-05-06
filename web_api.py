@@ -256,6 +256,10 @@ def api_add_todo(req: TodoAddRequest):
 
 class TodoModifyRequest(BaseModel):
     item: str
+    # date_orig / time_orig：定位舊 row（同名待辦多筆時用三元組精確找）。
+    # 沒帶或空字串時 fallback 為「找事項名稱第一筆」舊行為，保留 LINE bot 路徑相容。
+    date_orig: Optional[str] = None
+    time_orig: Optional[str] = None
     item_new: Optional[str] = None
     date: Optional[str] = None
     time: Optional[str] = None
@@ -269,6 +273,8 @@ def api_modify_todo(req: TodoModifyRequest):
     ctx = RequestContext()
     ctx.load()
     data = {"item": req.item}
+    if req.date_orig is not None: data["date_orig"] = req.date_orig
+    if req.time_orig is not None: data["time_orig"] = req.time_orig
     if req.item_new is not None: data["item_new"] = req.item_new
     if req.date is not None: data["date"] = req.date
     if req.time is not None: data["time"] = req.time
@@ -281,13 +287,19 @@ def api_modify_todo(req: TodoModifyRequest):
 
 class TodoDeleteRequest(BaseModel):
     item: str
+    # date_orig / time_orig：定位 row。同 modify，沒帶就 fallback 找第一筆。
+    date_orig: Optional[str] = None
+    time_orig: Optional[str] = None
 
 
 @router.delete("/todos")
 def api_delete_todo(req: TodoDeleteRequest):
     ctx = RequestContext()
     ctx.load()
-    result = handle_delete_todo({"item": req.item}, ctx)
+    data = {"item": req.item}
+    if req.date_orig is not None: data["date_orig"] = req.date_orig
+    if req.time_orig is not None: data["time_orig"] = req.time_orig
+    result = handle_delete_todo(data, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
