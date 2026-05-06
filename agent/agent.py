@@ -122,22 +122,29 @@ def read_cpu_temp_from_lhm() -> float | None:
     if cpu_temps is None:
         return None
 
-    package = None
-    core_max = None
+    # Build leaf name → value dict, then pick by priority.
+    # 不同 CPU 廠牌的 sensor 命名差很多：Intel Xeon/Core 用 "CPU Package"、
+    # AMD Ryzen Zen 2+ 用 "Core (Tctl/Tdie)"、舊版 Zen 用 "Core (Tdie)" 等。
+    leaves: dict[str, float] = {}
     for leaf in cpu_temps.get("Children", []):
         v = leaf.get("Value", "")
         if "°C" not in v:
             continue
         try:
-            num = float(v.replace("°C", "").strip())
+            leaves[leaf.get("Text", "")] = float(v.replace("°C", "").strip())
         except ValueError:
             continue
-        if leaf.get("Text") == "CPU Package":
-            package = num
-        elif leaf.get("Text") == "Core Max":
-            core_max = num
 
-    return package if package is not None else core_max
+    for key in (
+        "CPU Package",          # Intel modern
+        "Core (Tctl/Tdie)",     # AMD Ryzen Zen 2+ (含 7000 系列)
+        "Core (Tdie)",          # AMD Ryzen 較舊版
+        "CPU Cores",            # 某些主機板 generic
+        "Core Max",             # Intel fallback
+    ):
+        if key in leaves:
+            return leaves[key]
+    return None
 
 
 def read_gpu_via_pynvml() -> dict:
