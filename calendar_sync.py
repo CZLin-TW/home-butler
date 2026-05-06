@@ -5,24 +5,29 @@ import notion_api
 def sync_external_events(ctx):
     """
     同步外部行事曆到待辦事項 Sheet：
-    1. 收集已完成的外部事項名稱（用於比對跳過）
+    1. 收集已完成的外部事項 (name, date, time) 三元組（用於比對跳過）
     2. 刪掉所有來源≠本地且狀態=待辦的項目
     3. 拉 Notion API 寫入新事件（跳過已完成的）
     4. 清理已完成但 Notion 已不存在的項目
     5. 更新 ctx 快取
+
+    去重 key 用 (事項, 日期, 時間) 而非單純 name：避免 Notion 上同名不同時間
+    的兩筆任務、其中一筆被標完成後、另一筆也被連帶 skip 不同步進來。
     """
     try:
         sheet = ctx.get_worksheet("待辦事項")
         records = ctx.get("待辦事項")
 
-        # 1. 收集已完成的外部事項名稱
+        # 1. 收集已完成的外部事項（用 name+date+time 唯一識別）
         completed_external = set()
-        completed_indices = []
         for i, row in enumerate(records):
             source = str(row.get("來源", "")).strip()
             if source and source != "本地" and row.get("狀態") == "已完成":
-                completed_external.add(row.get("事項", ""))
-                completed_indices.append(i)
+                completed_external.add((
+                    row.get("事項", ""),
+                    row.get("日期", ""),
+                    row.get("時間", ""),
+                ))
 
         # 2. 刪掉所有外部且狀態=待辦的項目（從下往上刪）
         pending_external_indices = []
@@ -41,7 +46,7 @@ def sync_external_events(ctx):
         # 3. 遍歷成員，拉 Notion 事件寫入（跳過已完成的）
         members = ctx.get("家庭成員")
         new_rows = []
-        new_event_names = set()
+        new_event_keys = set()
 
         for member in members:
             if member.get("狀態") != "啟用":
@@ -61,11 +66,6 @@ def sync_external_events(ctx):
             for item in events:
                 name = item.get("Event", "")
                 if not name:
-                    continue
-
-                # 跳過已標記完成的事件
-                if name in completed_external:
-                    new_event_names.add(name)
                     continue
 
                 date_val = item.get("Date", {})
@@ -89,9 +89,16 @@ def sync_external_events(ctx):
                     date_part = start_str
                     time_part = ""
 
+                event_key = (name, date_part, time_part)
+
+                # 跳過已標記完成的事件（用三元組比對，同名不同時間互不影響）
+                if event_key in completed_external:
+                    new_event_keys.add(event_key)
+                    continue
+
                 new_row = [name, date_part, time_part, member_name, "待辦", "私人", "Notion", permission]
                 new_rows.append(new_row)
-                new_event_names.add(name)
+                new_event_keys.add(event_key)
                 records.append({
                     "事項": name, "日期": date_part, "時間": time_part,
                     "負責人": member_name, "狀態": "待辦", "類型": "私人",
@@ -107,7 +114,8 @@ def sync_external_events(ctx):
         for i, row in enumerate(records):
             source = str(row.get("來源", "")).strip()
             if source and source != "本地" and row.get("狀態") == "已完成":
-                if row.get("事項", "") not in new_event_names:
+                row_key = (row.get("事項", ""), row.get("日期", ""), row.get("時間", ""))
+                if row_key not in new_event_keys:
                     stale_indices.append(i)
 
         for i in sorted(stale_indices, reverse=True):
