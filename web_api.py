@@ -21,6 +21,7 @@ from auth import verify_api_key
 import switchbot_api
 import panasonic_api
 import weather_api
+import pc_state
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -485,3 +486,40 @@ def api_get_device_options():
             "humidity": sorted(panasonic_api.HUMIDITY_VALUE_MAP.keys()),
         },
     }
+
+
+# ── PC 監控 ──
+# 第一版設計：agent 每 60s POST 一次當前指標，後端 in-memory ring buffer
+# 累積最多 1440 點（24h）。Dashboard 拉 /computers/status 拿所有 PC 的 raw
+# history + current snapshot。詳細設計見 pc_state.py 模組註解。
+
+class FAHStatus(BaseModel):
+    paused: Optional[bool] = None
+    finish: Optional[bool] = None
+    units_count: Optional[int] = None
+    progress_pct: Optional[float] = None
+
+
+class PCHeartbeatRequest(BaseModel):
+    ip: str
+    hostname: Optional[str] = ""
+    cpu_model: Optional[str] = ""
+    gpu_model: Optional[str] = ""
+    cpu_pct: float
+    ram_pct: float
+    gpu_pct: Optional[float] = None
+    gpu_temp_c: Optional[float] = None
+    cpu_temp_c: Optional[float] = None  # Windows 上要靠 LibreHardwareMonitor，沒裝就 None
+    fah: Optional[FAHStatus] = None
+
+
+@router.post("/computers/heartbeat")
+def api_pc_heartbeat(req: PCHeartbeatRequest):
+    pc_state.record_heartbeat(req.model_dump())
+    return {"ok": True}
+
+
+@router.get("/computers/status")
+def api_pc_status():
+    """回傳所有已 heartbeat 過的 PC 當前狀態 + 最近 24h raw 歷史（每 60s 一點）。"""
+    return pc_state.snapshot()
