@@ -65,6 +65,14 @@ from web_api import router as web_api_router
 app.include_router(web_api_router)
 
 
+# 啟動時把 PC 監控歷史從 Sheet 撈回 in-memory ring buffer（解 Render free instance
+# 重啟資料遺失問題）。同步跑——backfill 速度由 Sheet read 決定，2880 row 等級幾秒內。
+@app.on_event("startup")
+def _on_startup():
+    import pc_state
+    pc_state.backfill_from_sheet()
+
+
 # ════════════════════════════════════════════
 # HTTP 端點
 # ════════════════════════════════════════════
