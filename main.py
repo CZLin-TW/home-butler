@@ -65,12 +65,49 @@ from web_api import router as web_api_router
 app.include_router(web_api_router)
 
 
-# 啟動時把 PC 監控歷史從 Sheet 撈回 in-memory ring buffer（解 Render free instance
-# 重啟資料遺失問題）。同步跑——backfill 速度由 Sheet read 決定，2880 row 等級幾秒內。
+# 啟動時把 PC 監控歷史 + 感測器歷史從 Sheet 撈回 in-memory ring buffer
+# （解 Render free instance 重啟資料遺失）+ spawn 感測器 polling thread。
 @app.on_event("startup")
 def _on_startup():
+    import threading
+    import time as _time
     import pc_state
+    import sensor_state
+    from sheets import RequestContext
+    import switchbot_api
+    from handlers.device import apply_sensor_compensation
+
     pc_state.backfill_from_sheet()
+    sensor_state.backfill_from_sheet()
+
+    def _sensor_polling_loop():
+        """每 60s 拉所有啟用感應器的當下溫濕度寫進 sensor_state。"""
+        while True:
+            try:
+                ctx = RequestContext()
+                ctx.load()
+                for d in ctx.get("智能居家"):
+                    if d.get("狀態") != "啟用" or d.get("類型") != "感應器":
+                        continue
+                    device_id = d.get("Device ID", "")
+                    name = d.get("名稱", "")
+                    location = d.get("位置", "")
+                    if not device_id or not name:
+                        continue
+                    result = switchbot_api.get_hub_sensor(device_id)
+                    if "error" in result:
+                        print(f"[sensor poll] {name}: {result.get('error')}")
+                        continue
+                    temp = result.get("temperature")
+                    humidity = result.get("humidity")
+                    temp, humidity = apply_sensor_compensation(temp, humidity, d)
+                    sensor_state.record(name, location, temp, humidity)
+            except Exception as e:
+                print(f"[sensor poll] tick error: {e}")
+            _time.sleep(60)
+
+    threading.Thread(target=_sensor_polling_loop, daemon=True).start()
+    print("[startup] sensor polling thread started")
 
 
 # ════════════════════════════════════════════

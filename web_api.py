@@ -22,6 +22,7 @@ import switchbot_api
 import panasonic_api
 import weather_api
 import pc_state
+import sensor_state
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -523,3 +524,12 @@ def api_pc_heartbeat(req: PCHeartbeatRequest):
 def api_pc_status():
     """回傳所有已 heartbeat 過的 PC 當前狀態 + 最近 24h raw 歷史（每 60s 一點）。"""
     return pc_state.snapshot()
+
+
+# ── 感測器歷史（home-butler 內部 polling SwitchBot API 累積） ──
+
+@router.get("/sensors/status")
+def api_sensors_status():
+    """回傳所有 polling 過的感測器當前讀值 + 最近 24h history。
+    polling 由 home-butler startup 時 spawn 的 thread 處理（main.py），不靠 PC agent。"""
+    return sensor_state.snapshot()
