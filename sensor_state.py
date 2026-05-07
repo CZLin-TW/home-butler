@@ -19,12 +19,12 @@ import gspread
 
 from sheets import _get_spreadsheet
 
-MAX_HISTORY_POINTS = 1440          # 24h × 60s
-OFFLINE_THRESHOLD_S = 300          # 5 分鐘沒 poll 視為離線（比 PC 更寬，因 polling 本身可能 SwitchBot API timeout）
+MAX_HISTORY_POINTS = 288           # 24h / 5min（polling 5 分鐘一次）
+OFFLINE_THRESHOLD_S = 900          # 15 分鐘沒 poll 視為離線（給 polling 一兩次容錯）
 SENSOR_HISTORY_SHEET = "感測器歷史"
 HISTORY_HEADERS = ["timestamp", "device_name", "location", "temp", "humidity"]
-TRIM_EVERY_N_APPENDS = 100
-SHEET_HARD_LIMIT_ROWS = 10000
+TRIM_EVERY_N_APPENDS = 12          # ~1 小時 trim 一次（polling 5min × N 感測器）
+SHEET_HARD_LIMIT_ROWS = 5000       # 防呆上限
 
 _lock = Lock()
 _sensors: dict = {}                # key = device_name

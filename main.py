@@ -104,7 +104,7 @@ def _on_startup():
                     sensor_state.record(name, location, temp, humidity)
             except Exception as e:
                 print(f"[sensor poll] tick error: {e}")
-            _time.sleep(60)
+            _time.sleep(300)  # 溫濕度變化慢，5 分鐘 polling 一次足夠（也省 SwitchBot API quota）
 
     threading.Thread(target=_sensor_polling_loop, daemon=True).start()
     print("[startup] sensor polling thread started")
