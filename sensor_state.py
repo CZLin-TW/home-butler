@@ -187,6 +187,11 @@ def backfill_from_sheet() -> None:
                     "temp": _to_float_or_none(r.get("temp")),
                     "humidity": _to_float_or_none(r.get("humidity")),
                 }
+                # Skip 已寫進 Sheet 的 0,0 row（早期版本 get_hub_sensor 沒 filter
+                # SwitchBot 失聯時回的 0,0；現在 filter 了，但歷史資料還在 Sheet。
+                # 24h 後 trim 會自動清，期間 backfill 跳過避免污染 chart）。
+                if point["temp"] == 0 and point["humidity"] == 0:
+                    continue
                 s["history_dict"][int(t)] = point
                 loaded += 1
         print(f"[sensor_state] backfilled {loaded} points from Sheet")
