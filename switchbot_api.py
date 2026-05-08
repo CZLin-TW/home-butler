@@ -153,10 +153,14 @@ def get_hub_sensor(device_id):
     status = get_device_status(device_id)
     if "error" in status:
         return status
-    return {
-        "temperature": status.get("temperature"),
-        "humidity": status.get("humidity"),
-    }
+    temp = status.get("temperature")
+    humidity = status.get("humidity")
+    # SwitchBot Cloud 偶爾在 hub 失聯時回 statusCode=100 但 body temperature/humidity
+    # 都是 0（default 值，不是真實讀值）。室內感測器不可能同時 0°C + 0%RH，
+    # 把這種 case 視為失敗而不是 record 進去。
+    if temp == 0 and humidity == 0:
+        return {"error": "sensor returned 0/0 (hub likely disconnected)"}
+    return {"temperature": temp, "humidity": humidity}
 
 
 # ── 高階封裝：DIY IR 設備控制 ──
