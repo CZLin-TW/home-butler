@@ -23,6 +23,7 @@ import panasonic_api
 import weather_api
 import pc_state
 import sensor_state
+import ac_history
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -533,3 +534,11 @@ def api_sensors_status():
     """回傳所有 polling 過的感測器當前讀值 + 最近 24h history。
     polling 由 home-butler startup 時 spawn 的 thread 處理（main.py），不靠 PC agent。"""
     return sensor_state.snapshot()
+
+
+@router.get("/ac/status")
+def api_ac_status():
+    """回傳所有空調的 24h 狀態歷史 snapshot。每 5 分鐘從「智能居家」分頁的
+    「最後電源/溫度/模式/風速」欄位 snapshot。前端按 location 拼 segments
+    在 sensor chart 背景畫色塊（冷氣藍 / 暖氣琥珀 / 除濕綠 / 其他灰）。"""
+    return ac_history.snapshot()
