@@ -47,6 +47,7 @@ GPU_MODEL = agent_config.GPU_MODEL
 HOME_BUTLER_URL = getattr(agent_config, "HOME_BUTLER_URL", "https://home-butler.onrender.com")
 LHM_URL = getattr(agent_config, "LHM_URL", "http://localhost:8085/data.json")
 TICK_SECONDS = getattr(agent_config, "TICK_SECONDS", 60)
+AUTO_UPDATE = getattr(agent_config, "AUTO_UPDATE", True)
 LOG_PATH = getattr(
     agent_config,
     "LOG_PATH",
@@ -111,6 +112,49 @@ def detect_local_ip() -> str:
 
 HOSTNAME = socket.gethostname()
 THIS_PC_IP = detect_local_ip()
+
+# ── Auto-update ──────────────────────────────────────
+# 每 UPDATE_CHECK_TICKS 個 tick（預設 60 ticks ≈ 1 小時）跑一次：
+#   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → os._exit(1)
+# 讓 Task Scheduler restart-on-fail 接走，下次 process 起來自帶新 code。
+#
+# AUTO_UPDATE=False 可關（agent_config.py），用來在你 push 壞 code 時暫停
+# 推送到所有 PC 拉新版。
+UPDATE_CHECK_TICKS = 60
+_REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _git(*args, timeout=30) -> str:
+    """Run git command in repo, return stdout. Raises CalledProcessError on failure."""
+    return subprocess.check_output(
+        ["git", *args], cwd=_REPO_DIR, timeout=timeout,
+    ).decode().strip()
+
+
+def get_current_sha() -> str:
+    try:
+        return _git("rev-parse", "HEAD", timeout=5)[:7]
+    except Exception:
+        return "unknown"
+
+
+def check_for_updates() -> bool:
+    """origin/main 有新 commit 就 git pull、回 True（caller 應 os._exit(1)）。
+    失敗（網路掛、merge conflict 等）log 後回 False，agent 繼續跑舊版。"""
+    if not AUTO_UPDATE:
+        return False
+    try:
+        _git("fetch", "origin", "main")
+        current = _git("rev-parse", "HEAD", timeout=5)
+        remote = _git("rev-parse", "origin/main", timeout=5)
+        if current == remote:
+            return False
+        _git("pull", "origin", "main")
+        log.info(f"[update] {current[:7]} → {remote[:7]}, restarting")
+        return True
+    except Exception as e:
+        log.info(f"[update] check failed: {e}")
+        return False
 
 
 def read_cpu_temp_from_lhm() -> float | None:
@@ -293,8 +337,12 @@ def push(payload: dict) -> None:
 
 def main():
     global _last_tick_at
-    log.info(f"agent start: {HOSTNAME} ({THIS_PC_IP}) → {HOME_BUTLER_URL}  log={LOG_PATH}")
+    log.info(
+        f"agent start: {HOSTNAME} ({THIS_PC_IP}) sha={get_current_sha()} "
+        f"auto_update={AUTO_UPDATE} → {HOME_BUTLER_URL}  log={LOG_PATH}"
+    )
     threading.Thread(target=_watchdog, daemon=True).start()
+    tick_count = 0
     while True:
         t0 = time.monotonic()
         try:
@@ -303,6 +351,12 @@ def main():
             log.info(f"[tick] {e}")
         with _watchdog_lock:
             _last_tick_at = time.monotonic()
+        # 每 UPDATE_CHECK_TICKS 個 tick check 一次 origin/main，有新 commit 就 _exit(1)
+        # 讓 Task Scheduler 重啟 process 拉新 code
+        tick_count += 1
+        if tick_count % UPDATE_CHECK_TICKS == 0:
+            if check_for_updates():
+                os._exit(1)
         elapsed = time.monotonic() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
 
