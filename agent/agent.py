@@ -17,6 +17,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import httpx
@@ -75,6 +76,26 @@ log.addHandler(_file_handler)
 _stream_handler = logging.StreamHandler(sys.stdout)
 _stream_handler.setFormatter(logging.Formatter("%(message)s"))  # terminal 不重複秀時間
 log.addHandler(_stream_handler)
+
+
+# ── Watchdog ─────────────────────────────────────────
+# 主迴圈 5 分鐘沒新 tick = 認定某個 blocking call hang 住（pynvml 沒 timeout
+# 機制、httpx 邊角情境、subprocess 孤兒孫程序等都可能）。用 os._exit 而不是
+# sys.exit，後者會 raise SystemExit 而被卡在主 thread 的 syscall 裡出不來。
+# 退出後 Task Scheduler 的 restart-on-failure 會把 agent 拉起。
+_WATCHDOG_STALE_THRESHOLD_S = 5 * 60
+_last_tick_at = time.monotonic()
+_watchdog_lock = threading.Lock()
+
+
+def _watchdog():
+    while True:
+        time.sleep(30)
+        with _watchdog_lock:
+            stale = time.monotonic() - _last_tick_at
+        if stale > _WATCHDOG_STALE_THRESHOLD_S:
+            log.error(f"[watchdog] no tick for {stale:.0f}s, hard exit")
+            os._exit(1)
 
 
 def detect_local_ip() -> str:
@@ -210,8 +231,32 @@ def read_fah_via_lufah() -> dict | None:
 
 
 def collect_payload() -> dict:
+    # 逐步計時，任一 collector > 3s 才印（平常各 < 1s）。等下次 hang 前留下
+    # 哪個 collector 開始拖慢的證據，方便鎖定真兇（pynvml/lhm/lufah 都嫌疑）。
+    timings: dict[str, float] = {}
+
+    t = time.monotonic()
     cpu_pct = psutil.cpu_percent(interval=1.0)
     mem = psutil.virtual_memory()
+    timings["psutil"] = time.monotonic() - t
+
+    t = time.monotonic()
+    cpu_temp = read_cpu_temp_from_lhm()
+    timings["lhm"] = time.monotonic() - t
+
+    t = time.monotonic()
+    gpu = read_gpu_via_pynvml()
+    timings["gpu"] = time.monotonic() - t
+
+    t = time.monotonic()
+    fah = read_fah_via_lufah()
+    timings["fah"] = time.monotonic() - t
+
+    if max(timings.values()) > 3.0:
+        log.warning(
+            "[collect slow] " + " ".join(f"{k}={v:.1f}s" for k, v in timings.items())
+        )
+
     return {
         "ip": THIS_PC_IP,
         "hostname": HOSTNAME,
@@ -219,9 +264,9 @@ def collect_payload() -> dict:
         "gpu_model": GPU_MODEL,
         "cpu_pct": float(cpu_pct),
         "ram_pct": float(mem.percent),
-        "cpu_temp_c": read_cpu_temp_from_lhm(),
-        "fah": read_fah_via_lufah(),
-        **read_gpu_via_pynvml(),
+        "cpu_temp_c": cpu_temp,
+        "fah": fah,
+        **gpu,
     }
 
 
@@ -247,14 +292,18 @@ def push(payload: dict) -> None:
 
 
 def main():
+    global _last_tick_at
     log.info(f"agent start: {HOSTNAME} ({THIS_PC_IP}) → {HOME_BUTLER_URL}  log={LOG_PATH}")
+    threading.Thread(target=_watchdog, daemon=True).start()
     while True:
-        t0 = time.time()
+        t0 = time.monotonic()
         try:
             push(collect_payload())
         except Exception as e:
             log.info(f"[tick] {e}")
-        elapsed = time.time() - t0
+        with _watchdog_lock:
+            _last_tick_at = time.monotonic()
+        elapsed = time.monotonic() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
 
 
