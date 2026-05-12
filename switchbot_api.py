@@ -149,18 +149,19 @@ def ac_set_all(device_id, temperature=26, mode=2, fan_speed=1, power="on"):
 # ── 高階封裝：感應器讀取 ──
 
 def get_hub_sensor(device_id):
-    """讀取 Hub 的溫濕度感應器"""
+    """讀取 Hub 的溫濕度感應器。Meter Pro CO2 會多回 CO2 欄位（ppm）。"""
     status = get_device_status(device_id)
     if "error" in status:
         return status
     temp = status.get("temperature")
     humidity = status.get("humidity")
+    co2 = status.get("CO2")    # Meter Pro CO2 實測欄位名 "CO2"（大寫），其他感測器沒這欄回 None
     # SwitchBot Cloud 偶爾在 hub 失聯時回 statusCode=100 但 body temperature/humidity
     # 都是 0（default 值，不是真實讀值）。室內感測器不可能同時 0°C + 0%RH，
     # 把這種 case 視為失敗而不是 record 進去。
     if temp == 0 and humidity == 0:
         return {"error": "sensor returned 0/0 (hub likely disconnected)"}
-    return {"temperature": temp, "humidity": humidity}
+    return {"temperature": temp, "humidity": humidity, "co2": co2}
 
 
 # ── 高階封裝：DIY IR 設備控制 ──
