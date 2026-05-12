@@ -165,6 +165,13 @@ def list_switchbot_devices():
     return {"status": "ok", "設備數量": len(devices), "設備列表": devices}
 
 
+@app.get("/switchbot/devices/{device_id}/raw_status", dependencies=[Depends(verify_api_key)])
+def get_switchbot_raw_status(device_id: str):
+    """Debug: 回 SwitchBot Cloud API 對該裝置原始 status body。
+    用來看新感測器（Meter Pro CO2 等）實際回什麼欄位，決定後續解析邏輯。"""
+    return switchbot_api.get_device_status(device_id)
+
+
 @app.get("/switchbot/test/{device_id}/{button_name}", dependencies=[Depends(verify_api_key)])
 def test_switchbot_command(device_id: str, button_name: str):
     print(f"[TEST] device_id={device_id}, button={button_name}")
