@@ -96,16 +96,29 @@ def _ensure_history_sheet():
     ss = _get_spreadsheet()
     try:
         ws = ss.worksheet(SENSOR_HISTORY_SHEET)
-        # 自動 migrate：早期版本沒 co2 欄，加進去。既有 row 那一欄會是空字串。
-        current_headers = ws.row_values(1)
-        if "co2" not in current_headers:
-            new_col = len(current_headers) + 1
-            ws.update_cell(1, new_col, "co2")
-            print(f"[sensor_state] migrated header: added co2 at column {new_col}")
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=SENSOR_HISTORY_SHEET, rows=2000, cols=len(HISTORY_HEADERS))
         ws.append_row(HISTORY_HEADERS, value_input_option="USER_ENTERED")
         print(f"[sensor_state] created sheet '{SENSOR_HISTORY_SHEET}'")
+        _cached_ws = ws
+        return ws
+
+    # 自動 migrate：早期版本只配 5 個 columns（無 co2 欄）。先用 add_cols 把
+    # grid 寬度撐到 len(HISTORY_HEADERS) 再寫 header，否則直接 update_cell
+    # F1 會撞 "Range exceeds grid limits" API error。
+    # Migration 失敗不該擋住 caching（會讓每次 polling tick 都重試 row_values
+    # + update_cell，浪費 API quota）；cache 起來、寫 row 時 co2 那欄會空。
+    try:
+        current_headers = ws.row_values(1)
+        if "co2" not in current_headers:
+            target_cols = len(HISTORY_HEADERS)
+            if ws.col_count < target_cols:
+                ws.add_cols(target_cols - ws.col_count)
+            ws.update_cell(1, target_cols, "co2")
+            print(f"[sensor_state] migrated header: added co2 at column {target_cols}")
+    except Exception as e:
+        print(f"[sensor_state] header migration failed (continuing without co2 column): {e}")
+
     _cached_ws = ws
     return ws
 
