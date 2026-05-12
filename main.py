@@ -74,6 +74,7 @@ def _on_startup():
     import pc_state
     import sensor_state
     import ac_history
+    import dehumidifier_auto
     from sheets import RequestContext
     import switchbot_api
     from handlers.device import apply_sensor_compensation
@@ -81,6 +82,7 @@ def _on_startup():
     pc_state.backfill_from_sheet()
     sensor_state.backfill_from_sheet()
     ac_history.backfill_from_sheet()
+    dehumidifier_auto.load_rules()
 
     def _polling_loop():
         """每 5 分鐘掃一次「智能居家」分頁：
@@ -120,12 +122,14 @@ def _on_startup():
                             name, location, power,
                             d.get("最後溫度"), d.get("最後模式"), d.get("最後風速"),
                         )
+                # 除濕機自動規則：先 sensor poll 跑完寫進 snapshot 再評估
+                dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())
             except Exception as e:
                 print(f"[poll] tick error: {e}")
             _time.sleep(300)
 
     threading.Thread(target=_polling_loop, daemon=True).start()
-    print("[startup] polling thread started (sensor + ac)")
+    print("[startup] polling thread started (sensor + ac + dehumidifier auto)")
 
 
 # ════════════════════════════════════════════

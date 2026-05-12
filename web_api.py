@@ -24,6 +24,7 @@ import weather_api
 import pc_state
 import sensor_state
 import ac_history
+import dehumidifier_auto
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -219,6 +220,72 @@ def api_control_dehumidifier(req: DehumidifierControlRequest):
     result = handle_control_dehumidifier(data, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
+
+
+# ── 除濕機自動規則 (條件式 ON/OFF) ──
+
+class DehumAutoRuleRequest(BaseModel):
+    device_name: str
+    auto_mode: bool
+    sensor_name: Optional[str] = None
+    duration_min: Optional[int] = None
+    threshold: Optional[int] = None        # = UI 目標濕度 segment 當下值
+    on_mode: Optional[str] = None          # = UI 模式 segment 當下值
+
+
+@router.get("/dehumidifier/auto-rule")
+def api_get_dehum_auto_rules():
+    """回傳所有除濕機的自動規則 + runtime state（含 above_since 等）。"""
+    return dehumidifier_auto.get_all_rules()
+
+
+@router.post("/dehumidifier/auto-rule")
+def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
+    """設定/更新一台除濕機的自動規則。
+
+    auto_mode=False → True 且 sensor + 設備資訊都備齊時，set_rule 內會立即
+    依「對稱單一門檻」規則 fire ON 或 OFF。"""
+    sensor_humidity = None
+    power_now = None
+    auth = None
+    gwid = None
+
+    if req.auto_mode:
+        ctx = RequestContext()
+        ctx.load()
+        for d in ctx.get("智能居家"):
+            if (d.get("狀態") == "啟用"
+                    and d.get("名稱") == req.device_name
+                    and d.get("類型") == "除濕機"):
+                auth = d.get("Auth", "")
+                gwid = d.get("Device ID", "")
+                break
+
+        if req.sensor_name:
+            sensor = sensor_state.snapshot().get(req.sensor_name, {})
+            if sensor.get("online", False):
+                sensor_humidity = sensor.get("current", {}).get("humidity")
+
+        if auth and gwid:
+            try:
+                status = panasonic_api.get_dehumidifier_status(auth, gwid)
+                if "error" not in status:
+                    power_now = status.get("0x00") == "1"
+            except Exception as e:
+                print(f"[dehum-auto API] status fetch error: {e}")
+
+    return dehumidifier_auto.set_rule(
+        device_name=req.device_name,
+        auto_mode=req.auto_mode,
+        sensor_name=req.sensor_name,
+        duration_min=req.duration_min,
+        threshold=req.threshold,
+        on_mode=req.on_mode,
+        sensor_humidity=sensor_humidity,
+        power_now=power_now,
+        auth=auth,
+        gwid=gwid,
+    )
 
 
 @router.get("/devices/sensor")
