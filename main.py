@@ -112,8 +112,9 @@ def _on_startup():
                             continue
                         temp = result.get("temperature")
                         humidity = result.get("humidity")
+                        co2 = result.get("co2")
                         temp, humidity = apply_sensor_compensation(temp, humidity, d)
-                        sensor_state.record(name, location, temp, humidity)
+                        sensor_state.record(name, location, temp, humidity, co2)
                     elif dtype == "空調":
                         power = str(d.get("最後電源", "")).strip()
                         if not power:

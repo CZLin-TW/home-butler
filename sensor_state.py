@@ -22,7 +22,7 @@ from sheets import _get_spreadsheet
 MAX_HISTORY_POINTS = 288           # 24h / 5min（polling 5 分鐘一次）
 OFFLINE_THRESHOLD_S = 900          # 15 分鐘沒 poll 視為離線（給 polling 一兩次容錯）
 SENSOR_HISTORY_SHEET = "感測器歷史"
-HISTORY_HEADERS = ["timestamp", "device_name", "location", "temp", "humidity"]
+HISTORY_HEADERS = ["timestamp", "device_name", "location", "temp", "humidity", "co2"]
 TRIM_EVERY_N_APPENDS = 12          # ~1 小時 trim 一次（polling 5min × N 感測器）
 SHEET_HARD_LIMIT_ROWS = 5000       # 防呆上限
 
@@ -42,13 +42,14 @@ def _new_sensor():
     }
 
 
-def record(device_name: str, location: str, temp, humidity) -> None:
+def record(device_name: str, location: str, temp, humidity, co2=None) -> None:
     """寫入一筆感測器讀值。in-memory 即時、Sheet append 走背景 thread。
-    temp / humidity 任一可為 None（讀值缺失），不影響另一個。"""
-    if temp is None and humidity is None:
-        return  # 兩個都缺、沒意義
+    temp / humidity / co2 任一可為 None（讀值缺失），不影響其他。
+    Meter Pro CO2 三合一感測器會三欄都有；一般 SwitchBot 溫濕度感測器 co2=None。"""
+    if temp is None and humidity is None and co2 is None:
+        return  # 三個都缺、沒意義
     now = time.time()
-    point = {"t": now, "temp": temp, "humidity": humidity}
+    point = {"t": now, "temp": temp, "humidity": humidity, "co2": co2}
 
     with _lock:
         if device_name not in _sensors:
@@ -95,6 +96,12 @@ def _ensure_history_sheet():
     ss = _get_spreadsheet()
     try:
         ws = ss.worksheet(SENSOR_HISTORY_SHEET)
+        # 自動 migrate：早期版本沒 co2 欄，加進去。既有 row 那一欄會是空字串。
+        current_headers = ws.row_values(1)
+        if "co2" not in current_headers:
+            new_col = len(current_headers) + 1
+            ws.update_cell(1, new_col, "co2")
+            print(f"[sensor_state] migrated header: added co2 at column {new_col}")
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=SENSOR_HISTORY_SHEET, rows=2000, cols=len(HISTORY_HEADERS))
         ws.append_row(HISTORY_HEADERS, value_input_option="USER_ENTERED")
@@ -108,7 +115,7 @@ def _sheet_append_async(point: dict, device_name: str, location: str) -> None:
     try:
         ws = _ensure_history_sheet()
         ws.append_row(
-            [point["t"], device_name, location, point.get("temp"), point.get("humidity")],
+            [point["t"], device_name, location, point.get("temp"), point.get("humidity"), point.get("co2")],
             value_input_option="USER_ENTERED",
         )
         with _lock:
@@ -186,6 +193,7 @@ def backfill_from_sheet() -> None:
                     "t": t,
                     "temp": _to_float_or_none(r.get("temp")),
                     "humidity": _to_float_or_none(r.get("humidity")),
+                    "co2": _to_float_or_none(r.get("co2")),
                 }
                 # Skip 已寫進 Sheet 的 0,0 row（早期版本 get_hub_sensor 沒 filter
                 # SwitchBot 失聯時回的 0,0；現在 filter 了，但歷史資料還在 Sheet。
