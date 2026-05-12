@@ -34,6 +34,11 @@ RULES_SHEET = "除濕機自動規則"
 HYSTERESIS_OFFSET = 5              # H_on = threshold + 5
 SENSOR_WARNING_TICKS = 6           # 30min（6 × 5min polling）
 SENSOR_DISABLE_TICKS = 12          # 60min
+# 自動模式下強制走「連續除濕」：其他模式（尤其「目標濕度」）會讓除濕機看自己
+# 機體周邊濕度達標就停，但機體周邊通常比房間其他位置更乾、外部 sensor 未達
+# 門檻，導致永遠 trigger 不到 auto-OFF。連續除濕忽略內部判定，控制權完全
+# 交給外部 sensor + 我們的 hysteresis。
+AUTO_MODE_DEHUMIDIFIER_MODE = "連續除濕"
 
 HEADERS = [
     "device_name", "auto_mode", "sensor_name", "duration_min",
@@ -138,7 +143,9 @@ def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
             "sensor_name": sensor_name if sensor_name is not None else existing.get("sensor_name", ""),
             "duration_min": duration_min if duration_min is not None else existing.get("duration_min", 30),
             "threshold": threshold if threshold is not None else existing.get("threshold", 50),
-            "on_mode": on_mode if on_mode is not None else existing.get("on_mode", "目標濕度"),
+            # on_mode 永遠強制成 AUTO_MODE_DEHUMIDIFIER_MODE，忽略 caller 傳入。
+            # 保留欄位是為 Sheet schema 一致 + 將來若改成可選不同模式的彈性。
+            "on_mode": AUTO_MODE_DEHUMIDIFIER_MODE,
         }
         _rules[device_name] = rule
         if old_auto != auto_mode:
@@ -340,13 +347,13 @@ def _phase_for_set(rule, sensor_humidity, power_now):
 # ── Panasonic API wrappers ─────────────────────────────
 
 def _fire_on(device_name, rule, auth, gwid):
-    """送開機 → 設模式 → 設目標濕度。送指令失敗 log 不 raise。"""
+    """送開機 → 強制設「連續除濕」→ 設目標濕度（連續模式下被忽略，但保留為
+    UI segment highlight 用）。送指令失敗 log 不 raise。"""
     try:
         panasonic_api.dehumidifier_turn_on(auth, gwid)
-        if rule.get("on_mode"):
-            panasonic_api.dehumidifier_set_mode(auth, gwid, rule["on_mode"])
+        panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
         panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
-        print(f"[dehum-auto] FIRE ON {device_name}: mode={rule.get('on_mode')} target={rule['threshold']}")
+        print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 target={rule['threshold']}")
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
 
