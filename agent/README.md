@@ -159,19 +159,38 @@ LOG_PATH = r"C:\butler-agent\agent.log"
 
 ## 更新 agent
 
+**預設自動更新**：agent 每 60 ticks（≈ 1 小時）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` + `os._exit(1)` 讓 Task Scheduler 重啟 process 拉新 code。`main` push 完之後 1 小時內所有 PC 自動跟上，**不用手動**。
+
+第一次套用 auto-update 功能本身那次升級要手動（拉新版 agent.py 進來才會有自更新邏輯）：
+
 ```powershell
 cd C:\butler-agent\repo
 git pull
+schtasks /end /tn "ButlerAgent"
+schtasks /run /tn "ButlerAgent"
 ```
 
-`agent_config.py`、`agent.log` 都不會被動到（前者在 `.gitignore`、後者預設在 user home 之外於 git tree）。Task Scheduler 開的 agent process 不會自動重啟拿新版——手動：
+之後就純手動釋出 = 直接 push 到 `main`，所有 PC 自動拿。
+
+### 暫停 auto-update
+
+push 了壞 code 想暫停推送、或某台 PC 想鎖版本 debug：在 `agent_config.py` 加：
+
+```python
+AUTO_UPDATE = False
+```
+
+然後重啟 agent（`schtasks /end + /run`）。該台 PC 從此不再 check 更新，要拿新版要手動 `git pull` + 重啟 task。
+
+### 看當前版本
+
+agent startup log 第一行會印 `sha=xxxxxxx`：
 
 ```powershell
-schtasks /end /tn "ButlerAgent"   # 停掉舊 process
-schtasks /run /tn "ButlerAgent"   # 跑新版
+Get-Content "$env:USERPROFILE\butler-agent.log" -Head 1
 ```
 
-或重開機。
+或所有 PC 一起看（home-butler Dashboard 上目前還沒 expose，要的話 agent payload 加一個 sha 欄位即可）。
 
 ---
 

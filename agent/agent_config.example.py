@@ -21,6 +21,11 @@ GPU_MODEL = ""    # 例如 "GTX-1650S"、"RTX-4070Ti"
 # LHM_URL = "http://localhost:8085/data.json"
 # TICK_SECONDS = 60
 
+# Auto-update：每小時 check 一次 origin/main，有新 commit 就 git pull
+# + os._exit(1) 讓 Task Scheduler 重啟 process 拉新 code。預設啟用。
+# 緊急時改 False 暫停這台 PC 接收新版（例如 main 推了壞 code 你要鎖版本 debug）。
+# AUTO_UPDATE = True
+
 # Log 檔位置（會 rotate：5MB × 3 份輪替）。預設 ~/butler-agent.log，
 # Windows 上會解到 C:\Users\<你>\butler-agent.log。要改別處例如 C:\butler-agent\agent.log
 # 取消下面註解：
