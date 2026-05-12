@@ -6,6 +6,7 @@ from sheets import get_device_id_by_name, get_device_auth_by_name, get_all_devic
 import switchbot_api
 import panasonic_api
 import weather_api
+import dehumidifier_auto
 
 # 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
 # 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
@@ -340,7 +341,8 @@ def handle_query_devices(ctx):
     return "已設定的設備：\n" + "\n".join(lines)
 
 
-def handle_control_dehumidifier(data, ctx):
+def handle_control_dehumidifier(data, ctx, _internal=False):
+    """除濕機手動控制。_internal=True 是自動模式規則自己呼叫，跳過 lock 檢查。"""
     device_name = data.get("device_name", "")
     auth, gwid = get_device_auth_by_name(device_name, ctx)
 
@@ -355,6 +357,10 @@ def handle_control_dehumidifier(data, ctx):
             return f"❌ 有多台除濕機（{names}），請指定要控制哪一台"
         else:
             return "❌ 找不到除濕機設備，請先在「智能居家」分頁設定"
+
+    # 自動模式啟用中拒收外部控制（Dashboard 手動 / LINE bot / 排程都會走這條）
+    if not _internal and dehumidifier_auto.is_locked(device_name):
+        return f"❌ {device_name} 目前處於自動模式，請先在 Dashboard 關閉自動模式才能手動控制"
 
     power = data.get("power", "")
     mode = data.get("mode", "")
