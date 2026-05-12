@@ -23,8 +23,9 @@
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
 | 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
 | 除濕機控制 | 開關、模式、目標濕度（Panasonic Smart App） |
+| 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：目標濕度當門檻 + 持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制 |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
-| 溫濕度查詢 | 即時讀取室內溫度與濕度 |
+| 溫濕度查詢 | 即時讀取室內溫度與濕度（含 SwitchBot Meter Pro CO2 三合一感測器的 CO2 ppm 讀值） |
 | 天氣預報 | 全台鄉鎮一週天氣（含體感溫度與相對濕度），支援自然語言查詢 |
 | 廣播訊息 | `@all` 開頭可對全體家庭成員發送訊息 |
 | 晚間綜合推播 | 晚上：明日天氣預報 + 食品過期提醒 + 明日與未完成待辦 |
@@ -32,7 +33,7 @@
 | 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
-| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖 |
+| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖。agent 內建 watchdog 防 hang、auto-update 自動拉新版（詳見 `agent/README.md`） |
 
 ---
 ## 需要的資源
@@ -261,6 +262,16 @@ git push
 |---------|------|------|---------|--------|---------|------|------|
 - 設備所有排程完成後統一移至此分頁，Claude 不會讀取
 
+#### 自動建立的分頁（不需手動建）
+
+home-butler 啟動 / 第一次寫入時自動建出來，header 也自動補：
+
+| 分頁 | 寫入者 | 內容 |
+|------|--------|------|
+| 感測器歷史 | `sensor_state.py` 每 5 min polling 寫入 | timestamp, device_name, location, temp, humidity, co2（24h 後自動 trim） |
+| 空調歷史 | `ac_history.py` 每 5 min polling 寫入 | timestamp, device_name, location, power, temp, mode, fan_speed（24h 後自動 trim） |
+| 除濕機自動規則 | `dehumidifier_auto.py` 規則設定 / 評估時寫入 | device_name, auto_mode, sensor_name, duration_min, threshold, on_mode, auto_phase, countdown_min, last_event, last_event_at（每台一行，覆蓋更新） |
+
 ---
 
 ### 六、Google Cloud 設定
@@ -485,8 +496,12 @@ function sendRealtimeNotification() {
 | /api/devices/options | GET | 各類裝置的可用選項（空調模式/風速、除濕機模式/濕度），供前端動態渲染 |
 | /api/devices/control/ac | POST | 控制空調（power, temperature, mode, fan_speed） |
 | /api/devices/control/ir | POST | 控制 IR 裝置（device_name, button） |
-| /api/devices/control/dehumidifier | POST | 控制除濕機（power, mode, humidity） |
+| /api/devices/control/dehumidifier | POST | 控制除濕機（power, mode, humidity）。自動模式啟用時拒收外部控制 |
 | /api/devices/sensor | GET | 查詢感測器（device_name） |
+| /api/sensors/status | GET | 所有感測器當下讀值 + 24h history（溫度 / 濕度 / CO2），給 Dashboard chart 用 |
+| /api/ac/status | GET | 所有空調當下狀態 + 24h history snapshot，給 Dashboard chart 背景畫 AC on 區段用 |
+| /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state（auto_phase / countdown / last_event） |
+| /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
 | /api/todos | GET | 列出所有待辦事項 |
 | /api/todos | POST | 新增待辦事項 |
 | /api/todos | PATCH | 修改待辦事項 |
@@ -709,13 +724,17 @@ function sendRealtimeNotification() {
 | handlers/device.py | 智能居家 handler（空調、IR、感應器、除濕機、天氣） |
 | handlers/schedule.py | 排程指令 handler（新增、刪除、查詢） |
 | handlers/style.py | 自訂風格 handler |
-| switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取、DIY IR） |
+| switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取 含 Meter Pro CO2、DIY IR） |
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
+| observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
-| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控） |
+| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則） |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
-| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）。Render 部署不會 import 這個目錄 |
+| sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
+| ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
+| dehumidifier_auto.py | 除濕機條件式自動 ON/OFF（hysteresis + sensor 失聯 fallback + 排他鎖）。runtime state in-memory，rule 設定值持久化到 Sheet「除濕機自動規則」 |
+| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 每小時自動 git pull。Render 部署不會 import 這個目錄 |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 
