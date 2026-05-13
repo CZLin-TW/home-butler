@@ -25,6 +25,7 @@ import pc_state
 import sensor_state
 import ac_history
 import dehumidifier_auto
+import dehumidifier_history
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -609,3 +610,11 @@ def api_ac_status():
     「最後電源/溫度/模式/風速」欄位 snapshot。前端按 location 拼 segments
     在 sensor chart 背景畫色塊（冷氣藍 / 暖氣琥珀 / 除濕綠 / 其他灰）。"""
     return ac_history.snapshot()
+
+
+@router.get("/dehumidifier/history")
+def api_dehumidifier_history():
+    """回傳所有除濕機的 24h power 歷史 snapshot。只有 auto_mode=True 的除濕機
+    會被 polling 因此才有資料；前端只在「自動模式 ON」卡片內畫 on-segments
+    背景（fresh 綠色）+ 綁定 sensor 的濕度線。"""
+    return dehumidifier_history.snapshot()

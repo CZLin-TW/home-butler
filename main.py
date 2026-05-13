@@ -75,6 +75,7 @@ def _on_startup():
     import sensor_state
     import ac_history
     import dehumidifier_auto
+    import dehumidifier_history
     from sheets import RequestContext
     import switchbot_api
     from handlers.device import apply_sensor_compensation
@@ -82,6 +83,7 @@ def _on_startup():
     pc_state.backfill_from_sheet()
     sensor_state.backfill_from_sheet()
     ac_history.backfill_from_sheet()
+    dehumidifier_history.backfill_from_sheet()
     dehumidifier_auto.load_rules()
 
     def _polling_loop():
