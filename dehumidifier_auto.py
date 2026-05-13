@@ -27,6 +27,7 @@ from threading import Lock
 
 import gspread
 
+import dehumidifier_history
 import panasonic_api
 from sheets import _get_spreadsheet
 
@@ -62,6 +63,14 @@ _cached_ws = None
 
 def _new_runtime():
     return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0}
+
+
+def _round_humidity(h: float) -> int:
+    """四捨五入到整數（0.5 進位）。Python 內建 round() 是 banker's rounding
+    (round half to even)，60.5 會變 60 不是 61，跟「四捨五入」直覺不一致。
+    sensor 小數值 vs 整數門檻比對時用這個，避免 60.0 卡點、60.1 reset 的問題。
+    濕度永遠非負，這寫法安全。"""
+    return int(h + 0.5)
 
 
 def _ensure_sheet():
@@ -198,6 +207,10 @@ def evaluate_all(ctx, sensor_snapshot):
             continue
         power_now = status.get("0x00") == "1"
 
+        # Record power 狀態到 history（給 Dashboard 自動模式 chart 背景畫 on segments）
+        location = d.get("位置", "")
+        dehumidifier_history.record(device_name, location, power_now)
+
         sensor = sensor_snapshot.get(rule["sensor_name"], {})
         humidity = None
         if sensor.get("online", False):
@@ -217,9 +230,11 @@ def evaluate_all(ctx, sensor_snapshot):
 # ── Internal evaluators ─────────────────────────────────
 
 def _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, auth, gwid):
-    """Toggle 從 OFF→ON 瞬間：對稱單一門檻判斷。"""
+    """Toggle 從 OFF→ON 瞬間：對稱單一門檻判斷（無 hysteresis，用 ≥ 端贏 tie）。
+    sensor 四捨五入後比，跟 steady-state 一致。"""
     threshold = rule["threshold"]
-    if sensor_humidity >= threshold:
+    humidity_int = _round_humidity(sensor_humidity)
+    if humidity_int >= threshold:
         if not power_now:
             _fire_on(device_name, rule, auth, gwid)
             return "toggled_immediate_on"
@@ -235,6 +250,9 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
     duration_s = rule["duration_min"] * 60
     h_on = threshold + HYSTERESIS_OFFSET
     h_off = threshold
+    # 四捨五入後再比較：sensor 0.x 小數 vs 整數門檻精準匹配不會卡。
+    # 例：target=60 → 59.5~60.4 都算「≤60」會累積關閉、60.5~64.4 灰色區。
+    humidity_int = _round_humidity(humidity)
 
     fire = None
     countdown_min = None
@@ -243,7 +261,7 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
     with _lock:
         state = _state.setdefault(device_name, _new_runtime())
 
-        if humidity >= h_on:
+        if humidity_int >= h_on:
             state["below_since"] = None
             if state["above_since"] is None:
                 state["above_since"] = now
@@ -257,7 +275,9 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
                     phase = "armed_above"
             else:
                 phase = "idle_humid"
-        elif humidity < h_off:
+        elif humidity_int <= h_off:
+            # 改用 <=（含等於）：sensor 剛好等於 target 也算「夠乾」進關閉累積。
+            # 原本用 < 時剛好打到 60.0 會落到灰色區、下個 tick 60.1 又 reset，不直覺。
             state["above_since"] = None
             if state["below_since"] is None:
                 state["below_since"] = now
@@ -272,7 +292,7 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
             else:
                 phase = "idle_dry"
         else:
-            # 灰色區 [threshold, threshold+5)：reset 計時器，維持當前 power
+            # 灰色區 (threshold, threshold+5)：reset 計時器，維持當前 power
             state["above_since"] = None
             state["below_since"] = None
             phase = "idle_humid" if power_now else "idle_dry"
@@ -329,16 +349,18 @@ def _force_disable(device_name, rule, power_now, auth, gwid, now):
 # ── Phase computation ──────────────────────────────────
 
 def _phase_for_set(rule, sensor_humidity, power_now):
-    """set_rule 後計算當下 phase。下個 tick evaluate_all 會覆寫成更精準的值。"""
+    """set_rule 後計算當下 phase。下個 tick evaluate_all 會覆寫成更精準的值。
+    四捨五入規則同 _evaluate_steady。"""
     if not rule.get("auto_mode"):
         return "disabled"
     if sensor_humidity is None:
         return "sensor_lost_warning"
     threshold = rule["threshold"]
     h_on = threshold + HYSTERESIS_OFFSET
-    if sensor_humidity >= h_on:
+    humidity_int = _round_humidity(sensor_humidity)
+    if humidity_int >= h_on:
         return "idle_humid" if power_now else "armed_above"
-    elif sensor_humidity < threshold:
+    elif humidity_int <= threshold:
         return "armed_below" if power_now else "idle_dry"
     else:
         return "idle_humid" if power_now else "idle_dry"
