@@ -159,7 +159,7 @@ LOG_PATH = r"C:\butler-agent\agent.log"
 
 ## 更新 agent
 
-**預設自動更新**：agent 每 60 ticks（≈ 1 小時）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` + `os._exit(1)` 讓 Task Scheduler 重啟 process 拉新 code。`main` push 完之後 1 小時內所有 PC 自動跟上，**不用手動**。
+**預設自動更新**：agent 每 60 ticks（≈ 1 小時）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。`main` push 完之後 1 小時內所有 PC 自動跟上，**不用手動**。
 
 第一次套用 auto-update 功能本身那次升級要手動（拉新版 agent.py 進來才會有自更新邏輯）：
 
@@ -199,6 +199,7 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Head 1
 | 症狀 | 原因 | 解法 |
 |---|---|---|
 | Task 跑了 Last Result `0x41303` `(SCHED_S_TASK_HAS_NOT_RUN)`、log 沒長 | bat 走 PATH 解 `python.exe` 解到 MS Store 版 stub launcher，background session 跑不起來 | bat 改絕對路徑 `"C:\Program Files\Python3XX\python.exe"` |
+| Task `Status: Ready` + `Last Result: 3`、log 完全沒新增（連 `agent start:` 都沒寫） | bat 裡 python 絕對路徑跟實際安裝位置對不上（例如裝在 `C:\Python313\` 但 bat 寫 `C:\Program Files\Python313\`），bat 啟動瞬間就死 | 前景跑一次 `& "<正確 python>" -u agent.py` 確認新 code 沒問題，然後改 bat 的 python 路徑（用 `where.exe python` 或 `Get-ChildItem "C:\Python*","C:\Program Files\Python*"` 找實際位置） |
 | 前台跑 agent OK，但 task scheduler 跑 log 50 分鐘才出現 | python stdout 對檔案是 block buffer (4KB)，每行 ~80 bytes 要攢很久 | bat 加 `-u` flag，或升 agent.py 到自帶 line-buffered 版本 |
 | `cpu_temp_c` 一直是 None / `[lhm] timed out` | LHM 沒在跑 / port 8085 沒開 / 沒有 admin 權限 | 確認 LHM process 在、Web Server option 勾了、首次啟動給 admin |
 | 重開機後 `cpu_temp_c` 短時間是 None，登入後恢復 | LHM 用 startup folder 模式只在 logon 後啟，agent 是 OnStart 早於 logon | 改 LHM 也用 Task Scheduler at-startup with highest privileges，或設 auto-login |
