@@ -81,9 +81,7 @@ log.addHandler(_stream_handler)
 
 # ── Watchdog ─────────────────────────────────────────
 # 主迴圈 5 分鐘沒新 tick = 認定某個 blocking call hang 住（pynvml 沒 timeout
-# 機制、httpx 邊角情境、subprocess 孤兒孫程序等都可能）。用 os._exit 而不是
-# sys.exit，後者會 raise SystemExit 而被卡在主 thread 的 syscall 裡出不來。
-# 退出後 Task Scheduler 的 restart-on-failure 會把 agent 拉起。
+# 機制、httpx 邊角情境、subprocess 孤兒孫程序等都可能）。
 _WATCHDOG_STALE_THRESHOLD_S = 5 * 60
 _last_tick_at = time.monotonic()
 _watchdog_lock = threading.Lock()
@@ -95,8 +93,48 @@ def _watchdog():
         with _watchdog_lock:
             stale = time.monotonic() - _last_tick_at
         if stale > _WATCHDOG_STALE_THRESHOLD_S:
-            log.error(f"[watchdog] no tick for {stale:.0f}s, hard exit")
-            os._exit(1)
+            _restart_self(f"watchdog: no tick for {stale:.0f}s")
+
+
+# ── Self-restart ─────────────────────────────────────
+# 之前是 `os._exit(1)` 出去靠 Task Scheduler restart-on-failure 把 agent 拉
+# 回來，但實測：（1）若使用者沒勾 restart-on-failure 或 3 次 attempt 用完，
+# agent 永久死到下次 OnStart trigger（=重開機）；（2）即使勾了，每次 git
+# auto-update 都在賭一次 Task Scheduler 設定還活著 — 太脆。
+#
+# 改成 agent 自己 spawn 一個 detached 新 process 再乾淨 exit(0)。Task
+# Scheduler 看到原本 task 正常完成，新 process 以 orphan 身份活下去。
+# Trade-off: 新 process 之後若意外死，Task Scheduler 就 catch 不到了 —— 但
+# 反正之前那條路本來就壞，現況嚴格更好。
+def _restart_self(reason: str) -> None:
+    log.info(f"[restart] {reason}; spawning detached new process")
+    for h in log.handlers:
+        try:
+            h.flush()
+        except Exception:
+            pass
+
+    DETACHED_PROCESS = 0x00000008
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), *sys.argv[1:]],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            creationflags=creationflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        os._exit(0)
+    except Exception as e:
+        # spawn 失敗（極少見：路徑壞、權限等）退回 _exit(1) 給 Task Scheduler
+        # 最後一搏。比靜默死好。
+        log.error(f"[restart] spawn failed: {e}, fall back to _exit(1)")
+        os._exit(1)
 
 
 def detect_local_ip() -> str:
@@ -115,8 +153,10 @@ THIS_PC_IP = detect_local_ip()
 
 # ── Auto-update ──────────────────────────────────────
 # 每 UPDATE_CHECK_TICKS 個 tick（預設 60 ticks ≈ 1 小時）跑一次：
-#   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → os._exit(1)
-# 讓 Task Scheduler restart-on-fail 接走，下次 process 起來自帶新 code。
+#   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → py_compile 驗 →
+#   _restart_self()（自己 spawn detached 新 process + exit(0)）
+# 不靠 Task Scheduler restart-on-fail，因為實測那條路太脆（restart attempt
+# 用完／使用者沒勾／設定漂移都會讓 agent 永久死，要等下次重開機）。
 #
 # AUTO_UPDATE=False 可關（agent_config.py），用來在你 push 壞 code 時暫停
 # 推送到所有 PC 拉新版。
@@ -138,9 +178,22 @@ def get_current_sha() -> str:
         return "unknown"
 
 
+def _new_agent_py_compiles() -> bool:
+    """pull 完先 py_compile 驗 syntax。新 code SyntaxError 直接 abort restart，
+    舊 process 繼續跑 in-memory 舊版，比 spawn 一個瞬間就死的新 process 好。
+    抓不到 ImportError／runtime bug，但 syntax error 是最大宗 breakage。"""
+    try:
+        import py_compile
+        py_compile.compile(os.path.abspath(__file__), doraise=True)
+        return True
+    except Exception as e:
+        log.error(f"[update] new agent.py compile failed: {e}")
+        return False
+
+
 def check_for_updates() -> bool:
-    """origin/main 有新 commit 就 git pull、回 True（caller 應 os._exit(1)）。
-    失敗（網路掛、merge conflict 等）log 後回 False，agent 繼續跑舊版。"""
+    """origin/main 有新 commit 就 git pull、回 True（caller 應呼叫 _restart_self）。
+    失敗（網路掛、merge conflict、新 code syntax error 等）log 後回 False，agent 繼續跑舊版。"""
     if not AUTO_UPDATE:
         return False
     try:
@@ -150,6 +203,9 @@ def check_for_updates() -> bool:
         if current == remote:
             return False
         _git("pull", "origin", "main")
+        if not _new_agent_py_compiles():
+            log.error(f"[update] {current[:7]} → {remote[:7]} pulled but new agent.py won't compile; staying on old code")
+            return False
         log.info(f"[update] {current[:7]} → {remote[:7]}, restarting")
         return True
     except Exception as e:
@@ -356,7 +412,7 @@ def main():
         tick_count += 1
         if tick_count % UPDATE_CHECK_TICKS == 0:
             if check_for_updates():
-                os._exit(1)
+                _restart_self("auto-update pulled new code")
         elapsed = time.monotonic() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
 
