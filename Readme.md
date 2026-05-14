@@ -35,7 +35,7 @@
 | 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
-| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖。agent 內建 watchdog 防 hang、auto-update 自動拉新版（詳見 `agent/README.md`） |
+| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
 
 ---
 ## 需要的資源
@@ -478,7 +478,7 @@ function sendRealtimeNotification() {
 | / | GET / HEAD | 健康檢查（UptimeRobot 用） |
 | /callback | POST | Line Webhook 接收訊息 |
 | /notify | POST | GAS 呼叫（每日 1 次，晚間 9~10 點）：同步外部行事曆 + 推送明日天氣 + 食品過期 + 明日與未完成待辦的綜合摘要 |
-| /notify_realtime | POST | GAS 呼叫（每 15 分鐘 1 次）：同步外部行事曆 + 推送即將到時的待辦提醒 + 執行已到時間的設備排程 + 封存完成的排程 |
+| /notify_realtime | POST | GAS 呼叫(每 15 分鐘 1 次)：同步外部行事曆 + 推送即將到時的待辦提醒 + 執行已到時間的設備排程 + 封存完成的排程 |
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
@@ -736,7 +736,7 @@ function sendRealtimeNotification() {
 | sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
 | dehumidifier_auto.py | 除濕機條件式自動 ON/OFF（hysteresis + sensor 失聯 fallback + 排他鎖）。runtime state in-memory，rule 設定值持久化到 Sheet「除濕機自動規則」 |
-| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 每小時自動 git pull。Render 部署不會 import 這個目錄 |
+| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 每小時自動 git pull + py_compile 驗新 code syntax + 自己 spawn detached process 重啟（不靠 Task Scheduler restart-on-fail）。Render 部署不會 import 這個目錄 |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 
