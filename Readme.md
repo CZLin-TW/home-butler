@@ -1,5 +1,7 @@
 # 家庭 AI 管家系統
 
+> 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。兩個 repo 一起運作，不分開使用。
+
 ## 這是什麼？
 
 一個用 LINE Bot 操作的家庭智能管家系統。家人只要會用 LINE 就能使用——傳訊息給管家，它就會幫你管理食品庫存、待辦事項、智能家電、天氣查詢，還會每天主動推播提醒。
