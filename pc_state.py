@@ -22,7 +22,7 @@ import gspread
 from sheets import _get_spreadsheet
 
 MAX_HISTORY_POINTS = 1440          # 24h × 60s 上限
-OFFLINE_THRESHOLD_S = 180          # 3 分鐘沒 heartbeat 視為離線
+OFFLINE_THRESHOLD_S = 300          # 5 分鐘沒 heartbeat 視為離線（agent watchdog 也是 5 分鐘）
 PC_HISTORY_SHEET = "PC 監控歷史"
 HISTORY_HEADERS = ["timestamp", "ip", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c"]
 TRIM_EVERY_N_APPENDS = 100         # ~50 分鐘一次（兩台 PC × 60s）
@@ -184,7 +184,12 @@ def backfill_from_sheet() -> None:
     """從 Sheet 撈最近 24h 的 row 填回 in-memory ring buffer。FastAPI startup 跑一次。
 
     重啟時 in-memory 是空的，這個 fn 把過去資料還原回來；只在 process 啟動時跑一次
-    （flag _backfilled），之後 in-memory 累積不再讀 Sheet。"""
+    （flag _backfilled），之後 in-memory 累積不再讀 Sheet。
+
+    重點：把每台 PC 最新一筆的 timestamp 設成 `last_heartbeat_at`、最新點寫進
+    `current`——少了這步，重啟後 snapshot() 看到的 `last_heartbeat_at=0` 會讓
+    OFFLINE 判定 (now - 0 <= 300) 永遠 False，所有 PC 立刻變離線直到下次
+    heartbeat 進來（最多 60s 空窗，Dashboard 看到的就是「失聯」）。"""
     global _backfilled
     if _backfilled:
         return
@@ -213,6 +218,12 @@ def backfill_from_sheet() -> None:
                     "gpu_temp_c": _to_float_or_none(r.get("gpu_temp_c")),
                 }
                 pc["history_dict"][int(t)] = point
+                # 追蹤每台 PC 最新一筆 timestamp，補進 last_heartbeat_at + current
+                # （Sheet 沒存 hostname/cpu_model/gpu_model 跟 fah，meta 與 fah 留空
+                # 等下一筆 live heartbeat 補上）
+                if t > pc["last_heartbeat_at"]:
+                    pc["last_heartbeat_at"] = t
+                    pc["current"] = {**point, "fah": None}
                 loaded += 1
         print(f"[pc_state] backfilled {loaded} points from Sheet (cutoff={cutoff:.0f})")
     except Exception as e:

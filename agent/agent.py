@@ -81,9 +81,7 @@ log.addHandler(_stream_handler)
 
 # ── Watchdog ─────────────────────────────────────────
 # 主迴圈 5 分鐘沒新 tick = 認定某個 blocking call hang 住（pynvml 沒 timeout
-# 機制、httpx 邊角情境、subprocess 孤兒孫程序等都可能）。用 os._exit 而不是
-# sys.exit，後者會 raise SystemExit 而被卡在主 thread 的 syscall 裡出不來。
-# 退出後 Task Scheduler 的 restart-on-failure 會把 agent 拉起。
+# 機制、httpx 邊角情境、subprocess 孤兒孫程序等都可能）。
 _WATCHDOG_STALE_THRESHOLD_S = 5 * 60
 _last_tick_at = time.monotonic()
 _watchdog_lock = threading.Lock()
@@ -95,8 +93,48 @@ def _watchdog():
         with _watchdog_lock:
             stale = time.monotonic() - _last_tick_at
         if stale > _WATCHDOG_STALE_THRESHOLD_S:
-            log.error(f"[watchdog] no tick for {stale:.0f}s, hard exit")
-            os._exit(1)
+            _restart_self(f"watchdog: no tick for {stale:.0f}s")
+
+
+# ── Self-restart ─────────────────────────────────────
+# 之前是 `os._exit(1)` 出去靠 Task Scheduler restart-on-failure 把 agent 拉
+# 回來，但實測：（1）若使用者沒勾 restart-on-failure 或 3 次 attempt 用完，
+# agent 永久死到下次 OnStart trigger（=重開機）；（2）即使勾了，每次 git
+# auto-update 都在賭一次 Task Scheduler 設定還活著 — 太脆。
+#
+# 改成 agent 自己 spawn 一個 detached 新 process 再乾淨 exit(0)。Task
+# Scheduler 看到原本 task 正常完成，新 process 以 orphan 身份活下去。
+# Trade-off: 新 process 之後若意外死，Task Scheduler 就 catch 不到了 —— 但
+# 反正之前那條路本來就壞，現況嚴格更好。
+def _restart_self(reason: str) -> None:
+    log.info(f"[restart] {reason}; spawning detached new process")
+    for h in log.handlers:
+        try:
+            h.flush()
+        except Exception:
+            pass
+
+    DETACHED_PROCESS = 0x00000008
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), *sys.argv[1:]],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            creationflags=creationflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        os._exit(0)
+    except Exception as e:
+        # spawn 失敗（極少見：路徑壞、權限等）退回 _exit(1) 給 Task Scheduler
+        # 最後一搏。比靜默死好。
+        log.error(f"[restart] spawn failed: {e}, fall back to _exit(1)")
+        os._exit(1)
 
 
 def detect_local_ip() -> str:
@@ -111,12 +149,16 @@ def detect_local_ip() -> str:
 
 
 HOSTNAME = socket.gethostname()
-THIS_PC_IP = detect_local_ip()
+# 注意：IP 改成每 tick 重抓（見 collect_payload），不再 cache 在 module scope。
+# DHCP lease renewal / router 重啟 / 切 NIC 都會換 IP，cache 住 startup 時抓到
+# 的舊 IP 會讓 server 端把同一台 PC 認成「舊 PC 失聯、新 PC 上線無歷史」。
 
 # ── Auto-update ──────────────────────────────────────
 # 每 UPDATE_CHECK_TICKS 個 tick（預設 60 ticks ≈ 1 小時）跑一次：
-#   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → os._exit(1)
-# 讓 Task Scheduler restart-on-fail 接走，下次 process 起來自帶新 code。
+#   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → py_compile 驗 →
+#   _restart_self()（自己 spawn detached 新 process + exit(0)）
+# 不靠 Task Scheduler restart-on-fail，因為實測那條路太脆（restart attempt
+# 用完／使用者沒勾／設定漂移都會讓 agent 永久死，要等下次重開機）。
 #
 # AUTO_UPDATE=False 可關（agent_config.py），用來在你 push 壞 code 時暫停
 # 推送到所有 PC 拉新版。
@@ -138,9 +180,22 @@ def get_current_sha() -> str:
         return "unknown"
 
 
+def _new_agent_py_compiles() -> bool:
+    """pull 完先 py_compile 驗 syntax。新 code SyntaxError 直接 abort restart，
+    舊 process 繼續跑 in-memory 舊版，比 spawn 一個瞬間就死的新 process 好。
+    抓不到 ImportError／runtime bug，但 syntax error 是最大宗 breakage。"""
+    try:
+        import py_compile
+        py_compile.compile(os.path.abspath(__file__), doraise=True)
+        return True
+    except Exception as e:
+        log.error(f"[update] new agent.py compile failed: {e}")
+        return False
+
+
 def check_for_updates() -> bool:
-    """origin/main 有新 commit 就 git pull、回 True（caller 應 os._exit(1)）。
-    失敗（網路掛、merge conflict 等）log 後回 False，agent 繼續跑舊版。"""
+    """origin/main 有新 commit 就 git pull、回 True（caller 應呼叫 _restart_self）。
+    失敗（網路掛、merge conflict、新 code syntax error 等）log 後回 False，agent 繼續跑舊版。"""
     if not AUTO_UPDATE:
         return False
     try:
@@ -150,6 +205,9 @@ def check_for_updates() -> bool:
         if current == remote:
             return False
         _git("pull", "origin", "main")
+        if not _new_agent_py_compiles():
+            log.error(f"[update] {current[:7]} → {remote[:7]} pulled but new agent.py won't compile; staying on old code")
+            return False
         log.info(f"[update] {current[:7]} → {remote[:7]}, restarting")
         return True
     except Exception as e:
@@ -302,7 +360,7 @@ def collect_payload() -> dict:
         )
 
     return {
-        "ip": THIS_PC_IP,
+        "ip": detect_local_ip(),  # 每 tick 重抓，DHCP 換 IP 才不會卡舊值
         "hostname": HOSTNAME,
         "cpu_model": CPU_MODEL,
         "gpu_model": GPU_MODEL,
@@ -315,30 +373,40 @@ def collect_payload() -> dict:
 
 
 def push(payload: dict) -> None:
-    try:
-        r = httpx.post(
-            f"{HOME_BUTLER_URL.rstrip('/')}/api/computers/heartbeat",
-            json=payload,
-            headers={"X-API-Key": HOME_BUTLER_API_KEY},
-            timeout=15.0,
-        )
-        if r.status_code >= 300:
-            log.info(f"[push] HTTP {r.status_code}: {r.text[:200]}")
-        else:
-            fah = payload.get("fah") or {}
-            log.info(
-                f"[push] ok cpu={payload['cpu_pct']}% gpu={payload.get('gpu_pct')}% "
-                f"cpu_t={payload.get('cpu_temp_c')}C gpu_t={payload.get('gpu_temp_c')}C "
-                f"fah_paused={fah.get('paused', 'n/a')}"
-            )
-    except Exception as e:
-        log.info(f"[push] {e}")
+    """POST 一筆 heartbeat。網路錯誤／timeout 最多 retry 2 次（backoff 2s/4s）。
+    HTTP 4xx/5xx 視為終局回應不 retry——讓 caller 看 log 自己決定處理。
+
+    Timeout 從 15s 改 30s：home-butler 部署在 Render free，閒置 15 分鐘會 spin-down，
+    下次 request 觸發 cold start 約 30-60s 才回。原本 15s timeout 必失敗、整個 tick
+    丟掉，連續 2-3 tick 失敗就跨過 server 端 OFFLINE_THRESHOLD（300s）變失聯。
+    現在 30s × 3 attempts 期望接得住絕大部分 cold-start 情境。"""
+    url = f"{HOME_BUTLER_URL.rstrip('/')}/api/computers/heartbeat"
+    headers = {"X-API-Key": HOME_BUTLER_API_KEY}
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            r = httpx.post(url, json=payload, headers=headers, timeout=30.0)
+            if r.status_code >= 300:
+                log.info(f"[push] HTTP {r.status_code}: {r.text[:200]}")
+            else:
+                fah = payload.get("fah") or {}
+                log.info(
+                    f"[push] ok cpu={payload['cpu_pct']}% gpu={payload.get('gpu_pct')}% "
+                    f"cpu_t={payload.get('cpu_temp_c')}C gpu_t={payload.get('gpu_temp_c')}C "
+                    f"fah_paused={fah.get('paused', 'n/a')}"
+                )
+            return  # HTTP 回應拿到了（含 4xx/5xx）就算結束，不 retry
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2 ** (attempt + 1))  # 2s, 4s
+    log.info(f"[push] failed after 3 attempts: {last_err}")
 
 
 def main():
     global _last_tick_at
     log.info(
-        f"agent start: {HOSTNAME} ({THIS_PC_IP}) sha={get_current_sha()} "
+        f"agent start: {HOSTNAME} ({detect_local_ip()}) sha={get_current_sha()} "
         f"auto_update={AUTO_UPDATE} → {HOME_BUTLER_URL}  log={LOG_PATH}"
     )
     threading.Thread(target=_watchdog, daemon=True).start()
@@ -356,7 +424,7 @@ def main():
         tick_count += 1
         if tick_count % UPDATE_CHECK_TICKS == 0:
             if check_for_updates():
-                os._exit(1)
+                _restart_self("auto-update pulled new code")
         elapsed = time.monotonic() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
 
