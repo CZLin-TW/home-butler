@@ -175,6 +175,28 @@ def get_switchbot_raw_status(device_id: str):
     return switchbot_api.get_device_status(device_id)
 
 
+@app.get("/panasonic/dehumidifier/{device_name}/full_status", dependencies=[Depends(verify_api_key)])
+def get_panasonic_dehumidifier_full_status(device_name: str):
+    """Debug: 掃除濕機 CommandType 0x00 ~ 0x1F 全部欄位。
+    用來找未知欄位（風量、風向、定時器等）對應哪個 CommandType——baseline
+    一次、改設定一次、diff 兩次結果。"""
+    from sheets import RequestContext
+    ctx = RequestContext()
+    ctx.load()
+    auth = ""
+    gwid = ""
+    for d in ctx.get("智能居家"):
+        if (d.get("狀態") == "啟用"
+                and d.get("名稱") == device_name
+                and d.get("類型") == "除濕機"):
+            auth = d.get("Auth", "")
+            gwid = d.get("Device ID", "")
+            break
+    if not auth or not gwid:
+        return {"error": f"找不到除濕機 {device_name}（檢查「智能居家」分頁名稱、類型、Auth、Device ID）"}
+    return panasonic_api.get_dehumidifier_full_status(auth, gwid)
+
+
 @app.get("/switchbot/test/{device_id}/{button_name}", dependencies=[Depends(verify_api_key)])
 def test_switchbot_command(device_id: str, button_name: str):
     print(f"[TEST] device_id={device_id}, button={button_name}")

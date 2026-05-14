@@ -191,6 +191,33 @@ def get_dehumidifier_status(device_auth: str, gwid: str) -> dict:
     return result
 
 
+def get_dehumidifier_full_status(device_auth: str, gwid: str) -> dict:
+    """Debug 用：掃 0x00 ~ 0x1F 所有 CommandType。
+    用來找未知欄位（例如風量、風向）對應哪個 CommandType。
+    Panasonic 對不存在的 CommandType 通常不回傳該 key，所以結果只含實際存在的。"""
+    all_commands = [f"0x{i:02x}" for i in range(0x20)]
+    commands = {
+        "CommandTypes": [{"CommandType": c} for c in all_commands],
+        "DeviceID": 1,
+    }
+    data = _request_with_retry(
+        "POST",
+        "DeviceGetInfo",
+        headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
+        json=[commands],
+    )
+    if data is None:
+        return {"error": "無法取得除濕機狀態"}
+    result = {}
+    try:
+        device = data["devices"][0]
+        for info in device["Info"]:
+            result[info["CommandType"]] = info["status"]
+    except Exception as e:
+        return {"error": str(e)}
+    return result
+
+
 # ── 除濕機控制 ──
 
 def set_dehumidifier_command(device_auth: str, gwid: str, command_type: str, value: int) -> dict:
