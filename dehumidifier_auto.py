@@ -211,6 +211,10 @@ def evaluate_all(ctx, sensor_snapshot):
         location = d.get("位置", "")
         dehumidifier_history.record(device_name, location, power_now)
 
+        # 強制 mode invariant：Panasonic 偶發 set_mode 沒生效導致 mode 漂回使用者
+        # 上次的設定，每 tick 對齊一次（power=on 才檢查，off 時 mode 無意義）
+        _enforce_mode_invariant(device_name, status, auth, gwid)
+
         sensor = sensor_snapshot.get(rule["sensor_name"], {})
         humidity = None
         if sensor.get("online", False):
@@ -370,14 +374,43 @@ def _phase_for_set(rule, sensor_humidity, power_now):
 
 def _fire_on(device_name, rule, auth, gwid):
     """送開機 → 強制設「連續除濕」→ 設目標濕度（連續模式下被忽略，但保留為
-    UI segment highlight 用）。送指令失敗 log 不 raise。"""
+    UI segment highlight 用）。檢查每個指令的 success flag，failure log 出來方便
+    事後追蹤（Panasonic API 偶發 200 OK 但沒真的執行的情況，set_mode 漏掉
+    會讓 mode 漂回使用者上次的設定）。任一指令真的拋 exception 才走 except。"""
     try:
-        panasonic_api.dehumidifier_turn_on(auth, gwid)
-        panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
-        panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
-        print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 target={rule['threshold']}")
+        r1 = panasonic_api.dehumidifier_turn_on(auth, gwid)
+        r2 = panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
+        r3 = panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
+        ok_all = r1.get("success") and r2.get("success") and r3.get("success")
+        if ok_all:
+            print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 target={rule['threshold']}")
+        else:
+            print(
+                f"[dehum-auto] FIRE ON {device_name} partial: "
+                f"turn_on={r1.get('success')} set_mode={r2.get('success')} "
+                f"set_humidity={r3.get('success')} target={rule['threshold']}"
+            )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
+
+
+def _enforce_mode_invariant(device_name, status, auth, gwid):
+    """Auto mode 期間若除濕機 mode != 連續除濕，重送一次 set_mode 矯正。
+    Panasonic API 偶發 set_mode 沒生效，fire_on 之後 mode 漂回使用者上次手動值
+    的情況（例如「目標濕度 60」）。每 polling tick 強制 invariant。
+    power=off 時 mode 無意義不檢查。Idempotent：已是連續除濕也送不會壞。"""
+    if status.get("0x00") != "1":
+        return  # power off，下次 fire_on 才會帶 mode
+    current_mode = status.get("0x01", "")
+    expected_mode = panasonic_api.DEHUMIDIFIER_MODE_MAP.get(AUTO_MODE_DEHUMIDIFIER_MODE)
+    if expected_mode is None:
+        return  # config 錯誤，skip
+    if current_mode != str(expected_mode):
+        print(
+            f"[dehum-auto] mode drift on {device_name}: code={current_mode!r} != "
+            f"{expected_mode}（連續除濕），重新套用"
+        )
+        panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
 
 
 def _fire_off(device_name, auth, gwid):
