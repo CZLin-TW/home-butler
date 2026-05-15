@@ -373,22 +373,35 @@ def _phase_for_set(rule, sensor_humidity, power_now):
 # ── Panasonic API wrappers ─────────────────────────────
 
 def _fire_on(device_name, rule, auth, gwid):
-    """送開機 → 強制設「連續除濕」→ 設目標濕度（連續模式下被忽略，但保留為
-    UI segment highlight 用）。檢查每個指令的 success flag，failure log 出來方便
-    事後追蹤（Panasonic API 偶發 200 OK 但沒真的執行的情況，set_mode 漏掉
-    會讓 mode 漂回使用者上次的設定）。任一指令真的拋 exception 才走 except。"""
+    """送開機 → 設目標濕度 → 強制設「連續除濕」。
+
+    指令順序刻意是「humidity 在 mode 之前」，不是疏失：set_humidity (0x04) 在
+    Panasonic 機體會有 side-effect 把 mode (0x01) 撥回「目標濕度」(6)——大概是
+    因為「設定目標濕度」這個動作本身在面板上隱含切換到該模式。如果反過來
+    先 set_mode 再 set_humidity，最終 mode 會落在「目標濕度」而非「連續除濕」，
+    auto rule 就會壞掉（機體會看自己周邊濕度自己決定停機，無視外部 sensor）。
+
+    擺成「set_mode 最後送」確保最終 mode 一定是連續除濕，set_humidity 的副作用
+    被下一個指令蓋掉。0x04 仍然有寫入，給 Dashboard 顯示「auto rule 的 threshold」
+    讀。`_enforce_mode_invariant` 留著當保險絲——cover Panasonic 真的偶發
+    set_mode 失效（少數情況）。
+
+    檢查每個指令的 success flag，failure log 出來方便事後追蹤（Panasonic API
+    偶發 200 OK 但沒真的執行）。任一指令真的拋 exception 才走 except。
+    """
     try:
         r1 = panasonic_api.dehumidifier_turn_on(auth, gwid)
-        r2 = panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
-        r3 = panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
+        # 順序敏感：humidity 先送，mode 後送。詳見 docstring。
+        r2 = panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
+        r3 = panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
         ok_all = r1.get("success") and r2.get("success") and r3.get("success")
         if ok_all:
             print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 target={rule['threshold']}")
         else:
             print(
                 f"[dehum-auto] FIRE ON {device_name} partial: "
-                f"turn_on={r1.get('success')} set_mode={r2.get('success')} "
-                f"set_humidity={r3.get('success')} target={rule['threshold']}"
+                f"turn_on={r1.get('success')} set_humidity={r2.get('success')} "
+                f"set_mode={r3.get('success')} target={rule['threshold']}"
             )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
@@ -396,9 +409,17 @@ def _fire_on(device_name, rule, auth, gwid):
 
 def _enforce_mode_invariant(device_name, status, auth, gwid):
     """Auto mode 期間若除濕機 mode != 連續除濕，重送一次 set_mode 矯正。
-    Panasonic API 偶發 set_mode 沒生效，fire_on 之後 mode 漂回使用者上次手動值
-    的情況（例如「目標濕度 60」）。每 polling tick 強制 invariant。
-    power=off 時 mode 無意義不檢查。Idempotent：已是連續除濕也送不會壞。"""
+
+    保險絲，cover 兩種情況：
+    1. Panasonic API 偶發 set_mode 200 OK 但沒真的執行（少數）
+    2. 自動規則 ON 期間，使用者繞過 lock 從機體面板直接改了模式（罕見）
+
+    Common case「fire_on 之後 set_humidity 把 mode 撥回目標濕度」已經在
+    `_fire_on` 用「set_mode 最後送」處理掉了，這裡只負責殘餘異常。
+
+    每 polling tick 強制 invariant。power=off 時 mode 無意義不檢查。
+    Idempotent：已是連續除濕也送不會壞。
+    """
     if status.get("0x00") != "1":
         return  # power off，下次 fire_on 才會帶 mode
     current_mode = status.get("0x01", "")
