@@ -1,12 +1,16 @@
 """除濕機條件式自動開關 (auto mode)。
 
-每台除濕機可獨立啟用：選一個感測器 + 持續時間 T。「目標濕度」(UI 既有
-segment) 同時當作門檻：
+每台除濕機可獨立啟用：選一個感測器 + 持續時間 T + 濕度門檻 threshold（UI
+獨立 dropdown，跟除濕機機體的目標濕度設定分離）。
 
-- 運轉中 hysteresis：≥ 門檻+5 連續 T → ON，< 門檻 連續 T → OFF，
-  [門檻, 門檻+5) 灰色區維持當前狀態
-- Toggle 從 OFF→ON 瞬間採對稱單一門檻：sensor ≥ 門檻 立即 ON、< 門檻
-  立即 OFF（不等 T，因為使用者意圖明確）
+- 運轉中 hysteresis（不對稱、置中 threshold）：
+    H_on  = threshold + 3   ≥ 連續 T → ON
+    H_off = threshold − 2   ≤ 連續 T → OFF
+    (H_off, H_on) 灰色區維持當前狀態
+  例：threshold=60 → 實際控制帶 58~63、置中接近 60。比原本 [60, 65] 對稱
+  在 threshold 之上的設計更貼近使用者「目標 60%」的直覺。
+- Toggle 從 OFF→ON 瞬間採對稱單一門檻：sensor ≥ threshold 立即 ON、
+  < threshold 立即 OFF（不等 T，因為使用者意圖明確）
 
 自動模式 ON 期間，這台除濕機只接受「規則本身」的控制；外部來源
 （Dashboard 手動、LINE bot、排程）都會被 is_locked() 攔下。
@@ -32,7 +36,8 @@ import panasonic_api
 from sheets import _get_spreadsheet
 
 RULES_SHEET = "除濕機自動規則"
-HYSTERESIS_OFFSET = 5              # H_on = threshold + 5
+HYSTERESIS_ABOVE = 3               # H_on  = threshold + 3
+HYSTERESIS_BELOW = 2               # H_off = threshold − 2
 SENSOR_WARNING_TICKS = 6           # 30min（6 × 5min polling）
 SENSOR_DISABLE_TICKS = 12          # 60min
 # 自動模式下強制走「連續除濕」：其他模式（尤其「目標濕度」）會讓除濕機看自己
@@ -252,10 +257,11 @@ def _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, auth, gw
 def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
     threshold = rule["threshold"]
     duration_s = rule["duration_min"] * 60
-    h_on = threshold + HYSTERESIS_OFFSET
-    h_off = threshold
+    h_on = threshold + HYSTERESIS_ABOVE
+    h_off = threshold - HYSTERESIS_BELOW
     # 四捨五入後再比較：sensor 0.x 小數 vs 整數門檻精準匹配不會卡。
-    # 例：target=60 → 59.5~60.4 都算「≤60」會累積關閉、60.5~64.4 灰色區。
+    # 例：target=60 → h_off=58、h_on=63；57.5~58.4 累積關閉、58.5~62.4 灰色區、
+    # 62.5~63.4 累積開啟。實際控制帶 58~63、置中接近 target 60。
     humidity_int = _round_humidity(humidity)
 
     fire = None
@@ -280,8 +286,8 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
             else:
                 phase = "idle_humid"
         elif humidity_int <= h_off:
-            # 改用 <=（含等於）：sensor 剛好等於 target 也算「夠乾」進關閉累積。
-            # 原本用 < 時剛好打到 60.0 會落到灰色區、下個 tick 60.1 又 reset，不直覺。
+            # 邊界用 <=（含等於）：剛好打到 h_off 就算「夠乾」進關閉累積，
+            # 避免 sensor 在邊界值 ±0.1 抖動造成 reset / 計時器歸零。h_on 同樣含等於。
             state["above_since"] = None
             if state["below_since"] is None:
                 state["below_since"] = now
@@ -296,7 +302,8 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
             else:
                 phase = "idle_dry"
         else:
-            # 灰色區 (threshold, threshold+5)：reset 計時器，維持當前 power
+            # 灰色區 (h_off, h_on) = (threshold−2, threshold+3)：
+            # reset 計時器，維持當前 power
             state["above_since"] = None
             state["below_since"] = None
             phase = "idle_humid" if power_now else "idle_dry"
@@ -360,11 +367,12 @@ def _phase_for_set(rule, sensor_humidity, power_now):
     if sensor_humidity is None:
         return "sensor_lost_warning"
     threshold = rule["threshold"]
-    h_on = threshold + HYSTERESIS_OFFSET
+    h_on = threshold + HYSTERESIS_ABOVE
+    h_off = threshold - HYSTERESIS_BELOW
     humidity_int = _round_humidity(sensor_humidity)
     if humidity_int >= h_on:
         return "idle_humid" if power_now else "armed_above"
-    elif humidity_int <= threshold:
+    elif humidity_int <= h_off:
         return "armed_below" if power_now else "idle_dry"
     else:
         return "idle_humid" if power_now else "idle_dry"
