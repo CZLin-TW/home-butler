@@ -21,7 +21,7 @@
 
 如果當下環境有 GitHub MCP 工具（`mcp__github__*`），直接切過去用；沒有就回報「這個環境沒有 push 權限」由 User 處理。
 
-注意 `main` branch 有 protection，CLI push 會 403；走 `mcp__github__push_files` 直接打 API 才寫得進去（會合成單一 commit，可接受）。Feature branch 可以直接 CLI push。
+`main` 跟 feature branch 都可以直接 CLI push，不需要 MCP（過去曾有一次 main protection 卡住 CLI 的記錄，但只是當時的特例，目前不存在）。
 
 # PC monitoring agent 部署現況
 
