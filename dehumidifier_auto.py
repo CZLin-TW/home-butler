@@ -373,22 +373,21 @@ def _phase_for_set(rule, sensor_humidity, power_now):
 # ── Panasonic API wrappers ─────────────────────────────
 
 def _fire_on(device_name, rule, auth, gwid):
-    """送開機 → 強制設「連續除濕」→ 設目標濕度（連續模式下被忽略，但保留為
-    UI segment highlight 用）。檢查每個指令的 success flag，failure log 出來方便
-    事後追蹤（Panasonic API 偶發 200 OK 但沒真的執行的情況，set_mode 漏掉
-    會讓 mode 漂回使用者上次的設定）。任一指令真的拋 exception 才走 except。"""
+    """送開機 → 強制設「連續除濕」。連續模式下機器忽略目標濕度，threshold 只是
+    本規則的判斷門檻，不下發到機器——下了反而會讓 Panasonic 韌體把 mode flip
+    回「目標濕度」（因為設目標濕度只在那個模式下有意義）。任一指令真的拋
+    exception 才走 except；success flag 用來區分「呼叫到了」vs「沒生效」。"""
     try:
         r1 = panasonic_api.dehumidifier_turn_on(auth, gwid)
         r2 = panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
-        r3 = panasonic_api.dehumidifier_set_humidity(auth, gwid, rule["threshold"])
-        ok_all = r1.get("success") and r2.get("success") and r3.get("success")
+        ok_all = r1.get("success") and r2.get("success")
         if ok_all:
-            print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 target={rule['threshold']}")
+            print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 threshold={rule['threshold']}")
         else:
             print(
                 f"[dehum-auto] FIRE ON {device_name} partial: "
                 f"turn_on={r1.get('success')} set_mode={r2.get('success')} "
-                f"set_humidity={r3.get('success')} target={rule['threshold']}"
+                f"threshold={rule['threshold']}"
             )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
