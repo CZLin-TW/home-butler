@@ -36,6 +36,7 @@
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 | PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
+| Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
 
 ---
 ## 需要的資源
@@ -76,7 +77,7 @@
 
 ---
 ## 系統架構
-- **介面**：Line Bot（Messaging API）
+- **介面**：Line Bot（Messaging API）、Siri 語音（iOS 捷徑 → `/api/assistant`）
 - **大腦**：Claude API（claude-sonnet-4-6）
 - **資料庫**：Google Sheets
 - **Server**：Render.com（Python + FastAPI）
@@ -462,6 +463,7 @@ function sendRealtimeNotification() {
 | ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） | 必要 |
 | HOME_BUTLER_API_KEY | 自訂的 API 認證金鑰，保護 `/api/*` `/notify*` `/switchbot/*` 端點。建議用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生 | 必要 |
 | DASHBOARD_URL | Dashboard 部署網址（例如 `https://dashboard.example.com`）。home-butler 啟動後會 runtime 從 `{DASHBOARD_URL}/api/version` 撈使用者體感版本（1 小時 cache）注入到 LINE bot 的 SYSTEM_PROMPT。沒設或撈不到時 LINE 回答版本會是「未知」，其他功能不受影響 | 建議 |
+| SIRI_USER_ID | Siri 捷徑（`/api/assistant`）沒帶 `user_id` 時的匿名 fallback 身分。**刻意維持中性，不要設成任何家人的真實 Line ID**——否則「忘了填 user_id」的請求會靜默冒名成那個人並污染其對話記憶。沒設預設字串 `siri`（匿名訪客：能控制家電，但無名字/無風格/對話記憶獨立）。正確用法是每人捷徑各自帶自己的 Line User ID | 選配 |
 | SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
 | SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
 | PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
@@ -519,6 +521,59 @@ function sendRealtimeNotification() {
 | /api/members | GET | 列出所有啟用的家庭成員 |
 | /api/computers/heartbeat | POST | PC agent 每 60 秒 push 指標（cpu_pct, ram_pct, gpu_pct, gpu_temp_c, cpu_temp_c, fah, ip, hostname, cpu_model, gpu_model）|
 | /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
+| /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，走跟 LINE bot 相同的 Claude pipeline，回 `{reply}`；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
+
+---
+
+## Siri 語音控制（iOS 捷徑）
+
+讓你用「嘿 Siri」就能控制家電、查詢、記待辦。Siri 只負責**把語音聽寫成文字**，POST 到 `/api/assistant`，剩下交給後端跑跟 LINE bot 一模一樣的 Claude pipeline（解析 → action 分派 → 組句），回傳 `reply` 給 Siri 朗讀。
+
+### 運作原理
+
+```
+語音 →(Siri 聽寫)→ 文字 →POST /api/assistant→ process_message（共用 LINE 那套）→ {reply} →(Siri 朗讀)
+```
+
+`/api/assistant` 與 LINE webhook 共用 `assistant.py:process_message`，所以 LINE 能做的指令 Siri 都能做，行為一致。
+
+### 身分辨識（重要）
+
+捷徑送的 HTTP request 除了你寫進去的內容**沒有任何身分資訊**（不像 LINE 有簽章帶 user_id），所以「誰在講話」只能靠捷徑裡帶的 `user_id`：
+
+- **每位家人（含自己）的捷徑都各自帶自己的 Line User ID** → 後端認得出是誰，給對應名字、自訂風格、各自的對話記憶。
+- 沒帶 `user_id` → fallback 成 `SIRI_USER_ID`（預設中性 `siri`）：當匿名訪客，照常控制家電，但無名字/無風格、記憶獨立一份，不會冒名任何人。
+- 因此 **`SIRI_USER_ID` 環境變數不要設成任何人的真實 Line ID**，維持中性即可。
+- Line User ID 怎麼拿：見上方「取得家庭成員 Line User ID」，或直接從「家庭成員」分頁複製。
+
+### iPhone 捷徑設定
+
+「捷徑」App → **+** 新增捷徑，依序加 4 個動作：
+
+1. **聽寫文字（Dictate Text）**
+   - 把語音轉成文字。語言設成「國語（台灣）」。
+   - 展開把 **「停止聽寫」設成「暫停後（After Pause）」**，這樣講完停頓就自動結束，不會卡在等待狀態。
+
+2. **取得 URL 內容（Get Contents of URL）**
+   - URL：`https://<你的 render 網址>/api/assistant`
+   - 展開「顯示更多」：
+     - **方法**：`POST`
+     - **標頭**：新增一列 `X-API-Key` = 你的 `HOME_BUTLER_API_KEY`
+     - **請求內文**：選 `JSON`，新增欄位：
+       - 文字 `text` = 步驟 1 的「聽寫文字」變數
+       - 文字 `user_id` = **你自己的 Line User ID**（每人填自己的）
+
+3. **取得字典值（Get Dictionary Value）**
+   - 取得「值」，鍵 `reply`，來源是步驟 2 的「URL 內容」。
+
+4. 讓步驟 3 的**「字典值」當捷徑的最終輸出** → 用「嘿 Siri」喊出來時，Siri 會**自動朗讀**這段 reply。
+   - ⚠️ 不要靠「朗讀文字（Speak Text）」動作：它只在編輯頁測試時出聲，透過 Hey Siri 觸發時會被 Siri 的 audio session 壓掉而不朗讀。把回覆文字當最終輸出交給 Siri 唸才可靠。
+
+把捷徑取個好喊的名字（例如「管家」），之後說「**嘿 Siri，管家**」→ 聽到提示音 → 講指令（「把冷氣調到 26 度」）→ Siri 朗讀回覆。
+
+### 家人共用
+
+把捷徑分享給家人（捷徑右上分享），他們在自己手機把步驟 2 的 `user_id` 改成**自己的** Line User ID 即可。多支沒帶 ID 的捷徑會共用同一個匿名 `siri` 身分與記憶（多輪對話會互相串），所以匿名只適合一次性單句指令。
 
 ---
 
@@ -714,7 +769,8 @@ function sendRealtimeNotification() {
 
 | 檔案 | 說明 |
 |------|------|
-| main.py | FastAPI 主程式（Webhook、Claude 串接、action 路由） |
+| main.py | FastAPI 主程式（LINE Webhook、啟動 polling thread、SwitchBot debug 端點）。訊息處理委派給 `assistant.py` |
+| assistant.py | 自然語言處理核心：`process_message`（Claude 解析 → action 分派 → 組句）與 action 路由表。LINE webhook 與 `/api/assistant`（Siri）共用，避免邏輯複製兩份 |
 | config.py | 環境變數、LINE/Claude 初始化、時區設定 |
 | sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取） |
 | prompt.py | SYSTEM_PROMPT 與 Claude 提示詞組裝 |
@@ -731,7 +787,7 @@ function sendRealtimeNotification() {
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
-| web_api.py | Dashboard REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則） |
+| web_api.py | REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則，以及 Siri 自然語言入口 `/api/assistant`） |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
 | sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
@@ -750,7 +806,7 @@ function sendRealtimeNotification() {
 1. Google Sheets 新增對應分頁
 2. 更新 prompt.py 的 SYSTEM_PROMPT 加入新功能描述
 3. 在 handlers/ 目錄加入對應的 handle 函數
-4. 在 main.py 註冊新的 action 路由
+4. 在 assistant.py 的 `ACTION_HANDLERS` 註冊新的 action 路由（query 類另需視情況加進 `SEMANTIC_ACTIONS` / `REALTIME_ACTIONS`）
 5. 如需推播，更新 notify.py 的推播邏輯
 
 **新增 SwitchBot 設備**：
