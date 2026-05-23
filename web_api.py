@@ -4,10 +4,15 @@ Web Dashboard REST API
 所有業務邏輯重用現有 handlers，不重複實作。
 """
 
+import threading
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import SIRI_USER_ID
+from assistant import process_message
+from prompt import get_user_name
+from conversation import save_conversation, cleanup_conversation
 from sheets import RequestContext, get_all_devices_by_type, get_device_id_by_name, get_device_auth_by_name
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo
@@ -28,6 +33,43 @@ import dehumidifier_auto
 import dehumidifier_history
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
+
+
+# ── 自然語言入口（Siri 捷徑用）──
+
+class AssistantRequest(BaseModel):
+    text: str
+    user_id: Optional[str] = None
+
+
+@router.post("/assistant")
+def api_assistant(req: AssistantRequest):
+    """語音助理入口：吃一句自然語言，走跟 LINE bot 完全相同的 Claude pipeline。
+
+    Siri 捷徑只負責聽寫成文字 POST 過來，後端 process_message 解析 + 分派 + 組句，
+    回 {"reply": ...} 給捷徑朗讀。user_id 不帶則用 config.SIRI_USER_ID。
+    對話歷史在背景存檔，讓多輪對話（「再低一度」）能延續。
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text 不可為空")
+
+    user_id = req.user_id or SIRI_USER_ID
+    ctx = RequestContext()
+    ctx.load()
+    user_name = get_user_name(user_id, ctx)
+    reply = process_message(user_id, text, user_name, ctx)
+
+    def _save():
+        try:
+            save_conversation(user_id, "user", text)
+            save_conversation(user_id, "assistant", reply)
+            cleanup_conversation(user_id)
+        except Exception as e:
+            print(f"[ASSISTANT SAVE ERROR] {e}")
+    threading.Thread(target=_save, daemon=True).start()
+
+    return {"reply": reply}
 
 
 # ── 首頁彙整 ──

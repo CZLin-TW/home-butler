@@ -13,6 +13,10 @@ GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 HOME_BUTLER_API_KEY = os.environ.get("HOME_BUTLER_API_KEY", "")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "")
+# Siri 捷徑語音入口（/api/assistant）的預設使用者身分。
+# 填自己的 Line User ID，就能拿到對應的名字、自訂風格，並跟 LINE 共用對話記憶；
+# 沒填則退到字串 "siri"（仍可運作，只是無名字、無風格、對話記憶獨立一份）。
+SIRI_USER_ID = os.environ.get("SIRI_USER_ID", "siri")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)
