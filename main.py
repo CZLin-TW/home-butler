@@ -12,6 +12,7 @@ from assistant import process_message
 from notify import router as notify_router
 from auth import verify_api_key
 import switchbot_api
+import panasonic_api
 
 
 app = FastAPI()
@@ -130,6 +131,15 @@ def get_switchbot_raw_status(device_id: str):
     """Debug: 回 SwitchBot Cloud API 對該裝置原始 status body。
     用來看新感測器（Meter Pro CO2 等）實際回什麼欄位，決定後續解析邏輯。"""
     return switchbot_api.get_device_status(device_id)
+
+
+@app.get("/panasonic/devices", dependencies=[Depends(verify_api_key)])
+def list_panasonic_devices():
+    """Debug: 列出 Panasonic Smart App 帳號下所有設備的原始 GwList。
+    新增除濕機時用來抓 GWID（Device ID）與 Auth 填進「智能居家」分頁。
+    Panasonic 各機型欄位名稱可能不同，故回傳整包原始 entry 讓你直接看。"""
+    gw_list = panasonic_api.get_devices()
+    return {"count": len(gw_list), "devices": gw_list}
 
 
 @app.get("/panasonic/dehumidifier/{device_name}/full_status", dependencies=[Depends(verify_api_key)])
