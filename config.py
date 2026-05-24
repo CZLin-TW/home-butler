@@ -28,6 +28,9 @@ SIRI_USER_ID = os.environ.get("SIRI_USER_ID", "siri")
 LG_PAT = os.environ.get("LG_PAT", "")
 LG_COUNTRY = os.environ.get("LG_COUNTRY", "TW")
 LG_CLIENT_ID = os.environ.get("LG_CLIENT_ID", "home-butler-client")
+# 區域 endpoint 覆寫：填了就強制用這個 base（繞過國碼推斷的區域）。
+# 用 /lg/probe 找出帳號對應區域後填入，例如 https://api-kic.lgthinq.com
+LG_API_BASE = os.environ.get("LG_API_BASE", "")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)

@@ -15,7 +15,7 @@ import uuid
 
 import httpx
 
-from config import LG_PAT, LG_COUNTRY, LG_CLIENT_ID
+from config import LG_PAT, LG_COUNTRY, LG_CLIENT_ID, LG_API_BASE
 
 # ThinQ Connect 公開 API key（所有 client 共用，官方 SDK 內建值，非機密）
 API_KEY = "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3"
@@ -36,6 +36,8 @@ _EU_COUNTRIES = {
 
 
 def _endpoint() -> str:
+    if LG_API_BASE:
+        return LG_API_BASE.rstrip("/")
     country = (LG_COUNTRY or "TW").upper()
     if country == "KR":
         region = "KIC"
@@ -44,6 +46,25 @@ def _endpoint() -> str:
     else:
         region = "AIC"
     return _REGION_ENDPOINTS[region]
+
+
+def probe_regions():
+    """對三個區域 endpoint 各打一次 GET /devices，回報結果，用來找出帳號對應區域。
+    哪個區回 200（或非 1310 Not supported domain）就是對的，把它填到 LG_API_BASE。"""
+    if not LG_PAT:
+        return {"error": "LG_PAT 未設定"}
+    out = {}
+    for region, base in _REGION_ENDPOINTS.items():
+        try:
+            resp = _client.get(f"{base}/devices", headers=_headers())
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text[:300]
+            out[region] = {"base": base, "status": resp.status_code, "body": body}
+        except Exception as e:
+            out[region] = {"base": base, "error": str(e)}
+    return out
 
 
 _client = httpx.Client(timeout=REQUEST_TIMEOUT)

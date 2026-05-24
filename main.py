@@ -143,6 +143,13 @@ def list_panasonic_devices():
     return {"count": len(gw_list), "devices": gw_list}
 
 
+@app.get("/lg/probe", dependencies=[Depends(verify_api_key)])
+def probe_lg_regions():
+    """Debug: 三個區域 endpoint 都試打 /devices，找出帳號對應區域。
+    哪區回 200 就把它的 base 填到環境變數 LG_API_BASE。"""
+    return lg_api.probe_regions()
+
+
 @app.get("/lg/devices", dependencies=[Depends(verify_api_key)])
 def list_lg_devices():
     """Debug: 列出 LG ThinQ 帳號下所有裝置。
