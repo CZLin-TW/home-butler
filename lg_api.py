@@ -204,6 +204,21 @@ def get_dehumidifier_status(device_id: str) -> dict:
     return get_device_state(device_id)
 
 
+def dehumidifier_status_fields(status: dict):
+    """把原始 state 轉成 Dashboard 用的 {power, mode, targetHumidity}（對齊 Panasonic 版形狀）。
+    error / 非 dict 回 None。"""
+    if not isinstance(status, dict) or "error" in status:
+        return None
+    power_raw = _dig(status, POWER_NODE, POWER_KEY)
+    mode_raw = _dig(status, JOBMODE_NODE, JOBMODE_KEY)
+    target = _dig(status, HUMIDITY_NODE, TARGET_HUMIDITY_KEY)
+    return {
+        "power": power_raw == POWER_ON_VALUE,
+        "mode": MODE_DISPLAY.get(mode_raw, mode_raw or ""),
+        "targetHumidity": f"{target}%" if target is not None else "",
+    }
+
+
 def _dig(state: dict, node: str, key: str):
     """從巢狀 state 取值；ThinQ 有時把 node 包成 dict、有時平鋪，兩種都試。"""
     if not isinstance(state, dict):

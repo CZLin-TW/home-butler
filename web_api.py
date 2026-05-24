@@ -25,6 +25,7 @@ from handlers.schedule import handle_add_schedule, handle_modify_schedule, handl
 from auth import verify_api_key
 import switchbot_api
 import panasonic_api
+import lg_api
 import weather_api
 import pc_state
 import sensor_state
@@ -136,9 +137,15 @@ def _fetch_sensor_status(device_id):
     return {}
 
 
-def _fetch_dehumidifier_status(auth, device_id):
-    """查詢除濕機狀態（供平行執行）"""
+def _fetch_dehumidifier_status(device_row):
+    """查詢除濕機狀態（供平行執行），依品牌分流到 Panasonic / LG。"""
+    brand = (device_row.get("品牌") or "Panasonic").strip()
+    device_id = device_row.get("Device ID", "")
     try:
+        if brand == "LG":
+            fields = lg_api.dehumidifier_status_fields(lg_api.get_dehumidifier_status(device_id))
+            return fields or {}
+        auth = device_row.get("Auth", "")
         status = panasonic_api.get_dehumidifier_status(auth, device_id)
         if "error" not in status:
             return {
@@ -190,8 +197,8 @@ def api_get_device_status():
             if d.get("類型") == "感應器" and d.get("Device ID"):
                 future = executor.submit(_fetch_sensor_status, d["Device ID"])
                 futures[future] = (name, d)
-            if d.get("類型") == "除濕機" and d.get("Auth") and d.get("Device ID"):
-                future = executor.submit(_fetch_dehumidifier_status, d["Auth"], d["Device ID"])
+            if d.get("類型") == "除濕機" and d.get("Device ID"):
+                future = executor.submit(_fetch_dehumidifier_status, d)
                 futures[future] = (name, d)
 
         for future in as_completed(futures):
