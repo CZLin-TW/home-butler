@@ -95,6 +95,7 @@ def api_dashboard():
             {
                 "name": d.get("名稱"),
                 "type": d.get("類型"),
+                "brand": d.get("品牌", ""),
                 "location": d.get("位置", ""),
                 "deviceId": d.get("Device ID", ""),
                 "buttons": d.get("按鈕", ""),
@@ -167,6 +168,7 @@ def api_get_devices():
         {
             "name": d.get("名稱"),
             "type": d.get("類型"),
+            "brand": d.get("品牌", ""),
             "location": d.get("位置", ""),
             "deviceId": d.get("Device ID", ""),
             "buttons": d.get("按鈕", ""),
@@ -590,9 +592,16 @@ def api_get_device_options():
     ac_fans = {}
     for k, v in switchbot_api.AC_FAN_MAP.items():
         if v not in ac_fans: ac_fans[v] = k
+    # Panasonic 模式：DEHUMIDIFIER_MODE_MAP 多個別名指向同一 int，dedupe 後依 int 排序
     dh_modes = {}
     for k, v in panasonic_api.DEHUMIDIFIER_MODE_MAP.items():
         if v not in dh_modes: dh_modes[v] = k
+    pana_modes = [{"value": label, "label": label} for _, label in sorted(dh_modes.items())]
+    pana_humidity = sorted(panasonic_api.HUMIDITY_VALUE_MAP.keys())
+
+    # LG 模式：用 MODE_DISPLAY 的中文標籤（與 set_mode 的別名 key、狀態回傳的 mode 字串一致）
+    lg_modes = [{"value": label, "label": label} for label in lg_api.MODE_DISPLAY.values()]
+    lg_humidity = list(range(lg_api.TARGET_HUMIDITY_MIN, lg_api.TARGET_HUMIDITY_MAX + 1, lg_api.TARGET_HUMIDITY_STEP))
 
     return {
         "ac": {
@@ -601,8 +610,13 @@ def api_get_device_options():
             "temperature": {"min": 16, "max": 30},
         },
         "dehumidifier": {
-            "modes": [{"value": label, "label": label} for _, label in sorted(dh_modes.items())],
-            "humidity": sorted(panasonic_api.HUMIDITY_VALUE_MAP.keys()),
+            # 頂層維持 Panasonic（向後相容沒帶品牌的前端）；前端依 device.brand 從 byBrand 取對的一組
+            "modes": pana_modes,
+            "humidity": pana_humidity,
+            "byBrand": {
+                "Panasonic": {"modes": pana_modes, "humidity": pana_humidity},
+                "LG": {"modes": lg_modes, "humidity": lg_humidity},
+            },
         },
     }
 
