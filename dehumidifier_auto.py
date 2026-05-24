@@ -217,9 +217,9 @@ def evaluate_all(ctx, sensor_snapshot):
         location = d.get("位置", "")
         dehumidifier_history.record(device_name, location, power_now)
 
-        # 強制持續模式 invariant：set_mode 偶發沒生效導致 mode 漂回使用者上次的設定，
-        # 每 tick 對齊一次（power=on 才檢查，off 時 mode 無意義）
-        driver.enforce_continuous(device_name, status)
+        # 強制持續模式 invariant：set_mode/target 偶發沒生效或被改掉，每 tick 對齊一次
+        # （power=on 才檢查，off 時無意義）。LG 還會把目標濕度對齊門檻−10%。
+        driver.enforce_continuous(device_name, status, rule["threshold"])
 
         sensor = sensor_snapshot.get(rule["sensor_name"], {})
         humidity = None

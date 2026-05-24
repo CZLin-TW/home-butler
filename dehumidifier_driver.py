@@ -38,9 +38,10 @@ class PanasonicDriver:
     def fire_off(self):
         panasonic_api.dehumidifier_turn_off(self.auth, self.gwid)
 
-    def enforce_continuous(self, device_name, status):
+    def enforce_continuous(self, device_name, status, threshold=None):
         """Panasonic API 偶發 set_mode 沒生效、mode 漂回使用者上次手動值，每 tick 矯正。
-        power=off 時 mode 無意義不檢查。Idempotent。"""
+        power=off 時 mode 無意義不檢查。Idempotent。threshold 不適用（Panasonic 連續除濕
+        不下發目標濕度）。"""
         if status.get("0x00") != "1":
             return
         current_mode = status.get("0x01", "")
@@ -77,7 +78,9 @@ class LGDriver:
     def fire_off(self):
         lg_api.dehumidifier_turn_off(self.device_id)
 
-    def enforce_continuous(self, device_name, status):
+    def enforce_continuous(self, device_name, status, threshold=None):
+        """每 tick 對齊：模式 = 智慧除濕、目標濕度 = 門檻−10%。涵蓋「auto 啟用時機器
+        本來就開著」沒走 fire_on 的情況，確保策略一定生效。只在偏離時才送 API。"""
         if lg_api._dig(status, lg_api.POWER_NODE, lg_api.POWER_KEY) != lg_api.POWER_ON_VALUE:
             return
         current = lg_api._dig(status, lg_api.JOBMODE_NODE, lg_api.JOBMODE_KEY)
@@ -88,6 +91,12 @@ class LGDriver:
                 f"{current!r} != {expected}（{lg_api.AUTO_CONTINUOUS_MODE}），重新套用"
             )
             lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_CONTINUOUS_MODE)
+        if threshold is not None:
+            desired = lg_api.snap_humidity(threshold + lg_api.AUTO_TARGET_OFFSET)
+            current_target = lg_api._dig(status, lg_api.HUMIDITY_NODE, lg_api.TARGET_HUMIDITY_KEY)
+            if current_target != desired:
+                print(f"[dehum-auto] target drift on {device_name} (LG): {current_target} != {desired}，重新套用")
+                lg_api.dehumidifier_set_humidity(self.device_id, desired)
 
 
 def make_driver(device_row):

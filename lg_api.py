@@ -198,11 +198,14 @@ def dehumidifier_set_mode(device_id: str, mode_str: str) -> dict:
     return _control(device_id, {JOBMODE_NODE: {JOBMODE_KEY: value}})
 
 
-def dehumidifier_set_humidity(device_id: str, humidity: int) -> dict:
-    # snap 到 step 的倍數並 clamp 到支援範圍（機器只吃 30~70、step 5）
+def snap_humidity(humidity: int) -> int:
+    """snap 到 step 的倍數並 clamp 到支援範圍（機器只吃 30~70、step 5）。"""
     h = int(round(int(humidity) / TARGET_HUMIDITY_STEP) * TARGET_HUMIDITY_STEP)
-    h = max(TARGET_HUMIDITY_MIN, min(TARGET_HUMIDITY_MAX, h))
-    return _control(device_id, {HUMIDITY_NODE: {TARGET_HUMIDITY_KEY: h}})
+    return max(TARGET_HUMIDITY_MIN, min(TARGET_HUMIDITY_MAX, h))
+
+
+def dehumidifier_set_humidity(device_id: str, humidity: int) -> dict:
+    return _control(device_id, {HUMIDITY_NODE: {TARGET_HUMIDITY_KEY: snap_humidity(humidity)}})
 
 
 def get_dehumidifier_status(device_id: str) -> dict:
