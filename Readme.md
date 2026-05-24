@@ -25,7 +25,7 @@
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
 | 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
 | 除濕機控制 | 開關、模式、目標濕度。支援 Panasonic（Smart App API）與 LG（ThinQ Connect API），多台並存，依「智能居家」品牌欄分流 |
-| 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑持續除濕（Panasonic 連續除濕 / LG 強力除濕）由外部 sensor 完全掌控。Panasonic、LG 皆支援（品牌無關狀態機 + driver 分流） |
+| 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑持續除濕（Panasonic 連續除濕 / LG 智慧除濕+目標壓低）由外部 sensor 完全掌控。Panasonic、LG 皆支援（品牌無關狀態機 + driver 分流） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
 | 溫濕度查詢 | 即時讀取室內溫度與濕度（含 SwitchBot Meter Pro CO2 三合一感測器的 CO2 ppm 讀值） |
 | 天氣預報 | 全台鄉鎮一週天氣（含體感溫度與相對濕度），支援自然語言查詢 |
@@ -374,7 +374,7 @@ DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指
    - 狀態：啟用
 6. **校準**：LG 除濕機的 property 欄位名 / 值因機型而異。部署後打 `GET /lg/devices/{deviceId}/profile` 與 `GET /lg/devices/{deviceId}/state`，對照回應調整 `lg_api.py` 頂部「校準點」常數（電源 / 模式 / 目標濕度的 node / key / 值）。
 
-> ⚠️ **LG「持續除濕」模式需真機驗證**：自動模式靠「機器跑滿、不看自身目標濕度，由外部 sensor + hysteresis 控制 on/off」運作。Panasonic 用「連續除濕」；LG 用 **強力除濕（INTENSIVE_DRY）+ 目標濕度壓到最低 30%** 當等效（見 `lg_api.py:AUTO_CONTINUOUS_MODE`）。若你的 LG 機在強力除濕仍會自己達標停機導致 auto-OFF 永遠 trigger 不到，把 `AUTO_CONTINUOUS_MODE` 換成別的模式。
+> **LG 自動模式策略**：Panasonic 用「連續除濕」讓機器忽略自身目標濕度；LG 改用 **智慧除濕 + 把機器目標濕度設成「自動規則門檻 − 10%」**（`lg_api.py:AUTO_CONTINUOUS_MODE` / `AUTO_TARGET_OFFSET`）。機器目標壓在我們 OFF 門檻（threshold−2）之下，hysteresis 一定先 fire OFF、機器不會自己先達標停機，外部 sensor 完全掌控 on/off。
 
 ---
 

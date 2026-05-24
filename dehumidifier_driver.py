@@ -30,7 +30,7 @@ class PanasonicDriver:
     def is_power_on(self, status):
         return status.get("0x00") == "1"
 
-    def fire_on(self):
+    def fire_on(self, threshold=None):
         r1 = panasonic_api.dehumidifier_turn_on(self.auth, self.gwid)
         r2 = panasonic_api.dehumidifier_set_mode(self.auth, self.gwid, PANA_CONTINUOUS_MODE)
         return bool(r1.get("success")), bool(r2.get("success"))
@@ -65,12 +65,13 @@ class LGDriver:
     def is_power_on(self, status):
         return lg_api._dig(status, lg_api.POWER_NODE, lg_api.POWER_KEY) == lg_api.POWER_ON_VALUE
 
-    def fire_on(self):
+    def fire_on(self, threshold=None):
         r1 = lg_api.dehumidifier_turn_on(self.device_id)
         r2 = lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_CONTINUOUS_MODE)
-        # 目標濕度壓到最低，讓機器幾乎不會自己達標停機，等效「持續除濕」，
-        # 真正的 on/off 完全交給外部 sensor + hysteresis。
-        lg_api.dehumidifier_set_humidity(self.device_id, lg_api.TARGET_HUMIDITY_MIN)
+        # 機器目標 = 規則門檻 − 10%，壓在我們 OFF 門檻之下，讓 hysteresis 先 fire OFF、
+        # 機器不會自己先達標停機。set_humidity 內含 snap/clamp 到合法範圍。
+        if threshold is not None:
+            lg_api.dehumidifier_set_humidity(self.device_id, threshold + lg_api.AUTO_TARGET_OFFSET)
         return bool(r1.get("success")), bool(r2.get("success"))
 
     def fire_off(self):

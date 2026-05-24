@@ -174,10 +174,11 @@ MODE_DISPLAY = {
     "CLOTHES_DRY": "衣物乾燥", "SMART_HUMIDITY": "智慧除濕", "QUIET_HUMIDITY": "靜音除濕",
 }
 
-# 自動模式用的「持續除濕」等效模式：機器跑滿、不看自身目標濕度（搭配把目標壓到最低），
-# 由外部 sensor + hysteresis 完全控制 on/off。強力除濕(INTENSIVE_DRY) 最接近。
-# ⚠️ real-device 驗證後可調（若該機 INTENSIVE_DRY 仍會自己達標停機，換別的模式）。
-AUTO_CONTINUOUS_MODE = "強力除濕"
+# 自動模式策略：用「智慧除濕」模式，並把機器目標濕度設成「自動規則門檻 − 10%」。
+# 機器目標壓在我們的 OFF 門檻（threshold−2）之下 → 我們的 hysteresis 一定先 fire OFF，
+# 機器不會自己先達標停機，外部 sensor 完全掌控 on/off。
+AUTO_CONTINUOUS_MODE = "智慧除濕"
+AUTO_TARGET_OFFSET = -10
 
 # ════════════════════════════════════════════
 

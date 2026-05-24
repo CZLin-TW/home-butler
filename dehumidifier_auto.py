@@ -386,7 +386,7 @@ def _fire_on(device_name, rule, driver):
     判斷門檻、不下發到機器）。品牌差異收斂在 driver.fire_on()。
     任一指令真的拋 exception 才走 except；success flag 區分「呼叫到了」vs「沒生效」。"""
     try:
-        turn_on_ok, set_mode_ok = driver.fire_on()
+        turn_on_ok, set_mode_ok = driver.fire_on(rule["threshold"])
         if turn_on_ok and set_mode_ok:
             print(f"[dehum-auto] FIRE ON {device_name}: 持續除濕 threshold={rule['threshold']}")
         else:

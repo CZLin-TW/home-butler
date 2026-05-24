@@ -35,6 +35,7 @@ def _on_startup():
     import ac_history
     import dehumidifier_auto
     import dehumidifier_history
+    import dehumidifier_driver
     from sheets import RequestContext
     import switchbot_api
     from handlers.device import apply_sensor_compensation
@@ -50,6 +51,8 @@ def _on_startup():
         - 感應器：打 SwitchBot API 拉當下溫濕度，寫進 sensor_state
         - 空調：snapshot「最後電源/溫度/模式/風速」進 ac_history
           （AC 是 IR write-only 不能 readback，只能用 home-butler 自己記的最後狀態）
+        - 除濕機（手動模式）：打 API 拉電源狀態進 dehumidifier_history，給感測器圖
+          背景斜紋用；自動模式的由下方 evaluate_all 記，這裡跳過避免重複
         """
         while True:
             try:
@@ -84,6 +87,20 @@ def _on_startup():
                             name, location, power,
                             d.get("最後溫度"), d.get("最後模式"), d.get("最後風速"),
                         )
+                    elif dtype == "除濕機":
+                        # 自動模式的除濕機由下方 evaluate_all 抓狀態 + record，
+                        # 這裡只補「手動模式」的，避免對同一台重複打 API / 重複記錄。
+                        if dehumidifier_auto.is_locked(name):
+                            continue
+                        driver = dehumidifier_driver.make_driver(d)
+                        if driver is None:
+                            continue
+                        status = driver.get_status()
+                        if not isinstance(status, dict) or "error" in status:
+                            err = status.get("error") if isinstance(status, dict) else status
+                            print(f"[dehum poll] {name}: {err}")
+                            continue
+                        dehumidifier_history.record(name, location, driver.is_power_on(status))
                 # 除濕機自動規則：先 sensor poll 跑完寫進 snapshot 再評估
                 dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())
             except Exception as e:
