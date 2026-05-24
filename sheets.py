@@ -19,8 +19,9 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   名稱                str   "客廳空調"
   類型                str   "空調" | "IR" | "感應器" | "除濕機"
   位置                str   "客廳"
-  Device ID           str   SwitchBot deviceId 或 Panasonic gwid
-  Auth                str   Panasonic 設備 auth token（除濕機才有）
+  Device ID           str   SwitchBot deviceId / Panasonic gwid / LG ThinQ deviceId
+  Auth                str   Panasonic 設備 auth token（Panasonic 除濕機才有；LG 不需要）
+  品牌                str   除濕機用："Panasonic" | "LG"。空值預設 Panasonic（向下相容）
   按鈕                str   IR 設備自訂按鈕，逗號分隔
   控制類型            str   "command" | "customize"
   狀態                str   "啟用" | "停用"

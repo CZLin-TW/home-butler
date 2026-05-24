@@ -2,9 +2,10 @@ import gspread
 import json
 from datetime import timedelta
 from config import now_taipei
-from sheets import get_device_id_by_name, get_device_auth_by_name, get_all_devices_by_type, build_row
+from sheets import get_device_id_by_name, get_all_devices_by_type, build_row
 import switchbot_api
 import panasonic_api
+import lg_api
 import weather_api
 import dehumidifier_auto
 
@@ -341,31 +342,32 @@ def handle_query_devices(ctx):
     return "已設定的設備：\n" + "\n".join(lines)
 
 
-def handle_control_dehumidifier(data, ctx, _internal=False):
-    """除濕機手動控制。_internal=True 是自動模式規則自己呼叫，跳過 lock 檢查。"""
-    device_name = data.get("device_name", "")
-    auth, gwid = get_device_auth_by_name(device_name, ctx)
+def _resolve_dehumidifier(device_name, ctx):
+    """找出要操作的除濕機 row。回傳 (row, error_str)。
+    有指定名稱找該台；沒指定且只有一台用那台；多台要求指定；都沒有回找不到。"""
+    dh_devices = get_all_devices_by_type("除濕機", ctx)
+    if device_name:
+        for d in dh_devices:
+            if d.get("名稱") == device_name:
+                return d, None
+    if len(dh_devices) == 1:
+        return dh_devices[0], None
+    if len(dh_devices) > 1:
+        names = "、".join([d.get("名稱") for d in dh_devices])
+        return None, f"❌ 有多台除濕機（{names}），請指定要控制哪一台"
+    return None, "❌ 找不到除濕機設備，請先在「智能居家」分頁設定"
 
-    if not auth:
-        dh_devices = get_all_devices_by_type("除濕機", ctx)
-        if len(dh_devices) == 1:
-            auth = dh_devices[0].get("Auth", "")
-            gwid = dh_devices[0].get("Device ID", "")
-            device_name = dh_devices[0].get("名稱", device_name)
-        elif len(dh_devices) > 1:
-            names = "、".join([d.get("名稱") for d in dh_devices])
-            return f"❌ 有多台除濕機（{names}），請指定要控制哪一台"
-        else:
-            return "❌ 找不到除濕機設備，請先在「智能居家」分頁設定"
 
-    # 自動模式啟用中拒收外部控制（Dashboard 手動 / LINE bot / 排程都會走這條）
-    if not _internal and dehumidifier_auto.is_locked(device_name):
-        return f"❌ {device_name} 目前處於自動模式，請先在 Dashboard 關閉自動模式才能手動控制"
+def _dehumidifier_brand(row):
+    """品牌欄空值視為 Panasonic（向下相容尚未填品牌的既有 row）。"""
+    return (row.get("品牌") or "Panasonic").strip()
 
-    power = data.get("power", "")
-    mode = data.get("mode", "")
-    humidity = data.get("humidity", "")
 
+def _control_dehumidifier_panasonic(row, device_name, power, mode, humidity):
+    auth = row.get("Auth", "")
+    gwid = row.get("Device ID", "")
+    if not auth or not gwid:
+        return f"❌ {device_name} 缺少 Auth 或 Device ID 設定"
     if power == "off":
         result = panasonic_api.dehumidifier_turn_off(auth, gwid)
     elif power == "on" and not mode and not humidity:
@@ -381,26 +383,69 @@ def handle_control_dehumidifier(data, ctx, _internal=False):
                 return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
         if humidity:
             result = panasonic_api.dehumidifier_set_humidity(auth, gwid, int(humidity))
-
     if result.get("success"):
         return f"✅ {device_name} 指令已送出"
+    return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+
+
+def _control_dehumidifier_lg(row, device_name, power, mode, humidity):
+    device_id = row.get("Device ID", "")
+    if not device_id:
+        return f"❌ {device_name} 缺少 Device ID 設定"
+    if power == "off":
+        result = lg_api.dehumidifier_turn_off(device_id)
+    elif power == "on" and not mode and not humidity:
+        result = lg_api.dehumidifier_turn_on(device_id)
     else:
-        return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+        turn_on_result = lg_api.dehumidifier_turn_on(device_id)
+        if not turn_on_result.get("success"):
+            return f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}"
+        result = turn_on_result
+        if mode:
+            result = lg_api.dehumidifier_set_mode(device_id, mode)
+            if not result.get("success"):
+                return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
+        if humidity:
+            result = lg_api.dehumidifier_set_humidity(device_id, int(humidity))
+    if result.get("success"):
+        return f"✅ {device_name} 指令已送出"
+    return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+
+
+def handle_control_dehumidifier(data, ctx, _internal=False):
+    """除濕機手動控制。_internal=True 是自動模式規則自己呼叫，跳過 lock 檢查。
+    依「智能居家」品牌欄分流到 Panasonic / LG。"""
+    device_name = data.get("device_name", "")
+    row, error = _resolve_dehumidifier(device_name, ctx)
+    if error:
+        return error
+    device_name = row.get("名稱", device_name)
+
+    # 自動模式啟用中拒收外部控制（Dashboard 手動 / LINE bot / 排程都會走這條）
+    if not _internal and dehumidifier_auto.is_locked(device_name):
+        return f"❌ {device_name} 目前處於自動模式，請先在 Dashboard 關閉自動模式才能手動控制"
+
+    power = data.get("power", "")
+    mode = data.get("mode", "")
+    humidity = data.get("humidity", "")
+
+    if _dehumidifier_brand(row) == "LG":
+        return _control_dehumidifier_lg(row, device_name, power, mode, humidity)
+    return _control_dehumidifier_panasonic(row, device_name, power, mode, humidity)
 
 
 def handle_query_dehumidifier(data, ctx):
     device_name = data.get("device_name", "")
-    auth, gwid = get_device_auth_by_name(device_name, ctx)
+    row, error = _resolve_dehumidifier(device_name, ctx)
+    if error:
+        return error
+    device_name = row.get("名稱", device_name)
 
-    if not auth:
-        dh_devices = get_all_devices_by_type("除濕機", ctx)
-        if len(dh_devices) == 1:
-            auth = dh_devices[0].get("Auth", "")
-            gwid = dh_devices[0].get("Device ID", "")
-            device_name = dh_devices[0].get("名稱", device_name)
-        else:
-            return "❌ 找不到除濕機設備"
-
+    if _dehumidifier_brand(row) == "LG":
+        status = lg_api.get_dehumidifier_status(row.get("Device ID", ""))
+        return lg_api.format_dehumidifier_status(status, device_name)
+    auth = row.get("Auth", "")
+    gwid = row.get("Device ID", "")
     status = panasonic_api.get_dehumidifier_status(auth, gwid)
     return panasonic_api.format_dehumidifier_status(status, device_name)
 

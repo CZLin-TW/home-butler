@@ -13,6 +13,7 @@ from notify import router as notify_router
 from auth import verify_api_key
 import switchbot_api
 import panasonic_api
+import lg_api
 
 
 app = FastAPI()
@@ -140,6 +141,25 @@ def list_panasonic_devices():
     Panasonic 各機型欄位名稱可能不同，故回傳整包原始 entry 讓你直接看。"""
     gw_list = panasonic_api.get_devices()
     return {"count": len(gw_list), "devices": gw_list}
+
+
+@app.get("/lg/devices", dependencies=[Depends(verify_api_key)])
+def list_lg_devices():
+    """Debug: 列出 LG ThinQ 帳號下所有裝置。
+    新增 LG 除濕機時用來抓 deviceId 填進「智能居家」分頁的 Device ID（品牌欄填 LG）。"""
+    return {"devices": lg_api.get_devices()}
+
+
+@app.get("/lg/devices/{device_id}/profile", dependencies=[Depends(verify_api_key)])
+def get_lg_device_profile(device_id: str):
+    """Debug: 某 LG 裝置的能力 profile，用來校準 lg_api.py 的除濕機 property 欄位名/值。"""
+    return lg_api.get_device_profile(device_id)
+
+
+@app.get("/lg/devices/{device_id}/state", dependencies=[Depends(verify_api_key)])
+def get_lg_device_state(device_id: str):
+    """Debug: 某 LG 裝置目前狀態（巢狀 property 結構），對照 profile 校準解析。"""
+    return lg_api.get_device_state(device_id)
 
 
 @app.get("/panasonic/dehumidifier/{device_name}/full_status", dependencies=[Depends(verify_api_key)])

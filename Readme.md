@@ -24,7 +24,7 @@
 | 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
 | 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
-| 除濕機控制 | 開關、模式、目標濕度（Panasonic Smart App） |
+| 除濕機控制 | 開關、模式、目標濕度。支援 Panasonic（Smart App API）與 LG（ThinQ Connect API），多台並存，依「智能居家」品牌欄分流 |
 | 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑連續除濕、目標濕度不下發給機器（避免韌體把 mode flip 回「目標濕度」） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
 | 溫濕度查詢 | 即時讀取室內溫度與濕度（含 SwitchBot Meter Pro CO2 三合一感測器的 CO2 ppm 讀值） |
@@ -343,15 +343,38 @@ DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指
 
 ---
 
-### 十、Panasonic 除濕機設定
+### 十、除濕機設定（Panasonic / LG）
+
+除濕機支援多台並存，依「智能居家」分頁的 **品牌** 欄位分流到對應 API。品牌欄空值預設為 Panasonic（向下相容）。
+
+**Panasonic（Smart App API）**
 
 1. 在 Render.com 新增環境變數 `PANASONIC_ACCOUNT` 和 `PANASONIC_PASSWORD`（Panasonic Smart App 帳密）
-2. 在 Google Sheets「智能居家」分頁新增一行：
-   - 名稱：自訂（例如「除濕機」）
+2. 抓裝置參數：帶 `X-API-Key` 打 `GET /panasonic/devices`，列出帳號下所有機器的 GWID / Auth
+3. 在「智能居家」分頁新增一行：
+   - 名稱：自訂（多台請取不同名字，建議用位置區分，例如「客廳除濕機」）
    - 類型：除濕機
+   - 品牌：Panasonic（或留空）
    - Device ID：Panasonic 的 GWID
    - Auth：Panasonic 的 Device Auth
    - 狀態：啟用
+
+**LG（ThinQ Connect API）**
+
+1. 那台 LG 除濕機需先在手機 **LG ThinQ App** 加入、能遠端控制
+2. 前往 https://thinq.dev，用同一個 LG 帳號登入，產生 **PAT（Personal Access Token）**，勾選裝置讀取 + 控制權限
+3. 在 Render.com 新增環境變數 `LG_PAT`（貼上 PAT）、`LG_COUNTRY`（台灣填 `TW`）
+4. 抓裝置參數：帶 `X-API-Key` 打 `GET /lg/devices`，找到該除濕機的 **deviceId**
+5. 在「智能居家」分頁新增一行：
+   - 名稱：自訂（取不同名字）
+   - 類型：除濕機
+   - 品牌：LG
+   - Device ID：LG 的 deviceId
+   - Auth：留空（LG 不需要）
+   - 狀態：啟用
+6. **校準**：LG 除濕機的 property 欄位名 / 值因機型而異。部署後打 `GET /lg/devices/{deviceId}/profile` 與 `GET /lg/devices/{deviceId}/state`，對照回應調整 `lg_api.py` 頂部「校準點」常數（電源 / 模式 / 目標濕度的 node / key / 值）。
+
+> ⚠️ **LG 自動濕度模式尚未支援**：`dehumidifier_auto.py` 目前綁定 Panasonic 的 (auth, gwid) 模型，LG 只支援手動控制與狀態查詢。請勿對 LG 機開啟 Dashboard 自動模式（會 lock 住手動控制但規則不會觸發）。
 
 ---
 
@@ -464,6 +487,9 @@ function sendRealtimeNotification() {
 | HOME_BUTLER_API_KEY | 自訂的 API 認證金鑰，保護 `/api/*` `/notify*` `/switchbot/*` 端點。建議用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生 | 必要 |
 | DASHBOARD_URL | Dashboard 部署網址（例如 `https://dashboard.example.com`）。home-butler 啟動後會 runtime 從 `{DASHBOARD_URL}/api/version` 撈使用者體感版本（1 小時 cache）注入到 LINE bot 的 SYSTEM_PROMPT。沒設或撈不到時 LINE 回答版本會是「未知」，其他功能不受影響 | 建議 |
 | SIRI_USER_ID | Siri 捷徑（`/api/assistant`）沒帶 `user_id` 時的匿名 fallback 身分。**刻意維持中性，不要設成任何家人的真實 Line ID**——否則「忘了填 user_id」的請求會靜默冒名成那個人並污染其對話記憶。沒設預設字串 `siri`（匿名訪客：能控制家電，但無名字/無風格/對話記憶獨立）。正確用法是每人捷徑各自帶自己的 Line User ID | 選配 |
+| LG_PAT | LG ThinQ Connect 的 Personal Access Token（thinq.dev 產生，需勾裝置讀取 + 控制權限）。有 LG 除濕機才需要 | 選配 |
+| LG_COUNTRY | LG ThinQ 國碼，台灣 = `TW`（決定區域 endpoint）。預設 `TW` | 選配 |
+| LG_CLIENT_ID | LG ThinQ client 識別字串，固定一組即可。預設 `home-butler-client` | 選配 |
 | SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
 | SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
 | PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
@@ -484,6 +510,11 @@ function sendRealtimeNotification() {
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
+| /panasonic/devices | GET | 列出 Panasonic 帳號下所有設備（GWID / Auth），新增除濕機抓參數用 |
+| /panasonic/dehumidifier/{name}/full_status | GET | Debug：掃某 Panasonic 除濕機 CommandType 0x00~0x1F 全欄位 |
+| /lg/devices | GET | 列出 LG ThinQ 帳號下所有裝置，抓 deviceId 用 |
+| /lg/devices/{device_id}/profile | GET | LG 裝置能力 profile，校準除濕機 property 欄位用 |
+| /lg/devices/{device_id}/state | GET | LG 裝置目前狀態，對照 profile 校準解析 |
 
 ### Dashboard REST API（/api）
 
@@ -784,6 +815,7 @@ function sendRealtimeNotification() {
 | handlers/style.py | 自訂風格 handler |
 | switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取 含 Meter Pro CO2、DIY IR） |
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
+| lg_api.py | LG ThinQ Connect API 封裝（PAT 認證、裝置探索、除濕機控制與狀態查詢）。除濕機 property 校準點集中在檔案頂部常數 |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |

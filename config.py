@@ -21,6 +21,14 @@ DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "")
 # 但無名字/無風格/對話記憶獨立一份。
 SIRI_USER_ID = os.environ.get("SIRI_USER_ID", "siri")
 
+# LG ThinQ Connect（thinq.dev 官方 API）。除濕機等 LG 智慧家電用。
+# LG_PAT：thinq.dev 產生的 Personal Access Token（需勾裝置讀取 + 控制權限）。
+# LG_COUNTRY：國碼，台灣 = TW（決定打哪個區域 endpoint）。
+# LG_CLIENT_ID：自訂的 client 識別字串，固定一組即可（ThinQ 要求每個 client 穩定）。
+LG_PAT = os.environ.get("LG_PAT", "")
+LG_COUNTRY = os.environ.get("LG_COUNTRY", "TW")
+LG_CLIENT_ID = os.environ.get("LG_CLIENT_ID", "home-butler-client")
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
