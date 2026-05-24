@@ -142,6 +142,7 @@ def _control(device_id: str, body: dict) -> dict:
 # 不同除濕機機型的 property node / key / 值可能不同
 # ════════════════════════════════════════════
 
+# 校準依據：DHUM_056905_WW 的 /profile + /state（2026-05）
 POWER_NODE = "operation"
 POWER_KEY = "dehumidifierOperationMode"
 POWER_ON_VALUE = "POWER_ON"
@@ -150,16 +151,27 @@ POWER_OFF_VALUE = "POWER_OFF"
 HUMIDITY_NODE = "humidity"
 TARGET_HUMIDITY_KEY = "targetHumidity"
 CURRENT_HUMIDITY_KEY = "currentHumidity"
+TARGET_HUMIDITY_MIN = 30
+TARGET_HUMIDITY_MAX = 70
+TARGET_HUMIDITY_STEP = 5
 
-JOBMODE_NODE = "operation"
-JOBMODE_KEY = "dehumidifierOperationMode"
+JOBMODE_NODE = "dehumidifierJobMode"
+JOBMODE_KEY = "currentJobMode"
 
-# 使用者講的模式 → ThinQ jobMode 值。先放常見值，校準後補全。
+# 使用者講的模式 → ThinQ currentJobMode 值
 DEHUMIDIFIER_MODE_MAP = {
-    "連續除濕": "CONTINUOUS_DEHUMIDIFY", "continuous": "CONTINUOUS_DEHUMIDIFY",
-    "自動除濕": "SMART_DEHUMIDIFY", "auto": "SMART_DEHUMIDIFY",
-    "快速除濕": "FAST_DEHUMIDIFY", "quick": "FAST_DEHUMIDIFY",
-    "送風": "AIR_CLEAN", "fan": "AIR_CLEAN",
+    "空氣清淨": "AIR_CLEAN", "清淨": "AIR_CLEAN", "air clean": "AIR_CLEAN", "purify": "AIR_CLEAN",
+    "強力除濕": "INTENSIVE_DRY", "集中除濕": "INTENSIVE_DRY", "intensive": "INTENSIVE_DRY",
+    "快速除濕": "RAPID_HUMIDITY", "快速": "RAPID_HUMIDITY", "rapid": "RAPID_HUMIDITY", "quick": "RAPID_HUMIDITY",
+    "衣物乾燥": "CLOTHES_DRY", "乾衣": "CLOTHES_DRY", "clothes": "CLOTHES_DRY",
+    "智慧除濕": "SMART_HUMIDITY", "自動除濕": "SMART_HUMIDITY", "自動": "SMART_HUMIDITY", "smart": "SMART_HUMIDITY", "auto": "SMART_HUMIDITY",
+    "靜音除濕": "QUIET_HUMIDITY", "靜音": "QUIET_HUMIDITY", "quiet": "QUIET_HUMIDITY",
+}
+
+# ThinQ jobMode 值 → 顯示用中文（查詢狀態時用）
+MODE_DISPLAY = {
+    "AIR_CLEAN": "空氣清淨", "INTENSIVE_DRY": "強力除濕", "RAPID_HUMIDITY": "快速除濕",
+    "CLOTHES_DRY": "衣物乾燥", "SMART_HUMIDITY": "智慧除濕", "QUIET_HUMIDITY": "靜音除濕",
 }
 
 # ════════════════════════════════════════════
@@ -181,7 +193,10 @@ def dehumidifier_set_mode(device_id: str, mode_str: str) -> dict:
 
 
 def dehumidifier_set_humidity(device_id: str, humidity: int) -> dict:
-    return _control(device_id, {HUMIDITY_NODE: {TARGET_HUMIDITY_KEY: int(humidity)}})
+    # snap 到 step 的倍數並 clamp 到支援範圍（機器只吃 30~70、step 5）
+    h = int(round(int(humidity) / TARGET_HUMIDITY_STEP) * TARGET_HUMIDITY_STEP)
+    h = max(TARGET_HUMIDITY_MIN, min(TARGET_HUMIDITY_MAX, h))
+    return _control(device_id, {HUMIDITY_NODE: {TARGET_HUMIDITY_KEY: h}})
 
 
 def get_dehumidifier_status(device_id: str) -> dict:
@@ -205,9 +220,12 @@ def format_dehumidifier_status(status: dict, device_name: str = "除濕機") -> 
         return f"❌ 無法取得{device_name}狀態：{err}"
     power_raw = _dig(status, POWER_NODE, POWER_KEY)
     power = "開啟" if power_raw == POWER_ON_VALUE else ("關閉" if power_raw == POWER_OFF_VALUE else "未知")
+    mode_raw = _dig(status, JOBMODE_NODE, JOBMODE_KEY)
     target = _dig(status, HUMIDITY_NODE, TARGET_HUMIDITY_KEY)
     current = _dig(status, HUMIDITY_NODE, CURRENT_HUMIDITY_KEY)
     parts = [f"💧 {device_name}：{power}"]
+    if mode_raw:
+        parts.append(f"模式：{MODE_DISPLAY.get(mode_raw, mode_raw)}")
     if current is not None:
         parts.append(f"目前濕度 {current}%")
     if target is not None:
