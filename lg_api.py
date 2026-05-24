@@ -174,6 +174,11 @@ MODE_DISPLAY = {
     "CLOTHES_DRY": "衣物乾燥", "SMART_HUMIDITY": "智慧除濕", "QUIET_HUMIDITY": "靜音除濕",
 }
 
+# 自動模式用的「持續除濕」等效模式：機器跑滿、不看自身目標濕度（搭配把目標壓到最低），
+# 由外部 sensor + hysteresis 完全控制 on/off。強力除濕(INTENSIVE_DRY) 最接近。
+# ⚠️ real-device 驗證後可調（若該機 INTENSIVE_DRY 仍會自己達標停機，換別的模式）。
+AUTO_CONTINUOUS_MODE = "強力除濕"
+
 # ════════════════════════════════════════════
 
 

@@ -32,7 +32,7 @@ from threading import Lock
 import gspread
 
 import dehumidifier_history
-import panasonic_api
+import dehumidifier_driver
 from sheets import _get_spreadsheet
 
 RULES_SHEET = "除濕機自動規則"
@@ -141,10 +141,10 @@ def get_all_rules() -> dict:
 
 def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
              threshold=None, on_mode=None, sensor_humidity=None,
-             power_now=None, auth=None, gwid=None):
+             power_now=None, driver=None):
     """Dashboard 設定/更新規則。
 
-    Toggle 從 OFF→ON 且 sensor_humidity + power_now + auth/gwid 都備齊時，
+    Toggle 從 OFF→ON 且 sensor_humidity + power_now + driver 都備齊時，
     會立即依「對稱單一門檻」規則 fire ON 或 OFF。Toggle ON→OFF 只關閉規則，
     不主動改除濕機當前狀態。"""
     now = time.time()
@@ -167,8 +167,8 @@ def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
 
     last_event = None
     last_event_at = None
-    if not old_auto and auto_mode and sensor_humidity is not None and auth and gwid:
-        last_event = _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, auth, gwid)
+    if not old_auto and auto_mode and sensor_humidity is not None and driver is not None:
+        last_event = _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, driver)
         if last_event:
             last_event_at = now
 
@@ -201,24 +201,25 @@ def evaluate_all(ctx, sensor_snapshot):
         if not d:
             print(f"[dehum-auto] {device_name} 不在「智能居家」啟用列表，skip")
             continue
-        auth = d.get("Auth", "")
-        gwid = d.get("Device ID", "")
-        if not auth or not gwid:
+        driver = dehumidifier_driver.make_driver(d)
+        if driver is None:
+            print(f"[dehum-auto] {device_name} 缺少品牌所需識別碼（Panasonic 需 Auth+Device ID / LG 需 Device ID），skip")
             continue
 
-        status = panasonic_api.get_dehumidifier_status(auth, gwid)
-        if "error" in status:
-            print(f"[dehum-auto] {device_name} status fetch: {status.get('error')}")
+        status = driver.get_status()
+        if not isinstance(status, dict) or "error" in status:
+            err = status.get("error") if isinstance(status, dict) else status
+            print(f"[dehum-auto] {device_name} status fetch: {err}")
             continue
-        power_now = status.get("0x00") == "1"
+        power_now = driver.is_power_on(status)
 
         # Record power 狀態到 history（給 Dashboard 自動模式 chart 背景畫 on segments）
         location = d.get("位置", "")
         dehumidifier_history.record(device_name, location, power_now)
 
-        # 強制 mode invariant：Panasonic 偶發 set_mode 沒生效導致 mode 漂回使用者
-        # 上次的設定，每 tick 對齊一次（power=on 才檢查，off 時 mode 無意義）
-        _enforce_mode_invariant(device_name, status, auth, gwid)
+        # 強制持續模式 invariant：set_mode 偶發沒生效導致 mode 漂回使用者上次的設定，
+        # 每 tick 對齊一次（power=on 才檢查，off 時 mode 無意義）
+        driver.enforce_continuous(device_name, status)
 
         sensor = sensor_snapshot.get(rule["sensor_name"], {})
         humidity = None
@@ -226,35 +227,35 @@ def evaluate_all(ctx, sensor_snapshot):
             humidity = sensor.get("current", {}).get("humidity")
 
         if humidity is None:
-            _handle_sensor_missing(device_name, rule, power_now, auth, gwid, now)
+            _handle_sensor_missing(device_name, rule, power_now, driver, now)
             continue
 
         with _lock:
             state = _state.setdefault(device_name, _new_runtime())
             state["sensor_missing_ticks"] = 0
 
-        _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now)
+        _evaluate_steady(device_name, rule, humidity, power_now, driver, now)
 
 
 # ── Internal evaluators ─────────────────────────────────
 
-def _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, auth, gwid):
+def _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, driver):
     """Toggle 從 OFF→ON 瞬間：對稱單一門檻判斷（無 hysteresis，用 ≥ 端贏 tie）。
     sensor 四捨五入後比，跟 steady-state 一致。"""
     threshold = rule["threshold"]
     humidity_int = _round_humidity(sensor_humidity)
     if humidity_int >= threshold:
         if not power_now:
-            _fire_on(device_name, rule, auth, gwid)
+            _fire_on(device_name, rule, driver)
             return "toggled_immediate_on"
     else:
         if power_now:
-            _fire_off(device_name, auth, gwid)
+            _fire_off(device_name, driver)
             return "toggled_immediate_off"
     return None
 
 
-def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
+def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
     threshold = rule["threshold"]
     duration_s = rule["duration_min"] * 60
     h_on = threshold + HYSTERESIS_ABOVE
@@ -310,11 +311,11 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
 
     last_event = None
     if fire == "on":
-        _fire_on(device_name, rule, auth, gwid)
+        _fire_on(device_name, rule, driver)
         last_event = "triggered_on"
         phase = "idle_humid"
     elif fire == "off":
-        _fire_off(device_name, auth, gwid)
+        _fire_off(device_name, driver)
         last_event = "triggered_off"
         phase = "idle_dry"
 
@@ -325,14 +326,14 @@ def _evaluate_steady(device_name, rule, humidity, power_now, auth, gwid, now):
     )
 
 
-def _handle_sensor_missing(device_name, rule, power_now, auth, gwid, now):
+def _handle_sensor_missing(device_name, rule, power_now, driver, now):
     with _lock:
         state = _state.setdefault(device_name, _new_runtime())
         state["sensor_missing_ticks"] += 1
         missing = state["sensor_missing_ticks"]
 
     if missing >= SENSOR_DISABLE_TICKS:
-        _force_disable(device_name, rule, power_now, auth, gwid, now)
+        _force_disable(device_name, rule, power_now, driver, now)
     elif missing >= SENSOR_WARNING_TICKS:
         _write_sheet(
             device_name, rule, "sensor_lost_warning", None,
@@ -340,14 +341,14 @@ def _handle_sensor_missing(device_name, rule, power_now, auth, gwid, now):
         )
 
 
-def _force_disable(device_name, rule, power_now, auth, gwid, now):
+def _force_disable(device_name, rule, power_now, driver, now):
     """60min sensor 失聯：解除 auto_mode + 關除濕機（若開著）。"""
     with _lock:
         _rules[device_name]["auto_mode"] = False
         _state[device_name] = _new_runtime()
 
     if power_now:
-        _fire_off(device_name, auth, gwid)
+        _fire_off(device_name, driver)
 
     rule_after = {**rule, "auto_mode": False}
     _write_sheet(
@@ -378,51 +379,28 @@ def _phase_for_set(rule, sensor_humidity, power_now):
         return "idle_humid" if power_now else "idle_dry"
 
 
-# ── Panasonic API wrappers ─────────────────────────────
+# ── Fire helpers（品牌差異交給 driver） ─────────────────
 
-def _fire_on(device_name, rule, auth, gwid):
-    """送開機 → 強制設「連續除濕」。連續模式下機器忽略目標濕度，threshold 只是
-    本規則的判斷門檻，不下發到機器——下了反而會讓 Panasonic 韌體把 mode flip
-    回「目標濕度」（因為設目標濕度只在那個模式下有意義）。任一指令真的拋
-    exception 才走 except；success flag 用來區分「呼叫到了」vs「沒生效」。"""
+def _fire_on(device_name, rule, driver):
+    """送開機 → 設成持續除濕等效模式（機器忽略自身目標濕度，threshold 只是本規則的
+    判斷門檻、不下發到機器）。品牌差異收斂在 driver.fire_on()。
+    任一指令真的拋 exception 才走 except；success flag 區分「呼叫到了」vs「沒生效」。"""
     try:
-        r1 = panasonic_api.dehumidifier_turn_on(auth, gwid)
-        r2 = panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
-        ok_all = r1.get("success") and r2.get("success")
-        if ok_all:
-            print(f"[dehum-auto] FIRE ON {device_name}: 連續除濕 threshold={rule['threshold']}")
+        turn_on_ok, set_mode_ok = driver.fire_on()
+        if turn_on_ok and set_mode_ok:
+            print(f"[dehum-auto] FIRE ON {device_name}: 持續除濕 threshold={rule['threshold']}")
         else:
             print(
                 f"[dehum-auto] FIRE ON {device_name} partial: "
-                f"turn_on={r1.get('success')} set_mode={r2.get('success')} "
-                f"threshold={rule['threshold']}"
+                f"turn_on={turn_on_ok} set_mode={set_mode_ok} threshold={rule['threshold']}"
             )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
 
 
-def _enforce_mode_invariant(device_name, status, auth, gwid):
-    """Auto mode 期間若除濕機 mode != 連續除濕，重送一次 set_mode 矯正。
-    Panasonic API 偶發 set_mode 沒生效，fire_on 之後 mode 漂回使用者上次手動值
-    的情況（例如「目標濕度 60」）。每 polling tick 強制 invariant。
-    power=off 時 mode 無意義不檢查。Idempotent：已是連續除濕也送不會壞。"""
-    if status.get("0x00") != "1":
-        return  # power off，下次 fire_on 才會帶 mode
-    current_mode = status.get("0x01", "")
-    expected_mode = panasonic_api.DEHUMIDIFIER_MODE_MAP.get(AUTO_MODE_DEHUMIDIFIER_MODE)
-    if expected_mode is None:
-        return  # config 錯誤，skip
-    if current_mode != str(expected_mode):
-        print(
-            f"[dehum-auto] mode drift on {device_name}: code={current_mode!r} != "
-            f"{expected_mode}（連續除濕），重新套用"
-        )
-        panasonic_api.dehumidifier_set_mode(auth, gwid, AUTO_MODE_DEHUMIDIFIER_MODE)
-
-
-def _fire_off(device_name, auth, gwid):
+def _fire_off(device_name, driver):
     try:
-        panasonic_api.dehumidifier_turn_off(auth, gwid)
+        driver.fire_off()
         print(f"[dehum-auto] FIRE OFF {device_name}")
     except Exception as e:
         print(f"[dehum-auto] fire off {device_name} error: {e}")

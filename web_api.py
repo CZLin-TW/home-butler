@@ -31,6 +31,7 @@ import pc_state
 import sensor_state
 import ac_history
 import dehumidifier_auto
+import dehumidifier_driver
 import dehumidifier_history
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
@@ -299,18 +300,17 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
     依「對稱單一門檻」規則 fire ON 或 OFF。"""
     sensor_humidity = None
     power_now = None
-    auth = None
-    gwid = None
+    driver = None
 
     if req.auto_mode:
         ctx = RequestContext()
         ctx.load()
+        device_row = None
         for d in ctx.get("智能居家"):
             if (d.get("狀態") == "啟用"
                     and d.get("名稱") == req.device_name
                     and d.get("類型") == "除濕機"):
-                auth = d.get("Auth", "")
-                gwid = d.get("Device ID", "")
+                device_row = d
                 break
 
         if req.sensor_name:
@@ -318,13 +318,15 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
             if sensor.get("online", False):
                 sensor_humidity = sensor.get("current", {}).get("humidity")
 
-        if auth and gwid:
-            try:
-                status = panasonic_api.get_dehumidifier_status(auth, gwid)
-                if "error" not in status:
-                    power_now = status.get("0x00") == "1"
-            except Exception as e:
-                print(f"[dehum-auto API] status fetch error: {e}")
+        if device_row is not None:
+            driver = dehumidifier_driver.make_driver(device_row)
+            if driver is not None:
+                try:
+                    status = driver.get_status()
+                    if isinstance(status, dict) and "error" not in status:
+                        power_now = driver.is_power_on(status)
+                except Exception as e:
+                    print(f"[dehum-auto API] status fetch error: {e}")
 
     return dehumidifier_auto.set_rule(
         device_name=req.device_name,
@@ -335,8 +337,7 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
         on_mode=req.on_mode,
         sensor_humidity=sensor_humidity,
         power_now=power_now,
-        auth=auth,
-        gwid=gwid,
+        driver=driver,
     )
 
 
