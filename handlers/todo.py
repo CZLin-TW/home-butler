@@ -1,6 +1,6 @@
 import threading
 from linebot.models import TextSendMessage
-from config import line_bot_api
+from config import line_bot_api, date_with_weekday
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
 from sheets import build_row
@@ -148,7 +148,8 @@ def handle_query_todo(user_name, ctx):
         if todo_type == "私人" and person != user_name:
             continue
         time_part = f" {r['時間']}" if r.get("時間") else ""
-        lines.append(f"• {r['事項']}（{r['日期']}{time_part}）")
+        # 日期附上 Python 算好的中文星期，避免 semantic 回覆時 LLM 自己推算星期算錯
+        lines.append(f"• {r['事項']}（{date_with_weekday(r['日期'])}{time_part}）")
 
     if not lines:
         return "目前沒有待辦事項"

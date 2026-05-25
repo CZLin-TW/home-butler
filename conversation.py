@@ -1,5 +1,5 @@
 import threading
-from config import claude, now_taipei, get_app_version
+from config import claude, now_taipei, get_app_version, weekday_zh
 from sheets import get_sheet
 from prompt import (
     SYSTEM_PROMPT, DEFAULT_STYLE,
@@ -48,8 +48,9 @@ def get_recent_conversation(user_id, ctx, limit=6):
 
 
 def ask_claude(user_id, user_message, user_name, ctx):
-    today = now_taipei().strftime("%Y-%m-%d")
-    now_time = now_taipei().strftime("%H:%M")
+    now = now_taipei()
+    today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
+    now_time = now.strftime("%H:%M")
     style_instruction = get_style_instruction(user_name, ctx)
     prompt = SYSTEM_PROMPT.format(
         today=today, now_time=now_time,
@@ -91,7 +92,8 @@ def ask_claude_semantic(user_text, raw_data, user_name, ctx, action_types):
     user 風格指令會 append 到 system 後面，讓使用者自訂風格也作用在 semantic 回覆上。
     """
     style_block = get_style_instruction(user_name, ctx)
-    today = now_taipei().strftime("%Y-%m-%d")
+    now = now_taipei()
+    today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
 
     if action_types & {"query_todo"}:
         system = SEMANTIC_TODO_PROMPT.format(today=today) + style_block

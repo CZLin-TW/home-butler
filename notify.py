@@ -3,7 +3,7 @@ from linebot.models import TextSendMessage
 from datetime import datetime, timedelta
 import json
 
-from config import line_bot_api, TZ, now_taipei
+from config import line_bot_api, TZ, now_taipei, date_with_weekday
 from sheets import RequestContext, build_row
 from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
@@ -88,7 +88,7 @@ async def notify():
                 overdue_mark = "⚠️ 未完成 " if todo_date <= today else ""
                 source = str(r.get("來源", "")).strip()
                 source_mark = "📅 " if source and source != "本地" else ""
-                label = f"{overdue_mark}{source_mark}{r['事項']}（{date_str}{time_part}）"
+                label = f"{overdue_mark}{source_mark}{r['事項']}（{date_with_weekday(date_str)}{time_part}）"
                 if r.get("類型") == "私人":
                     person = r.get("負責人", "")
                     if person not in todo_private:

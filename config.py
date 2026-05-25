@@ -42,6 +42,24 @@ def now_taipei():
     return datetime.now(TZ)
 
 
+# LLM 自己從日期推算「星期幾」很不可靠（常算錯），所以一律用 Python 算好再餵給它。
+_WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]  # Python weekday(): Mon=0..Sun=6
+
+
+def weekday_zh(dt):
+    """datetime → 中文星期單字（一~日）。"""
+    return _WEEKDAY_ZH[dt.weekday()]
+
+
+def date_with_weekday(date_str):
+    """'YYYY-MM-DD' → 'YYYY-MM-DD（X）'（X 為中文星期）。解析失敗原樣回傳。"""
+    try:
+        dt = datetime.strptime(str(date_str).strip(), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return date_str
+    return f"{date_str}（{_WEEKDAY_ZH[dt.weekday()]}）"
+
+
 # 使用者體感版本：source of truth 是 Dashboard 的 package.json:version。
 # 透過 Dashboard /api/version runtime 撈，避免 bump 版本要 push 兩個 repo。
 # 失敗時用上一次 cache 的值，最壞 fallback「未知」（LINE bot 仍能回應，只是版本講不準）。
