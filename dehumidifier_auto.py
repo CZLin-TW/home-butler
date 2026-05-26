@@ -67,7 +67,7 @@ _cached_ws = None
 
 
 def _new_runtime():
-    return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0}
+    return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0, "expected": None}
 
 
 def _round_humidity(h: float) -> int:
@@ -217,9 +217,30 @@ def evaluate_all(ctx, sensor_snapshot):
         location = d.get("位置", "")
         dehumidifier_history.record(device_name, location, power_now)
 
-        # 強制持續模式 invariant：set_mode/target 偶發沒生效或被改掉，每 tick 對齊一次
-        # （power=on 才檢查，off 時無意義）。LG 還會把目標濕度對齊門檻−10%。
-        driver.enforce_continuous(device_name, status, rule["threshold"])
+        # 手動介入偵測：比對機器實際狀態 vs 系統命令的基準狀態。
+        # 模式被改 / (LG) 目標被改 / 電源跟預期不符 → 視為使用者手動接管 → 解除自動模式、不動機器。
+        with _lock:
+            state = _state.setdefault(device_name, _new_runtime())
+            expected = state.get("expected")
+        actual = driver.read_state(status)
+
+        if expected is None:
+            # 首次 / 重啟後：建立基準。機器開著就把模式（+LG 目標）對齊持續除濕，
+            # 記下 expected，本 tick 不做偵測（使用者確認的「第一個 tick 跳過」）。
+            if actual.get("power"):
+                try:
+                    driver.align_continuous(rule["threshold"])
+                except Exception as e:
+                    print(f"[dehum-auto] {device_name} align baseline error: {e}")
+                new_expected = driver.expected_on_state(rule["threshold"])
+            else:
+                new_expected = driver.expected_off_state()
+            with _lock:
+                _state.setdefault(device_name, _new_runtime())["expected"] = new_expected
+        elif dehumidifier_driver.state_diverged(expected, actual):
+            print(f"[dehum-auto] {device_name} 偵測到手動變更：expected={expected} actual={actual}")
+            _disable_due_to_manual(device_name, rule, now)
+            continue
 
         sensor = sensor_snapshot.get(rule["sensor_name"], {})
         humidity = None
@@ -358,6 +379,21 @@ def _force_disable(device_name, rule, power_now, driver, now):
     print(f"[dehum-auto] AUTO DISABLED {device_name}: sensor lost ≥60min")
 
 
+def _disable_due_to_manual(device_name, rule, now):
+    """偵測到使用者手動改了除濕機（模式 / 目標 / 電源）→ 解除自動模式。
+    刻意「不動機器」——尊重使用者剛手動設定的狀態，只關掉自動規則並標記。"""
+    with _lock:
+        _rules[device_name]["auto_mode"] = False
+        _state[device_name] = _new_runtime()
+
+    rule_after = {**rule, "auto_mode": False}
+    _write_sheet(
+        device_name, rule_after, "disabled", None,
+        "auto_disabled_manual", now, preserve_history=False,
+    )
+    print(f"[dehum-auto] AUTO DISABLED {device_name}: 偵測到手動操作（不動機器）")
+
+
 # ── Phase computation ──────────────────────────────────
 
 def _phase_for_set(rule, sensor_humidity, power_now):
@@ -396,6 +432,9 @@ def _fire_on(device_name, rule, driver):
             )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
+    # 記下系統命令的基準狀態，供下個 tick 偵測手動介入
+    with _lock:
+        _state.setdefault(device_name, _new_runtime())["expected"] = driver.expected_on_state(rule["threshold"])
 
 
 def _fire_off(device_name, driver):
@@ -404,6 +443,8 @@ def _fire_off(device_name, driver):
         print(f"[dehum-auto] FIRE OFF {device_name}")
     except Exception as e:
         print(f"[dehum-auto] fire off {device_name} error: {e}")
+    with _lock:
+        _state.setdefault(device_name, _new_runtime())["expected"] = driver.expected_off_state()
 
 
 # ── Sheet I/O ──────────────────────────────────────────
