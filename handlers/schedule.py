@@ -1,6 +1,6 @@
 import json
 from config import now_taipei
-from sheets import get_all_devices_by_type, build_row
+from sheets import get_all_devices_by_type, append_record, update_row_fields
 from prompt import _format_schedule_params
 from handlers.device import maintain_ac_auto_schedule
 
@@ -22,7 +22,6 @@ def handle_add_schedule(data, user_name, ctx):
         else:
             return "❌ 請指定設備名稱"
 
-    headers = sheet.row_values(1)
     new_row = {
         "設備名稱": device_name,
         "動作": target_action,
@@ -33,7 +32,7 @@ def handle_add_schedule(data, user_name, ctx):
         "狀態": "待執行",
         "來源": "使用者",
     }
-    sheet.append_row(build_row(headers, new_row))
+    append_record(sheet, new_row)
     # 同步 ctx 快取，讓接著呼叫的 maintain_ac_auto_schedule 看得到這筆新排程
     ctx.get("排程指令").append(new_row)
 
@@ -94,23 +93,20 @@ def handle_modify_schedule(data, user_name, ctx):
 
     old_action = target_row.get("動作", "")
 
-    headers = sheet.row_values(1)
-    col = {h: idx + 1 for idx, h in enumerate(headers)}
     sheet_row = target_idx + 2  # +1 是 header、+1 是 1-based
 
+    updates = {}
     if new_device is not None:
-        sheet.update_cell(sheet_row, col["設備名稱"], new_device)
-        target_row["設備名稱"] = new_device
+        updates["設備名稱"] = new_device
     if new_action is not None:
-        sheet.update_cell(sheet_row, col["動作"], new_action)
-        target_row["動作"] = new_action
+        updates["動作"] = new_action
     if new_params is not None:
         params_str = json.dumps(new_params, ensure_ascii=False)
-        sheet.update_cell(sheet_row, col["參數"], params_str)
-        target_row["參數"] = params_str
+        updates["參數"] = params_str
     if new_trigger is not None:
-        sheet.update_cell(sheet_row, col["觸發時間"], new_trigger)
-        target_row["觸發時間"] = new_trigger
+        updates["觸發時間"] = new_trigger
+    update_row_fields(sheet, sheet_row, updates)
+    target_row.update(updates)
 
     # AC auto 重算：原與新只要任一是 control_ac 就要重算對應裝置。
     # 跨裝置（原 客廳 → 新 主臥）兩台都要算；同台 AC 只改參數呼叫一次。
@@ -148,14 +144,13 @@ def handle_delete_schedule(data, ctx):
             continue
         indices_to_delete.append(i)
 
-    archive_headers = archive.row_values(1)
     any_user_ac_deleted = False
     for i in sorted(indices_to_delete, reverse=True):
         row = records[i]
         # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
         if row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
             any_user_ac_deleted = True
-        archive.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
+        append_record(archive, {**row, "狀態": "已取消"})
         sheet.delete_rows(i + 2)
         records.pop(i)
         deleted += 1

@@ -1,12 +1,11 @@
 from config import now_taipei
-from sheets import build_row
+from sheets import append_record, update_row_fields
 
 
 def handle_add(data, user_name, ctx):
     sheet = ctx.get_worksheet("食品庫存")
     today = now_taipei().strftime("%Y-%m-%d")
-    headers = sheet.row_values(1)
-    sheet.append_row(build_row(headers, {
+    append_record(sheet, {
         "品名": data.get("name", ""),
         "數量": data.get("quantity", 1),
         "單位": data.get("unit", ""),
@@ -14,7 +13,7 @@ def handle_add(data, user_name, ctx):
         "新增日": today,
         "新增者": user_name,
         "狀態": "有效",
-    }))
+    })
     return f"✅ 已新增 {data.get('name')}，過期日 {data.get('expiry')}"
 
 
@@ -22,10 +21,9 @@ def handle_delete(data, ctx):
     sheet = ctx.get_worksheet("食品庫存")
     archive = ctx.get_worksheet("食品封存")
     records = ctx.get("食品庫存")
-    archive_headers = archive.row_values(1)
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
-            archive.append_row(build_row(archive_headers, {**row, "狀態": "已消耗"}))
+            append_record(archive, {**row, "狀態": "已消耗"})
             sheet.delete_rows(i + 2)
             records.pop(i)
             return f"✅ 已標記 {data.get('name')} 為已消耗"
@@ -46,23 +44,24 @@ def handle_modify(data, ctx):
     sheet = ctx.get_worksheet("食品庫存")
     archive = ctx.get_worksheet("食品封存")
     records = ctx.get("食品庫存")
-    archive_headers = archive.row_values(1)
     for i, row in enumerate(records):
         if row.get("品名") == data.get("name") and row.get("狀態") == "有效":
             if data.get("quantity") is not None and int(data.get("quantity", 1)) <= 0:
-                archive.append_row(build_row(archive_headers, {**row, "狀態": "已消耗"}))
+                append_record(archive, {**row, "狀態": "已消耗"})
                 sheet.delete_rows(i + 2)
                 records.pop(i)
                 return f"✅ {data.get('name')} 已全部消耗"
-            col = {h: idx + 1 for idx, h in enumerate(sheet.row_values(1))}
+            updates = {}
             if data.get("name_new"):
-                sheet.update_cell(i + 2, col["品名"], data.get("name_new"))
+                updates["品名"] = data.get("name_new")
             if data.get("quantity") is not None:
-                sheet.update_cell(i + 2, col["數量"], int(data.get("quantity")))
+                updates["數量"] = int(data.get("quantity"))
             if data.get("unit"):
-                sheet.update_cell(i + 2, col["單位"], data.get("unit"))
+                updates["單位"] = data.get("unit")
             if data.get("expiry"):
-                sheet.update_cell(i + 2, col["過期日"], data.get("expiry"))
+                updates["過期日"] = data.get("expiry")
+            update_row_fields(sheet, i + 2, updates)
+            row.update(updates)
             return f"✅ {data.get('name')} 已更新"
     return f"❌ 找不到 {data.get('name')}"
 
