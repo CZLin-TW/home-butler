@@ -33,6 +33,7 @@ import ac_history
 import dehumidifier_auto
 import dehumidifier_driver
 import dehumidifier_history
+import status_cache
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -139,6 +140,24 @@ def _fetch_sensor_status(device_id):
     return {}
 
 
+def _cached_sensor_status(name: str, device_id: str) -> dict:
+    cached = status_cache.get(name)
+    if cached is not None:
+        return cached
+    status = _fetch_sensor_status(device_id)
+    status_cache.put(name, status)
+    return status
+
+
+def _cached_dehumidifier_status(name: str, device_row) -> dict:
+    cached = status_cache.get(name)
+    if cached is not None:
+        return cached
+    status = _fetch_dehumidifier_status(device_row)
+    status_cache.put(name, status)
+    return status
+
+
 def _fetch_dehumidifier_status(device_row):
     """查詢除濕機狀態（供平行執行），依品牌分流到 Panasonic / LG。"""
     brand = (device_row.get("品牌") or "Panasonic").strip()
@@ -204,10 +223,10 @@ def api_get_device_status(name: str = ""):
         for d in devices:
             name = d.get("名稱", "")
             if d.get("類型") == "感應器" and d.get("Device ID"):
-                future = executor.submit(_fetch_sensor_status, d["Device ID"])
+                future = executor.submit(_cached_sensor_status, name, d["Device ID"])
                 futures[future] = (name, d)
             if d.get("類型") == "除濕機" and d.get("Device ID"):
-                future = executor.submit(_fetch_dehumidifier_status, d)
+                future = executor.submit(_cached_dehumidifier_status, name, d)
                 futures[future] = (name, d)
 
         for future in as_completed(futures):

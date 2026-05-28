@@ -33,6 +33,7 @@ import gspread
 
 import dehumidifier_history
 import dehumidifier_driver
+import status_cache
 from sheets import _get_spreadsheet
 
 RULES_SHEET = "除濕機自動規則"
@@ -229,6 +230,7 @@ def evaluate_all(ctx, sensor_snapshot):
             # 記下 expected，本 tick 不做偵測（使用者確認的「第一個 tick 跳過」）。
             if actual.get("power"):
                 try:
+                    status_cache.invalidate(device_name)  # 雲端狀態即將變，清 stale
                     driver.align_continuous(rule["threshold"])
                 except Exception as e:
                     print(f"[dehum-auto] {device_name} align baseline error: {e}")
@@ -421,6 +423,7 @@ def _fire_on(device_name, rule, driver):
     """送開機 → 設成持續除濕等效模式（機器忽略自身目標濕度，threshold 只是本規則的
     判斷門檻、不下發到機器）。品牌差異收斂在 driver.fire_on()。
     任一指令真的拋 exception 才走 except；success flag 區分「呼叫到了」vs「沒生效」。"""
+    status_cache.invalidate(device_name)  # 雲端狀態即將變，先清，避免下一輪 polling 拿到 stale
     try:
         turn_on_ok, set_mode_ok = driver.fire_on(rule["threshold"])
         if turn_on_ok and set_mode_ok:
@@ -438,6 +441,7 @@ def _fire_on(device_name, rule, driver):
 
 
 def _fire_off(device_name, driver):
+    status_cache.invalidate(device_name)  # 同 _fire_on：清 stale cache
     try:
         driver.fire_off()
         print(f"[dehum-auto] FIRE OFF {device_name}")
