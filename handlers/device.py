@@ -8,7 +8,6 @@ import panasonic_api
 import lg_api
 import weather_api
 import dehumidifier_auto
-import status_cache
 
 # 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
 # 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
@@ -429,12 +428,6 @@ def handle_control_dehumidifier(data, ctx, _internal=False):
     power = data.get("power", "")
     mode = data.get("mode", "")
     humidity = data.get("humidity", "")
-
-    # Invalidate status cache：下次 Dashboard polling 不吃 stale 值、強制 refetch
-    # 拿到雲端最新狀態（Dashboard 樂觀更新看「matched」的 readback 因此更快到位）。
-    # 放在 send command 之前 invalidate 比之後好：若 control 中途 raise，cache 已清，
-    # 不會留下「下一輪 polling 還是 stale」的狀況。
-    status_cache.invalidate(device_name)
 
     if _dehumidifier_brand(row) == "LG":
         return _control_dehumidifier_lg(row, device_name, power, mode, humidity)

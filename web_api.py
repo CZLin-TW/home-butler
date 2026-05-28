@@ -33,7 +33,6 @@ import ac_history
 import dehumidifier_auto
 import dehumidifier_driver
 import dehumidifier_history
-import status_cache
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -140,33 +139,6 @@ def _fetch_sensor_status(device_id):
     return {}
 
 
-def _cached_sensor_status(name: str, device_id: str, *, bypass_cache: bool = False) -> dict:
-    """bypass_cache=True 跳過 cache 讀寫直接打雲端，給命令送出後的樂觀 polling 用，
-    避免「invalidate → 雲端 sync 前的 stale value 被鎖 15s」的問題。"""
-    if not bypass_cache:
-        cached = status_cache.get(name)
-        if cached is not None:
-            return cached
-    status = _fetch_sensor_status(device_id)
-    if not bypass_cache:
-        status_cache.put(name, status)
-    return status
-
-
-def _cached_dehumidifier_status(name: str, device_row, *, bypass_cache: bool = False) -> dict:
-    """bypass_cache=True 跳過 cache 讀寫直接打雲端，給命令送出後的樂觀 polling 用。
-    invalidate 後第一次 fetch 拿到的常是雲端 stale（命令還沒 sync），cache.put 把
-    stale 鎖 15s 會讓 UI 整段 polling 都拿不到 fresh — 樂觀 polling 直接繞過。"""
-    if not bypass_cache:
-        cached = status_cache.get(name)
-        if cached is not None:
-            return cached
-    status = _fetch_dehumidifier_status(device_row)
-    if not bypass_cache:
-        status_cache.put(name, status)
-    return status
-
-
 def _fetch_dehumidifier_status(device_row):
     """查詢除濕機狀態（供平行執行）。品牌分流（含 status → fields 正規化）
     交給 dehumidifier_driver，未來加品牌只動 driver、不動 web_api。"""
@@ -204,14 +176,12 @@ def api_get_devices():
 
 
 @router.get("/devices/status")
-def api_get_device_status(name: str = "", nocache: bool = False):
+def api_get_device_status(name: str = ""):
     """查詢感測器/除濕機即時狀態，回傳 {裝置名稱: 狀態}。
 
     - 無 `name` query：所有啟用裝置並行查（給 Dashboard 60s 全局 polling 用）
     - 帶 `name=X` query：只查該裝置，避開 ThreadPoolExecutor 的 max(all latency)
       行為（給命令送出後樂觀更新 polling 用，不被其他雲端慢的裝置拖累）。
-    - 帶 `nocache=1`：跳過 status_cache 直接打雲端，給樂觀 polling 用 — 避免
-      invalidate 後雲端 stale 被鎖 15s 的失效模式。
     """
     ctx = RequestContext()
     ctx.load()
@@ -226,10 +196,10 @@ def api_get_device_status(name: str = "", nocache: bool = False):
         for d in devices:
             name = d.get("名稱", "")
             if d.get("類型") == "感應器" and d.get("Device ID"):
-                future = executor.submit(_cached_sensor_status, name, d["Device ID"], bypass_cache=nocache)
+                future = executor.submit(_fetch_sensor_status, d["Device ID"])
                 futures[future] = (name, d)
             if d.get("類型") == "除濕機" and d.get("Device ID"):
-                future = executor.submit(_cached_dehumidifier_status, name, d, bypass_cache=nocache)
+                future = executor.submit(_fetch_dehumidifier_status, d)
                 futures[future] = (name, d)
 
         for future in as_completed(futures):
