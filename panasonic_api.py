@@ -298,18 +298,15 @@ def dehumidifier_turn_on(device_auth: str, gwid: str) -> dict:
 def dehumidifier_turn_off(device_auth: str, gwid: str) -> dict:
     return set_dehumidifier_command(device_auth, gwid, "0x00", 0)
 
-# 模式
+# 模式：本機型支援的 5 個（LINE bot 也只接受這些）。其他 Panasonic 機型的模式
+# （自動除濕 / 送風 / 省電 / 快速除濕 / 靜音除濕）不收 set 指令，但 readback
+# 時還是會 fallback 到 MODE_DISPLAY 顯示（萬一遙控器轉到那邊去）。
 DEHUMIDIFIER_MODE_MAP = {
     "連續除濕": 0, "continuous": 0,
-    "自動除濕": 1, "auto": 1,
-    "防黴": 2, "anti-mildew": 2,
-    "送風": 3, "fan": 3,
+    "防霉抑菌": 2, "anti-mildew": 2,
     "目標濕度": 6, "target": 6,
     "空氣清淨": 7, "purify": 7,
     "AI舒適": 8, "ai舒適": 8,
-    "省電": 9, "eco": 9,
-    "快速除濕": 10, "quick": 10,
-    "靜音除濕": 11, "silent": 11,
 }
 
 def dehumidifier_set_mode(device_auth: str, gwid: str, mode_str: str) -> dict:
@@ -333,7 +330,7 @@ def dehumidifier_set_humidity(device_auth: str, gwid: str, humidity: int) -> dic
 
 POWER_MAP = {"0": "關閉", "1": "開啟"}
 MODE_DISPLAY = {
-    "0": "連續除濕", "1": "自動除濕", "2": "防黴", "3": "送風",
+    "0": "連續除濕", "1": "自動除濕", "2": "防霉抑菌", "3": "送風",
     "4": "ECONAVI", "5": "保乾", "6": "目標濕度", "7": "空氣清淨",
     "8": "AI舒適", "9": "省電", "10": "快速除濕", "11": "靜音除濕", "12": "鞋類乾燥",
 }

@@ -32,7 +32,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。未指定溫度時：heat 預設 24 度，其餘預設 27 度
 - query_sensor：device_name
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）
-- control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/自動除濕/防黴/送風/目標濕度/空氣清淨/AI舒適/省電/快速除濕/靜音除濕), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
+- control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/防霉抑菌/目標濕度/空氣清淨/AI舒適), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
 - query_dehumidifier：device_name
 - query_devices：無參數
 - query_weather：選填 date(YYYY-MM-DD,最多未來7天,預設今天), location(完整地名如「雲林縣莿桐鄉」,預設竹北市)。回應會同時包含「當下觀測值」（若地點有對應測站）跟「當日預報」，使用者問「現在/目前」類問題優先用觀測值，問「明天/週末」類未來問題用預報
