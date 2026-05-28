@@ -11,6 +11,8 @@ LG ThinQ Connect API 封裝模組（thinq.dev 官方 API）
 
 import base64
 import os
+import threading
+import time
 import uuid
 
 import httpx
@@ -69,6 +71,34 @@ def probe_regions():
 
 _client = httpx.Client(timeout=REQUEST_TIMEOUT)
 
+# 熔斷器：LG ThinQ 雲端意外掛掉 / PAT 過期 / rate limit 時，連續 N 次失敗就冷卻
+# M 秒 fast-fail。比 Panasonic 版單純（LG 無 token race，純粹防雲端 outage hammer），
+# 也讓 /devices/status endpoint 在 LG 雲端意外時不會卡住其他裝置。
+_failures = 0
+_open_until = 0.0
+_failures_lock = threading.Lock()
+FAILURE_THRESHOLD = 3
+COOLDOWN_SEC = 300
+
+
+def _circuit_open() -> bool:
+    return time.time() < _open_until
+
+
+def _record_result(ok: bool) -> None:
+    global _failures, _open_until
+    with _failures_lock:
+        if ok:
+            _failures = 0
+            return
+        _failures += 1
+        if _failures >= FAILURE_THRESHOLD:
+            _open_until = time.time() + COOLDOWN_SEC
+            print(
+                f"[LG] circuit OPEN for {COOLDOWN_SEC}s "
+                f"after {_failures} consecutive failures"
+            )
+
 
 def _message_id() -> str:
     """ThinQ 要求每個 request 帶唯一 x-message-id（22 字 base64url、無 padding）。"""
@@ -89,23 +119,33 @@ def _headers() -> dict:
 
 
 def _request(method: str, path: str, json_body: dict | None = None):
-    """打 ThinQ Connect，回傳 response payload 或 {"error": ...}。"""
+    """打 ThinQ Connect，回傳 response payload 或 {"error": ...}。
+    熔斷開啟時 fast-fail 不打雲端，避免在 LG outage 期間拖累整個 /devices/status。"""
     if not LG_PAT:
         return {"error": "LG_PAT 未設定（請在 Render 環境變數填入 thinq.dev 產生的 PAT）"}
+    if _circuit_open():
+        return {"error": "LG ThinQ 服務暫時不可用（連續失敗冷卻中）"}
+
     url = f"{_endpoint()}{path}"
     try:
         resp = _client.request(method, url, headers=_headers(), json=json_body)
     except Exception as e:
+        _record_result(False)
         return {"error": f"LG ThinQ 連線失敗：{e}"}
     try:
         data = resp.json()
     except Exception:
+        _record_result(False)
         return {"error": f"LG ThinQ 回應非 JSON（HTTP {resp.status_code}）：{resp.text[:200]}"}
     if resp.status_code != 200:
+        _record_result(False)
         err = data.get("error", data) if isinstance(data, dict) else data
         return {"error": f"LG ThinQ HTTP {resp.status_code}：{err}"}
     if isinstance(data, dict) and "error" in data and data["error"]:
+        _record_result(False)
         return {"error": data["error"]}
+
+    _record_result(True)
     # ThinQ 把實際資料包在 response 底下
     if isinstance(data, dict) and "response" in data:
         return data["response"]
