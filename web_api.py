@@ -313,8 +313,13 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
                 device_row = d
                 break
 
-        if req.sensor_name:
-            sensor = sensor_state.snapshot().get(req.sensor_name, {})
+        # sensor_name fallback：前端 toggle ON 時通常只送 {device_name, auto_mode}，
+        # 不重送 sensor_name；得從既有規則撈回來，否則拉不到濕度→無法依門檻立即 fire。
+        effective_sensor_name = req.sensor_name or dehumidifier_auto.get_all_rules().get(
+            req.device_name, {}
+        ).get("sensor_name", "")
+        if effective_sensor_name:
+            sensor = sensor_state.snapshot().get(effective_sensor_name, {})
             if sensor.get("online", False):
                 sensor_humidity = sensor.get("current", {}).get("humidity")
 
