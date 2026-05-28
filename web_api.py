@@ -184,12 +184,18 @@ def api_get_devices():
 
 
 @router.get("/devices/status")
-def api_get_device_status():
+def api_get_device_status(name: str = ""):
     """查詢感測器/除濕機即時狀態，回傳 {裝置名稱: 狀態}。
-    前端在裝置清單載入後非同步呼叫此 endpoint 補齊即時數值。"""
+
+    - 無 `name` query：所有啟用裝置並行查（給 Dashboard 60s 全局 polling 用）
+    - 帶 `name=X` query：只查該裝置，避開 ThreadPoolExecutor 的 max(all latency)
+      行為（給命令送出後樂觀更新 polling 用，不被其他雲端慢的裝置拖累）。
+    """
     ctx = RequestContext()
     ctx.load()
     devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
+    if name:
+        devices = [d for d in devices if d.get("名稱") == name]
 
     status_map = {}
     futures = {}
