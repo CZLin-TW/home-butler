@@ -159,24 +159,16 @@ def _cached_dehumidifier_status(name: str, device_row) -> dict:
 
 
 def _fetch_dehumidifier_status(device_row):
-    """查詢除濕機狀態（供平行執行），依品牌分流到 Panasonic / LG。"""
-    brand = (device_row.get("品牌") or "Panasonic").strip()
-    device_id = device_row.get("Device ID", "")
+    """查詢除濕機狀態（供平行執行）。品牌分流（含 status → fields 正規化）
+    交給 dehumidifier_driver，未來加品牌只動 driver、不動 web_api。"""
+    driver = dehumidifier_driver.make_driver(device_row)
+    if driver is None:
+        return {}
     try:
-        if brand == "LG":
-            fields = lg_api.dehumidifier_status_fields(lg_api.get_dehumidifier_status(device_id))
-            return fields or {}
-        auth = device_row.get("Auth", "")
-        status = panasonic_api.get_dehumidifier_status(auth, device_id)
-        if "error" not in status:
-            return {
-                "power": status.get("0x00") == "1",
-                "mode": panasonic_api.MODE_DISPLAY.get(str(status.get("0x01", "")), ""),
-                "targetHumidity": panasonic_api.HUMIDITY_DISPLAY.get(str(status.get("0x04", "")), ""),
-            }
+        return driver.status_fields(driver.get_status())
     except Exception as e:
         print(f"[WEB API] Dehumidifier error: {e}")
-    return {}
+        return {}
 
 
 @router.get("/devices")
