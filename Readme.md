@@ -786,6 +786,7 @@ function sendRealtimeNotification() {
 
 - **Google Sheets 批次讀取**：RequestContext 使用 values_batch_get 一次讀取所有分頁，取代原本多次個別 API 呼叫
 - **Google Sheets 快取**：get_sheet() 快取已認證的 spreadsheet 物件 60 秒，避免每次都重新 OAuth
+- **Google Sheets 集中寫入**：新增資料統一走 `append_record()`，多欄位修改統一走 `update_row_fields()` 的 batch update，減少 API 呼叫也避免欄位位置散落在 handler 裡
 - **背景寫入**：save_conversation（對話暫存）在背景 thread 執行
 - **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
 - **精簡 SYSTEM_PROMPT**：減少 token 數，加速 Claude 回應
@@ -803,7 +804,7 @@ function sendRealtimeNotification() {
 | main.py | FastAPI 主程式（LINE Webhook、啟動 polling thread、SwitchBot debug 端點）。訊息處理委派給 `assistant.py` |
 | assistant.py | 自然語言處理核心：`process_message`（Claude 解析 → action 分派 → 組句）與 action 路由表。LINE webhook 與 `/api/assistant`（Siri）共用，避免邏輯複製兩份 |
 | config.py | 環境變數、LINE/Claude 初始化、時區設定 |
-| sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取） |
+| sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取、append_record / update_row_fields 集中寫入） |
 | prompt.py | SYSTEM_PROMPT 與 Claude 提示詞組裝 |
 | conversation.py | 對話暫存管理、Claude API 呼叫、推播訊息生成 |
 | notify.py | 推播端點（/notify 晚間綜合推播、/notify_realtime 即時提醒與排程執行） |
@@ -841,6 +842,8 @@ function sendRealtimeNotification() {
 3. 在 handlers/ 目錄加入對應的 handle 函數
 4. 在 assistant.py 的 `ACTION_HANDLERS` 註冊新的 action 路由（query 類另需視情況加進 `SEMANTIC_ACTIONS` / `REALTIME_ACTIONS`）
 5. 如需推播，更新 notify.py 的推播邏輯
+
+**修改 Google Sheets 寫入**：新增列請用 `sheets.append_record()`；同一列多欄位修改請用 `sheets.update_row_fields()`，不要在 handler 裡分散呼叫多次 `update_cell()`。欄位名稱應集中放在該分頁的 header 對照，避免日後調整欄位順序時要到多個 handler 找行號與欄位號。
 
 **新增 SwitchBot 設備**：
 1. 在 SwitchBot App 新增設備
