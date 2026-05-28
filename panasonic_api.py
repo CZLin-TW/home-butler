@@ -9,6 +9,7 @@ import httpx
 import os
 import json
 import threading
+import time
 
 BASE_URL = "https://ems2.panasonic.com.tw/api"
 APP_TOKEN = "D8CBFF4C-2824-4342-B22D-189166FEF503"
@@ -25,10 +26,39 @@ _client = httpx.Client(
     timeout=REQUEST_TIMEOUT,
 )
 
-# Token 快取（服務運行期間保持登入狀態）
+# Token 快取（服務運行期間保持登入狀態）。
+# 同一個 lock 同時保護 token 跟認證熔斷狀態。
 _cp_token = None
 _refresh_token = None
 _token_lock = threading.Lock()
+
+# 認證熔斷器：多台 Panasonic 並發時 token 會 race（兩 thread 同時 417 → 各自 refresh
+# → 雲端 rotate token 互相 invalidate → 雪崩）。Panasonic 雲端對短時間連續 refresh
+# 會觸發風控（refresh / login 全 timeout、回空 body）。連續 N 次 auth 失敗就冷卻 M 秒
+# fast-fail，等雲端風控自然解除。
+_auth_failures = 0
+_auth_open_until = 0.0
+AUTH_FAILURE_THRESHOLD = 3
+AUTH_COOLDOWN_SEC = 300
+
+
+def _circuit_open() -> bool:
+    return time.time() < _auth_open_until
+
+
+def _record_auth_result(ok: bool) -> None:
+    """在 _token_lock 內呼叫。"""
+    global _auth_failures, _auth_open_until
+    if ok:
+        _auth_failures = 0
+        return
+    _auth_failures += 1
+    if _auth_failures >= AUTH_FAILURE_THRESHOLD:
+        _auth_open_until = time.time() + AUTH_COOLDOWN_SEC
+        print(
+            f"[PANASONIC] auth circuit OPEN for {AUTH_COOLDOWN_SEC}s "
+            f"after {_auth_failures} consecutive failures"
+        )
 
 
 def _headers(extra: dict | None = None) -> dict:
@@ -79,32 +109,51 @@ def _do_token_refresh() -> bool:
 
 
 def _ensure_token() -> bool:
-    """確保 token 存在，沒有就登入"""
-    if _cp_token is None:
-        with _token_lock:
-            if _cp_token is None:  # double-check after acquiring lock
-                return _login()
-    return True
-
-
-def _renew_token() -> str:
-    """refresh 或重新登入，回傳新 token"""
+    """確保 token 存在，沒有就登入。熔斷開啟時 fast-fail。"""
+    if _cp_token is not None:
+        return True
     with _token_lock:
-        if not _do_token_refresh():
-            _login()
-        return _cp_token
+        if _cp_token is not None:  # double-check after acquiring lock
+            return True
+        if _circuit_open():
+            return False
+        ok = _login()
+        _record_auth_result(ok)
+        return ok
+
+
+def _renew_token(stale_token: str | None = None) -> str | None:
+    """refresh + fallback login，回傳新 token；失敗或熔斷時回 None。
+
+    stale_token: caller 本次 request 用的 token。進 lock 後若 _cp_token 已不等於
+    stale_token，表示已被其他 thread refresh 過 — 直接吃白食、不再 refresh，避免
+    thundering herd 把 Panasonic 雲端打爆（雲端會 rotate token、互相 invalidate）。
+    """
+    with _token_lock:
+        if stale_token is not None and _cp_token is not None and _cp_token != stale_token:
+            return _cp_token
+        if _circuit_open():
+            return None
+        ok = _do_token_refresh() or _login()
+        _record_auth_result(ok)
+        return _cp_token if ok else None
 
 
 def _request_with_retry(method: str, url: str, **kwargs):
-    """發送請求，token 過期自動重試一次，空 response 重新登入後重試，網路錯誤亦重試一次"""
+    """發送請求，token 過期自動 refresh 重試一次。熔斷開啟或 renew 失敗時直接
+    return None，不再無限 hammer Panasonic 雲端。"""
     if not _ensure_token():
         return None
 
     for attempt in range(2):
+        if _circuit_open():
+            return None
+        # 記下本次用的 token，作為 stale_token 傳給 _renew_token 比對，
+        # 避免多 thread 同時 417 各自 refresh 把 token 互相 rotate 失效。
+        used_token = _cp_token
         try:
-            # 每次用最新的 token 建 header
             if "headers" in kwargs:
-                kwargs["headers"]["cptoken"] = _cp_token
+                kwargs["headers"]["cptoken"] = used_token
             resp = _client.request(method, url, **kwargs)
 
             # Token 過期（417 狀態碼）：統一嘗試 refresh 後重試
@@ -115,7 +164,8 @@ def _request_with_retry(method: str, url: str, **kwargs):
                     except Exception:
                         state_msg = "(empty body)"
                     print(f"[PANASONIC] 417 token error: {state_msg}, refreshing...")
-                    _renew_token()
+                    if _renew_token(stale_token=used_token) is None:
+                        return None
                     continue
                 else:
                     print(f"[PANASONIC] 417 persists after token refresh")
@@ -126,7 +176,8 @@ def _request_with_retry(method: str, url: str, **kwargs):
                     # 空 response 可能是 token 失效，重新登入後重試
                     if attempt == 0:
                         print(f"[PANASONIC] Empty response, re-login and retry...")
-                        _renew_token()
+                        if _renew_token(stale_token=used_token) is None:
+                            return None
                         continue
                     print(f"[PANASONIC] Empty response persists after retry")
                     return None
@@ -138,7 +189,8 @@ def _request_with_retry(method: str, url: str, **kwargs):
         except Exception as e:
             if attempt == 0:
                 print(f"[PANASONIC] Request error (will retry): {e}")
-                _renew_token()
+                if _renew_token(stale_token=used_token) is None:
+                    return None
                 continue
             print(f"[PANASONIC] Request error (gave up): {e}")
             return None
