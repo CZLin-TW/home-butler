@@ -31,6 +31,7 @@ import pc_state
 import sensor_state
 import ac_history
 import dehumidifier_auto
+import dehumidifier_auto_service
 import dehumidifier_driver
 import dehumidifier_history
 
@@ -296,52 +297,18 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
 
     auto_mode=False → True 且 sensor + 設備資訊都備齊時，set_rule 內會立即
     依「對稱單一門檻」規則 fire ON 或 OFF。"""
-    sensor_humidity = None
-    power_now = None
-    driver = None
-
-    if req.auto_mode:
-        ctx = RequestContext()
-        ctx.load()
-        device_row = None
-        for d in ctx.get("智能居家"):
-            if (d.get("狀態") == "啟用"
-                    and d.get("名稱") == req.device_name
-                    and d.get("類型") == "除濕機"):
-                device_row = d
-                break
-
-        # sensor_name fallback：前端 toggle ON 時通常只送 {device_name, auto_mode}，
-        # 不重送 sensor_name；得從既有規則撈回來，否則拉不到濕度→無法依門檻立即 fire。
-        effective_sensor_name = req.sensor_name or dehumidifier_auto.get_all_rules().get(
-            req.device_name, {}
-        ).get("sensor_name", "")
-        if effective_sensor_name:
-            sensor = sensor_state.snapshot().get(effective_sensor_name, {})
-            if sensor.get("online", False):
-                sensor_humidity = sensor.get("current", {}).get("humidity")
-
-        if device_row is not None:
-            driver = dehumidifier_driver.make_driver(device_row)
-            if driver is not None:
-                try:
-                    status = driver.get_status()
-                    if isinstance(status, dict) and "error" not in status:
-                        power_now = driver.is_power_on(status)
-                except Exception as e:
-                    print(f"[dehum-auto API] status fetch error: {e}")
-
-    return dehumidifier_auto.set_rule(
-        device_name=req.device_name,
-        auto_mode=req.auto_mode,
+    ctx = RequestContext()
+    ctx.load()
+    result = dehumidifier_auto_service.set_auto_rule(
+        ctx,
+        req.device_name,
+        req.auto_mode,
         sensor_name=req.sensor_name,
         duration_min=req.duration_min,
         threshold=req.threshold,
         on_mode=req.on_mode,
-        sensor_humidity=sensor_humidity,
-        power_now=power_now,
-        driver=driver,
     )
+    return result["rule"]
 
 
 @router.get("/devices/sensor")

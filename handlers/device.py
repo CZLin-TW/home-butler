@@ -8,6 +8,8 @@ import panasonic_api
 import lg_api
 import weather_api
 import dehumidifier_auto
+import dehumidifier_auto_service
+import sensor_state
 
 # 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
 # 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
@@ -130,6 +132,26 @@ def _parse_int_safe(value):
             return int(float(value))
         except (ValueError, TypeError):
             return 0
+
+
+def _parse_optional_int(value):
+    """Parse an int from optional action data; returns None if omitted."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
+
+
+def _parse_auto_mode(value):
+    if value is None or value == "":
+        return True
+    text = str(value).strip().lower()
+    return text not in ("off", "false", "0", "no", "關", "關閉", "停用", "取消")
 
 
 def _is_ac_off_action(schedule_row):
@@ -340,6 +362,81 @@ def handle_query_devices(ctx):
         return f"• {r['名稱']}（{r['類型']}，{r.get('位置', '未設定')}{control_part}）"
     lines = [_device_line(r) for r in valid]
     return "已設定的設備：\n" + "\n".join(lines)
+
+
+def handle_set_dehumidifier_auto(data, ctx):
+    """Configure sensor-driven dehumidifier auto mode from LINE/Siri actions."""
+    auto_mode = _parse_auto_mode(data.get("auto_mode", data.get("enabled", True)))
+    threshold = _parse_optional_int(
+        data.get("threshold", data.get("humidity", data.get("target_humidity")))
+    )
+    duration_min = _parse_optional_int(data.get("duration_min"))
+    sensor_name = data.get("sensor_name", "")
+    targets, error = dehumidifier_auto_service.resolve_dehumidifier_targets(
+        ctx,
+        device_name=data.get("device_name", ""),
+        scope=data.get("scope", "single"),
+    )
+    if error:
+        return error
+
+    if auto_mode and threshold is not None and not 30 <= threshold <= 80:
+        return "❌ 自動除濕目標濕度需介於 30%～80%"
+    if duration_min is not None and duration_min <= 0:
+        return "❌ 自動除濕持續時間必須大於 0 分鐘"
+
+    snapshot = sensor_state.snapshot()
+    successes = []
+    failures = []
+    for device in targets:
+        device_name = device.get("名稱", "")
+        if not device_name:
+            continue
+
+        if not auto_mode:
+            dehumidifier_auto_service.set_auto_rule(ctx, device_name, False)
+            successes.append(f"✅ {device_name} 已關閉自動除濕模式")
+            continue
+
+        if not dehumidifier_auto_service.has_control_driver(device):
+            failures.append(f"⚠️ {device_name} 未啟用：缺少品牌控制資訊或 Device ID/Auth")
+            continue
+
+        sensor, sensor_error = dehumidifier_auto_service.choose_sensor_for_dehumidifier(
+            ctx, device, sensor_name=sensor_name, snapshot=snapshot
+        )
+        if sensor_error:
+            failures.append(f"⚠️ {sensor_error}")
+            continue
+
+        result = dehumidifier_auto_service.set_auto_rule(
+            ctx,
+            device_name,
+            True,
+            sensor_name=sensor["name"],
+            duration_min=duration_min,
+            threshold=threshold,
+            snapshot=snapshot,
+        )
+        rule = result["rule"]
+        line = (
+            f"✅ {device_name} 已開啟自動除濕模式，目標 {rule['threshold']}%，"
+            f"使用 {sensor['name']}，持續 {rule['duration_min']} 分鐘"
+        )
+        if sensor["humidity"] is not None:
+            line += f"，目前濕度 {sensor['humidity']}%"
+        elif not sensor["online"]:
+            line += "；感測器目前沒有即時濕度，會等下一次回報後開始判斷"
+        successes.append(line)
+
+    lines = list(successes)
+    if failures:
+        lines.extend(failures)
+    if lines:
+        if failures and not successes:
+            return "❌ 自動除濕模式未設定：\n" + "\n".join(failures)
+        return "\n".join(lines)
+    return "❌ 自動除濕模式未設定"
 
 
 def _resolve_dehumidifier(device_name, ctx):

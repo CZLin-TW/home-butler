@@ -15,7 +15,8 @@ from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo, handle_query_todo
 from handlers.device import (
     handle_control_ac, handle_control_ir, handle_query_sensor,
-    handle_query_devices, handle_control_dehumidifier, handle_query_dehumidifier, handle_query_weather,
+    handle_query_devices, handle_control_dehumidifier, handle_query_dehumidifier,
+    handle_set_dehumidifier_auto, handle_query_weather,
 )
 from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from handlers.style import handle_set_style
@@ -38,6 +39,7 @@ ACTION_HANDLERS = {
     "query_sensor":         lambda d, u, c: handle_query_sensor(d, c),
     "control_dehumidifier": lambda d, u, c: handle_control_dehumidifier(d, c),
     "query_dehumidifier":   lambda d, u, c: handle_query_dehumidifier(d, c),
+    "set_dehumidifier_auto": lambda d, u, c: handle_set_dehumidifier_auto(d, c),
     "query_devices":        lambda d, u, c: handle_query_devices(c),
     "query_weather":        lambda d, u, c: handle_query_weather(d),
     "add_schedule":         lambda d, u, c: handle_add_schedule(d, u, c),
@@ -53,7 +55,7 @@ ACTION_HANDLERS = {
 # - REALTIME：直接回 raw 結果，避免 Claude 重新組句把即時資訊改寫掉
 # 沒列在這兩組的 action 是純寫入，reply 走 Claude 第一輪生成的 claude_reply。
 SEMANTIC_ACTIONS = {"query_weather", "query_sensor", "query_food", "query_todo"}
-REALTIME_ACTIONS = {"query_devices", "query_dehumidifier", "query_schedule"}
+REALTIME_ACTIONS = {"query_devices", "query_dehumidifier", "set_dehumidifier_auto", "query_schedule"}
 
 
 def process_message(user_id, text, user_name, ctx):

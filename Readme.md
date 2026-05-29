@@ -638,6 +638,7 @@ function sendRealtimeNotification() {
 | query_devices | 列出所有已設定設備 | 無 |
 | control_dehumidifier | 控制除濕機 | device_name，選填：power, mode, humidity |
 | query_dehumidifier | 查詢除濕機狀態 | device_name |
+| set_dehumidifier_auto | 設定 sensor 條件式自動除濕模式；可說「主臥除濕機開自動，目標55%」或「全家除濕機都開自動模式，目標55%」。未指定 sensor 時依除濕機位置配對同位置感應器，沒有同位置感應器會回報 | device_name 或 scope=all, auto_mode(on/off), threshold，選填：duration_min, sensor_name |
 
 ### 天氣
 

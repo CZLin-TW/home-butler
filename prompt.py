@@ -34,6 +34,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/防霉抑菌/目標濕度/空氣清淨/AI舒適), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
 - query_dehumidifier：device_name
+- set_dehumidifier_auto：設定除濕機的外部 sensor 自動除濕模式。device_name(單台時填設備名稱；全家/全部時可省略), scope(single/all), auto_mode(on/off), threshold(目標濕度整數，如55), 選填 duration_min, sensor_name。sensor_name 未指定時系統會依除濕機位置自動配對同位置感應器
 - query_devices：無參數
 - query_weather：選填 date(YYYY-MM-DD,最多未來7天,預設今天), location(完整地名如「雲林縣莿桐鄉」,預設竹北市)。回應會同時包含「當下觀測值」（若地點有對應測站）跟「當日預報」，使用者問「現在/目前」類問題優先用觀測值，問「明天/週末」類未來問題用預報
 - add_schedule：device_name, target_action(control_ac/control_ir/control_dehumidifier), params(與原 action 參數相同), trigger_time(YYYY-MM-DD HH:MM，根據現在時間自行計算)
@@ -55,6 +56,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - set_style 改寫成正向具體指令；語意不完整時用 unclear 反問
 - IR 設備無狀態回饋，開/關是 toggle，重複送會反轉。僅使用者明確要求時才送 control_ir
 - control_ac 開啟時，reply 必須告知實際溫度設定（含預設值）
+- 使用者說「自動除濕/自動除溼模式」「全家除濕機自動模式」「目標55%」時用 set_dehumidifier_auto，不要用 control_dehumidifier。目標濕度填 threshold，不是除濕機本體 humidity。使用者說「全家/全部/所有除濕機」時 scope=all
 
 排程規則：
 - 即時指令用原 action，未來指令用 add_schedule
@@ -67,6 +69,8 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 {{"actions": [{{"action": "modify_todo", "item": "剪頭髮", "date": "2026-04-10", "time": "20:00"}}], "reply": "好，剪頭髮改到 4/10 晚上 8 點 ✂️"}}
 {{"actions": [{{"action": "modify_schedule", "device_name": "客廳空調", "trigger_time": "2026-03-19 22:30", "device_name_new": "電風扇", "target_action_new": "control_ir", "params_new": {{"button": "開"}}, "trigger_time_new": "2026-03-19 22:30"}}], "reply": "好，把那筆改成 22:30 開電風扇 🌀"}}
 {{"actions": [{{"action": "control_ac", "device_name": "客廳空調", "power": "on", "temperature": 26}}, {{"action": "control_ir", "device_name": "電風扇", "button": "開"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"temperature": 27}}, "trigger_time": "2026-03-19 22:30"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"power": "off"}}, "trigger_time": "2026-03-20 08:00"}}, {{"action": "add_schedule", "device_name": "電風扇", "target_action": "control_ir", "params": {{"button": "關"}}, "trigger_time": "2026-03-20 08:00"}}], "reply": "好的，空調已開 26 度，電風扇已開 🌀\\n⏰ 排程已設定：\\n• 22:30 空調調 27 度\\n• 明早 8:00 空調和電風扇一起關"}}
+{{"actions": [{{"action": "set_dehumidifier_auto", "device_name": "主臥除濕機", "scope": "single", "auto_mode": "on", "threshold": 55}}], "reply": "好的，主臥除濕機會用同位置感應器開啟自動除濕模式，目標 55%。"}}
+{{"actions": [{{"action": "set_dehumidifier_auto", "scope": "all", "auto_mode": "on", "threshold": 55}}], "reply": "好的，會替全家除濕機開啟自動除濕模式，目標 55%。"}}
 {{"actions": [{{"action": "unclear", "message": "請問是哪個品項？"}}], "reply": "請問是哪個品項？"}}
 {{"actions": [], "reply": "了解，有需要再跟我說 😊"}}
 """
