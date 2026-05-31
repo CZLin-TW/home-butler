@@ -59,6 +59,64 @@ GPU_MODEL = "GTX-1650S"
 
 > 路徑要對應你裝的版本：python.org 下載的 installer 在「Customize installation → Install for all users」會裝到 `C:\Program Files\Python3XX\`。
 
+---
+
+## Philips Hue Bridge 測試工具
+
+`hue_probe.py` 是 Hue 燈光通知整合的第一步，只負責確認這台 PC 能在區網內控制 Hue Bridge。先跑通這個，再把 Hue 通知接進正式 agent / home-butler。
+
+### 1. 建立 Hue application key
+
+先按一下 Hue Bridge 上的實體按鈕，30 秒內執行：
+
+```powershell
+cd C:\butler-agent\repo\agent
+& "C:\Program Files\Python314\python.exe" hue_probe.py --bridge-ip 192.168.x.x auth
+```
+
+成功後會印出要加進 `agent_config.py` 的設定：
+
+```python
+HUE_BRIDGE_IP = "192.168.x.x"
+HUE_APPLICATION_KEY = "..."
+HUE_CLIENT_KEY = "..."
+```
+
+其中 `HUE_APPLICATION_KEY` 是 Hue API v2 後續呼叫用的 key；`HUE_CLIENT_KEY` 先留著，通知場景/呼吸燈不一定會用到。
+
+### 2. 列出 Hue 資源
+
+```powershell
+& "C:\Program Files\Python314\python.exe" hue_probe.py list
+```
+
+會列出 `light`、`grouped_light`、`room`、`zone`、`scene` 的名稱與 ID。之後通知通常會用：
+
+- `scene id`：呼叫 Hue App 裡設定好的場景
+- `grouped_light id`：對整個房間或區域觸發 breathe
+
+### 3. 測試呼吸燈 / 場景
+
+對某個房間或區域觸發 Hue 內建 breathe alert：
+
+```powershell
+& "C:\Program Files\Python314\python.exe" hue_probe.py breathe <grouped_light_id>
+```
+
+呼叫 Hue App 內已建立的場景：
+
+```powershell
+& "C:\Program Files\Python314\python.exe" hue_probe.py scene <scene_id>
+```
+
+如果要啟動動態場景，可試：
+
+```powershell
+& "C:\Program Files\Python314\python.exe" hue_probe.py scene <scene_id> --action dynamic_palette
+```
+
+注意：Hue Bridge API 是區網 API，這些指令必須在跟 Bridge 同網段的 PC 上跑。Render 上的 home-butler 不能直接連到家裡的 Bridge。
+
 ### 4. 設置 LibreHardwareMonitor
 
 CPU 溫度在 Windows 上純 Python 讀不到，要靠 LHM 跑著 + 開 web server 當 sensor bridge：
