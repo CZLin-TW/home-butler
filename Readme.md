@@ -203,12 +203,13 @@ git push
 - 已消耗的食品自動移至此分頁，Claude 不會讀取
 
 **待辦事項**
-| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 |
-|------|------|------|--------|------|------|------|------|
+| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 | 燈光提醒 |
+|------|------|------|--------|------|------|------|------|----------|
 - 狀態值：待辦 / 已完成
 - 類型值：公開 / 私人
 - 來源值：本地 / Notion（程式自動填入，本地新增的待辦填「本地」，外部行事曆同步的填來源名稱）
 - 屬性值：讀寫 / 唯讀（本地項目為「讀寫」，外部項目依成員的權限設定填入）
+- 燈光提醒：TRUE/FALSE。只有有「時間」且已到期、狀態仍為待辦時，PC agent 會每分鐘觸發 Hue breathe 一次，直到該待辦完成
 
 **待辦封存**
 | 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 |
@@ -541,6 +542,7 @@ function sendRealtimeNotification() {
 | /api/todos | POST | 新增待辦事項 |
 | /api/todos | PATCH | 修改待辦事項 |
 | /api/todos | DELETE | 完成（刪除）待辦事項 |
+| /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦，給 PC agent 每分鐘觸發 Hue breathe |
 | /api/food | GET | 列出所有有效食品庫存 |
 | /api/food | POST | 新增食品 |
 | /api/food | PATCH | 修改食品 |
@@ -623,8 +625,8 @@ function sendRealtimeNotification() {
 
 | action | 說明 | 欄位 |
 |--------|------|------|
-| add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type |
-| modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type |
+| add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type, light_notify |
+| modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify |
 | delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
 
@@ -710,6 +712,7 @@ function sendRealtimeNotification() {
 |------|---------|------|
 | 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦 |
 | 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
+| Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對設定的 Hue grouped_light 觸發 breathe；同一輪多筆待辦只呼吸一次 |
 
 推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。
 

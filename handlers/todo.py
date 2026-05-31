@@ -3,13 +3,35 @@ from linebot.models import TextSendMessage
 from config import line_bot_api, date_with_weekday
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
-from sheets import append_record, update_row_fields
+from sheets import append_record, ensure_columns, update_row_fields
+
+
+LIGHT_NOTIFY_COLUMN = "燈光提醒"
+
+
+def _parse_bool(value, default=False):
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "y", "on", "是", "要", "需要", "開", "開啟", "啟用"):
+        return True
+    if text in ("false", "0", "no", "n", "off", "否", "不要", "不用", "關", "關閉", "停用"):
+        return False
+    return default
+
+
+def _bool_cell(value):
+    return "TRUE" if _parse_bool(value) else "FALSE"
 
 
 def handle_add_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
+    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN])
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
+    light_notify = _parse_bool(data.get("light_notify"), default=False)
     append_record(sheet, {
         "事項": data.get("item", ""),
         "日期": data.get("date", ""),
@@ -19,11 +41,13 @@ def handle_add_todo(data, user_name, ctx):
         "類型": todo_type,
         "來源": "本地",
         "屬性": "讀寫",
+        LIGHT_NOTIFY_COLUMN: "TRUE" if light_notify else "FALSE",
     })
     date_str = data.get("date", "")
     time_str = data.get("time", "")
     time_part = f" {time_str}" if time_str else ""
     type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
+    light_label = "，燈光提醒" if light_notify and time_str else ""
     if person != user_name:
         def _notify():
             for member in ctx.get("家庭成員"):
@@ -36,7 +60,7 @@ def handle_add_todo(data, user_name, ctx):
                         cleanup_conversation(mid)
                     break
         threading.Thread(target=_notify, daemon=True).start()
-    return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}"
+    return f"✅ 已新增待辦：{data.get('item')}（{date_str}{time_part}）{type_label}{light_label}"
 
 
 def _matches_todo(row, item_name, date_orig, time_orig):
@@ -57,6 +81,7 @@ def _matches_todo(row, item_name, date_orig, time_orig):
 
 def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
+    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN])
     records = ctx.get("待辦事項")
     item_name = data.get("item", "")
     date_orig = data.get("date_orig") or ""
@@ -79,6 +104,8 @@ def handle_modify_todo(data, user_name, ctx):
                 updates["負責人"] = data.get("person")
             if data.get("type"):
                 updates["類型"] = data.get("type")
+            if "light_notify" in data:
+                updates[LIGHT_NOTIFY_COLUMN] = _bool_cell(data.get("light_notify"))
             update_count = update_row_fields(sheet, i + 2, updates)
             row.update(updates)
             new_person = data.get("person")

@@ -41,6 +41,19 @@ except ImportError as e:
     ) from e
 
 
+def _config_bool(value, default=True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "y", "on"):
+        return True
+    if text in ("false", "0", "no", "n", "off"):
+        return False
+    return default
+
+
 HOME_BUTLER_API_KEY = agent_config.HOME_BUTLER_API_KEY
 CPU_MODEL = agent_config.CPU_MODEL
 GPU_MODEL = agent_config.GPU_MODEL
@@ -48,6 +61,10 @@ HOME_BUTLER_URL = getattr(agent_config, "HOME_BUTLER_URL", "https://home-butler.
 LHM_URL = getattr(agent_config, "LHM_URL", "http://localhost:8085/data.json")
 TICK_SECONDS = getattr(agent_config, "TICK_SECONDS", 60)
 AUTO_UPDATE = getattr(agent_config, "AUTO_UPDATE", True)
+HUE_BRIDGE_IP = str(getattr(agent_config, "HUE_BRIDGE_IP", "") or "").strip()
+HUE_APPLICATION_KEY = str(getattr(agent_config, "HUE_APPLICATION_KEY", "") or "").strip()
+HUE_NOTIFY_GROUPED_LIGHT_ID = str(getattr(agent_config, "HUE_NOTIFY_GROUPED_LIGHT_ID", "") or "").strip()
+HUE_LIGHT_REMINDERS_ENABLED = _config_bool(getattr(agent_config, "HUE_LIGHT_REMINDERS_ENABLED", True), True)
 LOG_PATH = getattr(
     agent_config,
     "LOG_PATH",
@@ -85,6 +102,8 @@ log.addHandler(_stream_handler)
 _WATCHDOG_STALE_THRESHOLD_S = 5 * 60
 _last_tick_at = time.monotonic()
 _watchdog_lock = threading.Lock()
+_last_hue_breathe_minute: int | None = None
+_hue_config_warning_printed = False
 
 
 def _watchdog():
@@ -403,6 +422,81 @@ def push(payload: dict) -> None:
     log.info(f"[push] failed after 3 attempts: {last_err}")
 
 
+def _hue_bridge_host() -> str:
+    return HUE_BRIDGE_IP.removeprefix("https://").removeprefix("http://").strip("/")
+
+
+def _hue_config_ready() -> bool:
+    return bool(
+        HUE_LIGHT_REMINDERS_ENABLED
+        and _hue_bridge_host()
+        and HUE_APPLICATION_KEY
+        and HUE_NOTIFY_GROUPED_LIGHT_ID
+    )
+
+
+def _fetch_todo_light_reminders() -> list[dict]:
+    url = f"{HOME_BUTLER_URL.rstrip('/')}/api/todos/light-reminders"
+    headers = {"X-API-Key": HOME_BUTLER_API_KEY}
+    try:
+        r = httpx.get(url, headers=headers, timeout=30.0)
+        if r.status_code >= 300:
+            log.info(f"[hue todo] HTTP {r.status_code}: {r.text[:200]}")
+            return []
+        data = r.json()
+        reminders = data.get("reminders", [])
+        return reminders if isinstance(reminders, list) else []
+    except Exception as e:
+        log.info(f"[hue todo] fetch failed: {e}")
+        return []
+
+
+def _trigger_hue_breathe(reminders: list[dict]) -> None:
+    global _last_hue_breathe_minute
+    minute = int(time.time() // 60)
+    if _last_hue_breathe_minute == minute:
+        return
+
+    host = _hue_bridge_host()
+    url = f"https://{host}/clip/v2/resource/grouped_light/{HUE_NOTIFY_GROUPED_LIGHT_ID}"
+    headers = {
+        "hue-application-key": HUE_APPLICATION_KEY,
+        "Accept": "application/json",
+    }
+    try:
+        r = httpx.put(
+            url,
+            headers=headers,
+            json={"alert": {"action": "breathe"}},
+            verify=False,
+            timeout=10.0,
+        )
+        if r.status_code >= 300:
+            log.info(f"[hue] HTTP {r.status_code}: {r.text[:200]}")
+            return
+        _last_hue_breathe_minute = minute
+        names = "、".join(str(x.get("item", "")) for x in reminders[:3] if x.get("item"))
+        more = "" if len(reminders) <= 3 else f" +{len(reminders) - 3}"
+        log.info(f"[hue] breathe todo_reminders={len(reminders)} {names}{more}")
+    except Exception as e:
+        log.info(f"[hue] breathe failed: {e}")
+
+
+def process_todo_light_reminders() -> None:
+    global _hue_config_warning_printed
+    if not _hue_config_ready():
+        if HUE_LIGHT_REMINDERS_ENABLED and (HUE_BRIDGE_IP or HUE_APPLICATION_KEY or HUE_NOTIFY_GROUPED_LIGHT_ID):
+            if not _hue_config_warning_printed:
+                log.info("[hue] light reminders disabled: incomplete Hue config")
+                _hue_config_warning_printed = True
+        return
+
+    reminders = _fetch_todo_light_reminders()
+    if not reminders:
+        return
+    _trigger_hue_breathe(reminders)
+
+
 def main():
     global _last_tick_at
     log.info(
@@ -415,6 +509,7 @@ def main():
         t0 = time.monotonic()
         try:
             push(collect_payload())
+            process_todo_light_reminders()
         except Exception as e:
             log.info(f"[tick] {e}")
         with _watchdog_lock:

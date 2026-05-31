@@ -220,6 +220,30 @@ def append_record(sheet, data):
     sheet.append_row(build_row(headers, data), value_input_option="USER_ENTERED")
 
 
+def ensure_columns(sheet, columns):
+    """Ensure header columns exist, appending missing ones to row 1.
+
+    This keeps schema migrations small and idempotent for optional features.
+    """
+    headers = sheet.row_values(1)
+    missing = [c for c in columns if c not in headers]
+    if not missing:
+        return headers
+
+    start_col = len(headers) + 1
+    target_col_count = len(headers) + len(missing)
+    if getattr(sheet, "col_count", target_col_count) < target_col_count:
+        sheet.add_cols(target_col_count - sheet.col_count)
+    requests = []
+    for offset, column in enumerate(missing):
+        requests.append({
+            "range": rowcol_to_a1(1, start_col + offset),
+            "values": [[column]],
+        })
+    sheet.batch_update(requests, raw=False)
+    return headers + missing
+
+
 def update_row_fields(sheet, row_number, updates):
     """Batch update selected fields in a row by header name.
 

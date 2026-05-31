@@ -80,9 +80,11 @@ cd C:\butler-agent\repo\agent
 HUE_BRIDGE_IP = "192.168.x.x"
 HUE_APPLICATION_KEY = "..."
 HUE_CLIENT_KEY = "..."
+HUE_NOTIFY_GROUPED_LIGHT_ID = "..."
 ```
 
 其中 `HUE_APPLICATION_KEY` 是 Hue API v2 後續呼叫用的 key；`HUE_CLIENT_KEY` 先留著，通知場景/呼吸燈不一定會用到。
+`HUE_NOTIFY_GROUPED_LIGHT_ID` 可先留空，等下一步 `list` 找到要用來提醒的房間/區域 grouped_light id 再填。
 
 ### 2. 列出 Hue 資源
 
@@ -117,7 +119,18 @@ HUE_CLIENT_KEY = "..."
 
 注意：Hue Bridge API 是區網 API，這些指令必須在跟 Bridge 同網段的 PC 上跑。Render 上的 home-butler 不能直接連到家裡的 Bridge。
 
-### 4. 設置 LibreHardwareMonitor
+### 4. 待辦燈光提醒
+
+把上一步確認可用的 grouped_light id 寫進 `agent_config.py`：
+
+```python
+HUE_NOTIFY_GROUPED_LIGHT_ID = "66b5968b-a4a0-4492-93cf-7f81673412e2"
+HUE_LIGHT_REMINDERS_ENABLED = True
+```
+
+之後 agent 每 60 秒會查 home-butler `/api/todos/light-reminders`。如果有「有時間、已到期、未完成、燈光提醒=TRUE」的待辦，這一輪只觸發一次 Hue breathe；多筆待辦同時到期也不連續閃多次。待辦被標記完成後，下一輪 API 不再回傳，燈光提醒自然停止。
+
+### 5. 設置 LibreHardwareMonitor
 
 CPU 溫度在 Windows 上純 Python 讀不到，要靠 LHM 跑著 + 開 web server 當 sensor bridge：
 
@@ -131,7 +144,7 @@ CPU 溫度在 Windows 上純 Python 讀不到，要靠 LHM 跑著 + 開 web serv
 
 LHM 沒跑 / 端點掛了 agent 不會 crash，只是 `cpu_temp_c` 回 None。
 
-### 5. 第一次手動跑驗證
+### 6. 第一次手動跑驗證
 
 ```powershell
 cd C:\butler-agent\repo\agent

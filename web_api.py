@@ -5,11 +5,12 @@ Web Dashboard REST API
 """
 
 import threading
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import SIRI_USER_ID
+from config import SIRI_USER_ID, TZ, now_taipei
 from assistant import process_message
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
@@ -329,19 +330,69 @@ def api_get_todos():
     return [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
 
 
+def _sheet_bool(value):
+    return str(value or "").strip().upper() in ("TRUE", "1", "YES", "Y", "ON", "是", "要")
+
+
+@router.get("/todos/light-reminders")
+def api_get_todo_light_reminders():
+    """Return due unfinished todos that should trigger Hue light reminders.
+
+    The local PC agent polls this endpoint every minute and performs at most
+    one Hue breathe action per poll, so multiple due todos do not overlap.
+    """
+    ctx = RequestContext()
+    ctx.load()
+    now = now_taipei()
+    reminders = []
+    for r in ctx.get("待辦事項"):
+        if r.get("狀態") != "待辦":
+            continue
+        if not _sheet_bool(r.get("燈光提醒")):
+            continue
+        date_str = str(r.get("日期", "")).strip()
+        time_str = str(r.get("時間", "")).strip()
+        if not date_str or not time_str:
+            continue
+        try:
+            due_at = TZ.localize(datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M"))
+        except (ValueError, TypeError) as e:
+            print(f"[WARN] 無法解析燈光提醒待辦時間 {date_str!r} {time_str!r}: {e}")
+            continue
+        if due_at > now:
+            continue
+        reminders.append({
+            "item": r.get("事項", ""),
+            "date": date_str,
+            "time": time_str,
+            "person": r.get("負責人", ""),
+            "type": r.get("類型", "公開"),
+            "due_at": due_at.isoformat(),
+        })
+    return {"count": len(reminders), "reminders": reminders}
+
+
 class TodoAddRequest(BaseModel):
     item: str
     date: str
     time: Optional[str] = ""
     person: str
     type: Optional[str] = "私人"
+    light_notify: Optional[bool] = False
 
 
 @router.post("/todos")
 def api_add_todo(req: TodoAddRequest):
     ctx = RequestContext()
     ctx.load()
-    data = {"item": req.item, "date": req.date, "time": req.time or "", "person": req.person, "type": req.type or "私人"}
+    data = {
+        "item": req.item,
+        "date": req.date,
+        "time": req.time or "",
+        "person": req.person,
+        "type": req.type or "私人",
+        "light_notify": bool(req.light_notify),
+    }
     result = handle_add_todo(data, req.person, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
@@ -358,6 +409,7 @@ class TodoModifyRequest(BaseModel):
     time: Optional[str] = None
     person: Optional[str] = None
     type: Optional[str] = None
+    light_notify: Optional[bool] = None
     requester: str
 
 
@@ -373,6 +425,7 @@ def api_modify_todo(req: TodoModifyRequest):
     if req.time is not None: data["time"] = req.time
     if req.person is not None: data["person"] = req.person
     if req.type is not None: data["type"] = req.type
+    if req.light_notify is not None: data["light_notify"] = req.light_notify
     result = handle_modify_todo(data, req.requester, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}

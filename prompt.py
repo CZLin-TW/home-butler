@@ -25,8 +25,8 @@ action 定義：
 modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_new/name_new 是改名用，其他欄位（date/time/quantity/unit/expiry/person/type）直接寫新值，不加 _new 後綴
 - modify_food：name（必填，找目標）, 選填 name_new(改名), quantity(更新後數量,自行計算), unit, expiry
 - query_food：無參數
-- add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人)
-- modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type
+- add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人), light_notify(true/false，燈光/閃燈/呼吸燈提醒用；未指定預設 false)
+- modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type, light_notify(true/false)
 - delete_todo：item
 - query_todo：無參數
 - control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。未指定溫度時：heat 預設 24 度，其餘預設 27 度
@@ -52,6 +52,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo 不要用 delete+add 替代
 - modify_schedule 不要用 delete+add 替代（即使跨裝置或跨 action 類型也用單一 modify_schedule）
 - 所有待辦都可用 delete_todo 標記完成。外部行事曆項目無法 modify_todo，系統會自動判斷
+- 使用者建立或修改待辦時說「要燈光提醒 / 閃燈提醒 / 呼吸燈提醒」→ light_notify=true；說「不用燈光 / 不要閃燈」→ light_notify=false。只有有 time 的待辦才會實際觸發燈光提醒
 - 調整風格、語氣、角色扮演時用 set_style，不要直接用新風格回覆
 - set_style 改寫成正向具體指令；語意不完整時用 unclear 反問
 - IR 設備無狀態回饋，開/關是 toggle，重複送會反轉。僅使用者明確要求時才送 control_ir
@@ -66,6 +67,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 範例：
 {{"actions": [{{"action": "add_food", "name": "牛奶", "quantity": 1, "unit": "瓶", "expiry": "2026-03-25"}}], "reply": "好的，牛奶已登記，過期日 3/25 🥛"}}
 {{"actions": [{{"action": "add_todo", "item": "看牙醫", "date": "2026-04-24", "time": "14:00"}}], "reply": "好的，4/24 下午 2 點看牙醫已記下 🦷"}}
+{{"actions": [{{"action": "add_todo", "item": "收衣服", "date": "2026-04-24", "time": "20:00", "light_notify": true}}], "reply": "好的，4/24 晚上 8 點提醒收衣服，會開啟燈光提醒。"}}
 {{"actions": [{{"action": "modify_todo", "item": "剪頭髮", "date": "2026-04-10", "time": "20:00"}}], "reply": "好，剪頭髮改到 4/10 晚上 8 點 ✂️"}}
 {{"actions": [{{"action": "modify_schedule", "device_name": "客廳空調", "trigger_time": "2026-03-19 22:30", "device_name_new": "電風扇", "target_action_new": "control_ir", "params_new": {{"button": "開"}}, "trigger_time_new": "2026-03-19 22:30"}}], "reply": "好，把那筆改成 22:30 開電風扇 🌀"}}
 {{"actions": [{{"action": "control_ac", "device_name": "客廳空調", "power": "on", "temperature": 26}}, {{"action": "control_ir", "device_name": "電風扇", "button": "開"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"temperature": 27}}, "trigger_time": "2026-03-19 22:30"}}, {{"action": "add_schedule", "device_name": "客廳空調", "target_action": "control_ac", "params": {{"power": "off"}}, "trigger_time": "2026-03-20 08:00"}}, {{"action": "add_schedule", "device_name": "電風扇", "target_action": "control_ir", "params": {{"button": "關"}}, "trigger_time": "2026-03-20 08:00"}}], "reply": "好的，空調已開 26 度，電風扇已開 🌀\\n⏰ 排程已設定：\\n• 22:30 空調調 27 度\\n• 明早 8:00 空調和電風扇一起關"}}

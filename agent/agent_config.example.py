@@ -25,6 +25,8 @@ GPU_MODEL = ""    # 例如 "GTX-1650S"、"RTX-4070Ti"
 # HUE_BRIDGE_IP = "192.168.1.10"
 # HUE_APPLICATION_KEY = ""  # hue_probe.py auth 回傳的 username
 # HUE_CLIENT_KEY = ""       # auth 回傳的 clientkey；一般通知不一定會用到
+# HUE_NOTIFY_GROUPED_LIGHT_ID = ""  # hue_probe.py list 找到的 grouped_light id
+# HUE_LIGHT_REMINDERS_ENABLED = True
 
 # Auto-update：每小時 check 一次 origin/main，有新 commit 就 git pull
 # + os._exit(1) 讓 Task Scheduler 重啟 process 拉新 code。預設啟用。
