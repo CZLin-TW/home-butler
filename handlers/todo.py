@@ -7,6 +7,15 @@ from sheets import append_record, ensure_columns, update_row_fields
 
 
 LIGHT_NOTIFY_COLUMN = "燈光提醒"
+HOUSEHOLD_LIGHT_NOTIFY_KEYWORDS = (
+    "收衣服", "收衣", "晾衣服", "晾衣", "曬衣服", "曬衣", "洗衣服", "洗衣", "烘衣服", "烘衣",
+    "洗衣機", "烘衣機", "倒垃圾", "垃圾", "回收", "廚餘", "拿包裹", "收包裹", "包裹", "取貨",
+    "餵食", "餵貓", "餵狗", "貓砂", "澆花", "澆水", "關瓦斯", "瓦斯", "爐火", "關火",
+    "洗碗", "掃地", "拖地", "吸地", "打掃",
+)
+HOUSEHOLD_LIGHT_NOTIFY_EXCLUSIONS = (
+    "買", "購物", "採買", "預約", "牙醫", "看診", "醫生", "會議", "開會",
+)
 
 
 def _parse_bool(value, default=False):
@@ -26,12 +35,31 @@ def _bool_cell(value):
     return "TRUE" if _parse_bool(value) else "FALSE"
 
 
+def _is_household_light_notify_item(item):
+    text = str(item or "").strip()
+    if not text:
+        return False
+    if any(word in text for word in HOUSEHOLD_LIGHT_NOTIFY_EXCLUSIONS):
+        return False
+    return any(word in text for word in HOUSEHOLD_LIGHT_NOTIFY_KEYWORDS)
+
+
+def _default_light_notify(data):
+    return bool(data.get("time") and _is_household_light_notify_item(data.get("item")))
+
+
+def _resolve_light_notify(data):
+    if "light_notify" in data:
+        return _parse_bool(data.get("light_notify"), default=False)
+    return _default_light_notify(data)
+
+
 def handle_add_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN])
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
-    light_notify = _parse_bool(data.get("light_notify"), default=False)
+    light_notify = _resolve_light_notify(data)
     append_record(sheet, {
         "事項": data.get("item", ""),
         "日期": data.get("date", ""),

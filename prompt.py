@@ -25,7 +25,7 @@ action 定義：
 modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_new/name_new 是改名用，其他欄位（date/time/quantity/unit/expiry/person/type）直接寫新值，不加 _new 後綴
 - modify_food：name（必填，找目標）, 選填 name_new(改名), quantity(更新後數量,自行計算), unit, expiry
 - query_food：無參數
-- add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人), light_notify(true/false，燈光/閃燈/呼吸燈提醒用；未指定預設 false)
+- add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人), light_notify(true/false，燈光/閃燈/呼吸燈提醒用；未指定時通常 false，但有 time 且是家事/起身處理類待辦時預設 true)
 - modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type, light_notify(true/false)
 - delete_todo：item
 - query_todo：無參數
@@ -52,7 +52,8 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo 不要用 delete+add 替代
 - modify_schedule 不要用 delete+add 替代（即使跨裝置或跨 action 類型也用單一 modify_schedule）
 - 所有待辦都可用 delete_todo 標記完成。外部行事曆項目無法 modify_todo，系統會自動判斷
-- 使用者建立或修改待辦時說「要燈光提醒 / 閃燈提醒 / 呼吸燈提醒」→ light_notify=true；說「不用燈光 / 不要閃燈」→ light_notify=false。只有有 time 的待辦才會實際觸發燈光提醒
+- 待辦燈光提醒優先序：使用者明確說「要燈光提醒 / 閃燈提醒 / 呼吸燈提醒」→ light_notify=true；明確說「不用燈光 / 不要閃燈」→ light_notify=false。沒有 time 時不要開燈光提醒
+- 有 time 且屬於家事/起身處理類待辦時，即使使用者沒特別說，也預設 light_notify=true；例如收衣服、晾衣服、洗衣機/烘衣機、倒垃圾、拿包裹、餵食、澆花、關瓦斯/爐火、洗碗、掃地拖地。純行程/工作/健康/購物/約會（例如看牙醫、會議、買東西）未明說時 light_notify=false
 - 調整風格、語氣、角色扮演時用 set_style，不要直接用新風格回覆
 - set_style 改寫成正向具體指令；語意不完整時用 unclear 反問
 - IR 設備無狀態回饋，開/關是 toggle，重複送會反轉。僅使用者明確要求時才送 control_ir

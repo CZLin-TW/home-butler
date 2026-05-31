@@ -378,7 +378,7 @@ class TodoAddRequest(BaseModel):
     time: Optional[str] = ""
     person: str
     type: Optional[str] = "私人"
-    light_notify: Optional[bool] = False
+    light_notify: Optional[bool] = None
 
 
 @router.post("/todos")
@@ -391,8 +391,9 @@ def api_add_todo(req: TodoAddRequest):
         "time": req.time or "",
         "person": req.person,
         "type": req.type or "私人",
-        "light_notify": bool(req.light_notify),
     }
+    if req.light_notify is not None:
+        data["light_notify"] = req.light_notify
     result = handle_add_todo(data, req.person, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}

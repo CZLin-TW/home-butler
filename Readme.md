@@ -630,6 +630,8 @@ function sendRealtimeNotification() {
 | delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
 
+有時間的家事/起身處理類待辦（例如收衣服、倒垃圾、拿包裹、關瓦斯）在對話新增時會預設開啟 `light_notify=true`；使用者明確說不要燈光提醒時會優先關閉。
+
 ### 智能居家
 
 | action | 說明 | 欄位 |
