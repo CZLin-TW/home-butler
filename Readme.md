@@ -841,7 +841,7 @@ function sendRealtimeNotification() {
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
 | dehumidifier_auto.py | 除濕機條件式自動 ON/OFF（hysteresis + sensor 失聯 fallback + 排他鎖）。品牌無關狀態機，控制/狀態委派給 dehumidifier_driver。runtime state in-memory，rule 設定值持久化到 Sheet「除濕機自動規則」 |
 | dehumidifier_driver.py | 除濕機品牌無關 driver：把 Panasonic（auth+gwid+CommandType）與 LG（deviceId+ThinQ property）的控制/狀態差異收斂成統一介面，給 dehumidifier_auto 用 |
-| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 每小時自動 git pull + py_compile 驗新 code syntax + 自己 spawn detached process 重啟（不靠 Task Scheduler restart-on-fail）。Render 部署不會 import 這個目錄 |
+| agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 預設每 5 分鐘自動 git pull + py_compile 驗新 code syntax + 自己 spawn detached process 重啟（不靠 Task Scheduler restart-on-fail）。Render 部署不會 import 這個目錄 |
 | requirements.txt | Python 套件 |
 | render.yaml | Render.com 部署設定 |
 

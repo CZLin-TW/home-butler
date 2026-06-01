@@ -178,7 +178,7 @@ HOSTNAME = socket.gethostname()
 # 的舊 IP 會讓 server 端把同一台 PC 認成「舊 PC 失聯、新 PC 上線無歷史」。
 
 # ── Auto-update ──────────────────────────────────────
-# 每 UPDATE_CHECK_TICKS 個 tick（預設 60 ticks ≈ 1 小時）跑一次：
+# 每 UPDATE_CHECK_TICKS 個 tick（預設 5 ticks ≈ 5 分鐘）跑一次：
 #   git fetch → 比對 HEAD vs origin/main → 不同就 git pull → py_compile 驗 →
 #   _restart_self()（自己 spawn detached 新 process + exit(0)）
 # 不靠 Task Scheduler restart-on-fail，因為實測那條路太脆（restart attempt
@@ -186,7 +186,7 @@ HOSTNAME = socket.gethostname()
 #
 # AUTO_UPDATE=False 可關（agent_config.py），用來在你 push 壞 code 時暫停
 # 推送到所有 PC 拉新版。
-UPDATE_CHECK_TICKS = 60
+UPDATE_CHECK_TICKS = max(1, int(getattr(agent_config, "AUTO_UPDATE_CHECK_TICKS", 5)))
 _REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

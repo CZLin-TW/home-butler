@@ -249,7 +249,13 @@ LOG_PATH = r"C:\butler-agent\agent.log"
 
 ## 更新 agent
 
-**預設自動更新**：agent 每 60 ticks（≈ 1 小時）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。`main` push 完之後 1 小時內所有 PC 自動跟上，**不用手動**。
+**預設自動更新**：agent 每 5 ticks（TICK_SECONDS=60 時約 5 分鐘）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。`main` push 完之後約 5 分鐘內所有 PC 自動跟上，**不用手動**。
+
+要調整頻率可在 `agent_config.py` 設定：
+
+```python
+AUTO_UPDATE_CHECK_TICKS = 5
+```
 
 auto-update 只會拉新程式碼，不會自動安裝新 Python 套件。遇到這類更新（例如 WebSocket 通道新增 `websockets`）時，要在 PC 上手動跑一次 `python -m pip install -r requirements.txt`，之後同一個套件就不用再裝。
 
