@@ -203,13 +203,14 @@ git push
 - 已消耗的食品自動移至此分頁，Claude 不會讀取
 
 **待辦事項**
-| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 | 燈光提醒 |
-|------|------|------|--------|------|------|------|------|----------|
+| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 | 燈光提醒 | 燈光區域ID |
+|------|------|------|--------|------|------|------|------|----------|------------|
 - 狀態值：待辦 / 已完成
 - 類型值：公開 / 私人
 - 來源值：本地 / Notion（程式自動填入，本地新增的待辦填「本地」，外部行事曆同步的填來源名稱）
 - 屬性值：讀寫 / 唯讀（本地項目為「讀寫」，外部項目依成員的權限設定填入）
 - 燈光提醒：TRUE/FALSE。只有有「時間」且已到期、狀態仍為待辦時，PC agent 會每分鐘觸發 Hue breathe 一次，直到該待辦完成
+- 燈光區域ID：Hue grouped_light id。Dashboard 用顯示名稱下拉選擇，Sheet 內保存穩定 ID；LINE Bot 未指定區域時預設使用「客廳」
 
 **待辦封存**
 | 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 |
@@ -542,7 +543,7 @@ function sendRealtimeNotification() {
 | /api/todos | POST | 新增待辦事項 |
 | /api/todos | PATCH | 修改待辦事項 |
 | /api/todos | DELETE | 完成（刪除）待辦事項 |
-| /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦，給 PC agent 每分鐘觸發 Hue breathe |
+| /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦（含 light_area_id/name），給 PC agent 每分鐘依區域觸發 Hue breathe |
 | /api/food | GET | 列出所有有效食品庫存 |
 | /api/food | POST | 新增食品 |
 | /api/food | PATCH | 修改食品 |
@@ -630,12 +631,12 @@ function sendRealtimeNotification() {
 
 | action | 說明 | 欄位 |
 |--------|------|------|
-| add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type, light_notify |
-| modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify |
+| add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type, light_notify, light_area |
+| modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify, light_area |
 | delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
 
-有時間的家事/起身處理類待辦（例如收衣服、倒垃圾、拿包裹、關瓦斯）在對話新增時會預設開啟 `light_notify=true`；使用者明確說不要燈光提醒時會優先關閉。
+有時間的家事/起身處理類待辦（例如收衣服、倒垃圾、拿包裹、關瓦斯）在對話新增時會預設開啟 `light_notify=true`；使用者明確說不要燈光提醒時會優先關閉。若只說要燈光提醒但沒指定區域，預設使用客廳。
 
 ### 智能居家
 
@@ -719,7 +720,7 @@ function sendRealtimeNotification() {
 |------|---------|------|
 | 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦 |
 | 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
-| Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對設定的 Hue grouped_light 觸發 breathe；同一輪多筆待辦只呼吸一次 |
+| Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對每筆設定的 Hue grouped_light 觸發 breathe；同一區域同一輪多筆待辦只呼吸一次 |
 | Agent 即時通道 | PC agent 常駐 WebSocket | PC agent 每約 25 秒 heartbeat 到 `/api/agent/ws`，後端可用 `/api/agent/status` 確認在線狀態 |
 
 推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。

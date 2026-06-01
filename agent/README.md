@@ -128,7 +128,7 @@ HUE_NOTIFY_GROUPED_LIGHT_ID = "66b5968b-a4a0-4492-93cf-7f81673412e2"
 HUE_LIGHT_REMINDERS_ENABLED = True
 ```
 
-之後 agent 每 60 秒會查 home-butler `/api/todos/light-reminders`。如果有「有時間、已到期、未完成、燈光提醒=TRUE」的待辦，這一輪只觸發一次 Hue breathe；多筆待辦同時到期也不連續閃多次。待辦被標記完成後，下一輪 API 不再回傳，燈光提醒自然停止。
+之後 agent 每 60 秒會查 home-butler `/api/todos/light-reminders`。如果有「有時間、已到期、未完成、燈光提醒=TRUE」的待辦，agent 會依每筆待辦的 `light_area_id` 對對應 Hue grouped_light 觸發 breathe；同一區域同一輪多筆待辦只呼吸一次。待辦被標記完成後，下一輪 API 不再回傳，燈光提醒自然停止。
 
 ### 5. WebSocket 即時通道
 

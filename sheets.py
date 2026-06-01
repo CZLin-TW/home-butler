@@ -45,6 +45,8 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   類型                str   "私人" | "公開"
   來源                str   "本地" | "Notion"（外部行事曆）
   屬性                str   "讀寫" | "唯讀"   ← 唯讀項目（外部行事曆）不可 modify
+  燈光提醒            str   "TRUE" | "FALSE"
+  燈光區域ID          str   Hue grouped_light id（照明提醒用）
   封存表：待辦封存（同欄位）
 
 【對話暫存】（BATCH_SHEETS）

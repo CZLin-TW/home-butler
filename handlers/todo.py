@@ -4,9 +4,11 @@ from config import line_bot_api, date_with_weekday
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
 from sheets import append_record, ensure_columns, update_row_fields
+from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
 
 
 LIGHT_NOTIFY_COLUMN = "燈光提醒"
+LIGHT_AREA_ID_COLUMN = "燈光區域ID"
 HOUSEHOLD_LIGHT_NOTIFY_KEYWORDS = (
     "收衣服", "收衣", "晾衣服", "晾衣", "曬衣服", "曬衣", "洗衣服", "洗衣", "烘衣服", "烘衣",
     "洗衣機", "烘衣機", "倒垃圾", "垃圾", "回收", "廚餘", "拿包裹", "收包裹", "包裹", "取貨",
@@ -54,12 +56,27 @@ def _resolve_light_notify(data):
     return _default_light_notify(data)
 
 
+def _resolve_light_area(data, light_notify, existing_area_id=""):
+    time_value = data.get("time") if "time" in data else data.get("時間")
+    if not light_notify or not time_value:
+        return {"id": "", "name": ""}
+
+    explicit_id = str(data.get("light_area_id") or "").strip()
+    explicit_name = str(data.get("light_area") or "").strip()
+    if explicit_id or explicit_name:
+        return resolve_area(explicit_name, area_id=explicit_id)
+    if existing_area_id:
+        return resolve_area(area_id=existing_area_id)
+    return resolve_area(DEFAULT_LIGHT_AREA_NAME)
+
+
 def handle_add_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
-    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN])
+    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN, LIGHT_AREA_ID_COLUMN])
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
     light_notify = _resolve_light_notify(data)
+    light_area = _resolve_light_area(data, light_notify)
     append_record(sheet, {
         "事項": data.get("item", ""),
         "日期": data.get("date", ""),
@@ -70,12 +87,14 @@ def handle_add_todo(data, user_name, ctx):
         "來源": "本地",
         "屬性": "讀寫",
         LIGHT_NOTIFY_COLUMN: "TRUE" if light_notify else "FALSE",
+        LIGHT_AREA_ID_COLUMN: light_area.get("id", ""),
     })
     date_str = data.get("date", "")
     time_str = data.get("time", "")
     time_part = f" {time_str}" if time_str else ""
     type_label = "🔒 私人" if todo_type == "私人" else "📢 公開"
-    light_label = "，燈光提醒" if light_notify and time_str else ""
+    area_name = light_area.get("name") or DEFAULT_LIGHT_AREA_NAME
+    light_label = f"，燈光提醒：{area_name}" if light_notify and time_str else ""
     if person != user_name:
         def _notify():
             for member in ctx.get("家庭成員"):
@@ -109,7 +128,7 @@ def _matches_todo(row, item_name, date_orig, time_orig):
 
 def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
-    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN])
+    ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN, LIGHT_AREA_ID_COLUMN])
     records = ctx.get("待辦事項")
     item_name = data.get("item", "")
     date_orig = data.get("date_orig") or ""
@@ -134,6 +153,19 @@ def handle_modify_todo(data, user_name, ctx):
                 updates["類型"] = data.get("type")
             if "light_notify" in data:
                 updates[LIGHT_NOTIFY_COLUMN] = _bool_cell(data.get("light_notify"))
+                light_notify_next = _parse_bool(data.get("light_notify"), default=False)
+                updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
+                    {**row, **data},
+                    light_notify_next,
+                    existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
+                ).get("id", "")
+            elif "light_area_id" in data or "light_area" in data:
+                light_notify_next = _parse_bool(row.get(LIGHT_NOTIFY_COLUMN), default=False)
+                updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
+                    {**row, **data},
+                    light_notify_next,
+                    existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
+                ).get("id", "")
             update_count = update_row_fields(sheet, i + 2, updates)
             row.update(updates)
             new_person = data.get("person")

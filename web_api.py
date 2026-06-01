@@ -35,6 +35,7 @@ import dehumidifier_auto
 import dehumidifier_auto_service
 import dehumidifier_driver
 import dehumidifier_history
+from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -361,12 +362,17 @@ def api_get_todo_light_reminders():
             continue
         if due_at > now:
             continue
+        light_area_id = str(r.get("燈光區域ID", "") or "").strip()
+        light_area = resolve_area(area_id=light_area_id) if light_area_id else resolve_area(DEFAULT_LIGHT_AREA_NAME)
         reminders.append({
             "item": r.get("事項", ""),
             "date": date_str,
             "time": time_str,
             "person": r.get("負責人", ""),
             "type": r.get("類型", "公開"),
+            "light_area_id": light_area.get("id", ""),
+            "light_area_name": light_area.get("name", "") or DEFAULT_LIGHT_AREA_NAME,
+            "light_area_resource_type": light_area.get("resource_type", "grouped_light"),
             "due_at": due_at.isoformat(),
         })
     return {"count": len(reminders), "reminders": reminders}
@@ -379,6 +385,8 @@ class TodoAddRequest(BaseModel):
     person: str
     type: Optional[str] = "私人"
     light_notify: Optional[bool] = None
+    light_area_id: Optional[str] = None
+    light_area: Optional[str] = None
 
 
 @router.post("/todos")
@@ -394,6 +402,10 @@ def api_add_todo(req: TodoAddRequest):
     }
     if req.light_notify is not None:
         data["light_notify"] = req.light_notify
+    if req.light_area_id is not None:
+        data["light_area_id"] = req.light_area_id
+    if req.light_area is not None:
+        data["light_area"] = req.light_area
     result = handle_add_todo(data, req.person, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
@@ -411,6 +423,8 @@ class TodoModifyRequest(BaseModel):
     person: Optional[str] = None
     type: Optional[str] = None
     light_notify: Optional[bool] = None
+    light_area_id: Optional[str] = None
+    light_area: Optional[str] = None
     requester: str
 
 
@@ -427,6 +441,8 @@ def api_modify_todo(req: TodoModifyRequest):
     if req.person is not None: data["person"] = req.person
     if req.type is not None: data["type"] = req.type
     if req.light_notify is not None: data["light_notify"] = req.light_notify
+    if req.light_area_id is not None: data["light_area_id"] = req.light_area_id
+    if req.light_area is not None: data["light_area"] = req.light_area
     result = handle_modify_todo(data, req.requester, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}

@@ -106,7 +106,7 @@ log.addHandler(_stream_handler)
 _WATCHDOG_STALE_THRESHOLD_S = 5 * 60
 _last_tick_at = time.monotonic()
 _watchdog_lock = threading.Lock()
-_last_hue_breathe_minute: int | None = None
+_last_hue_breathe_minute_by_resource: dict[str, int] = {}
 _hue_config_warning_printed = False
 _agent_ws_thread_started = False
 
@@ -431,15 +431,6 @@ def _hue_bridge_host() -> str:
     return HUE_BRIDGE_IP.removeprefix("https://").removeprefix("http://").strip("/")
 
 
-def _hue_config_ready() -> bool:
-    return bool(
-        HUE_LIGHT_REMINDERS_ENABLED
-        and _hue_bridge_host()
-        and HUE_APPLICATION_KEY
-        and HUE_NOTIFY_GROUPED_LIGHT_ID
-    )
-
-
 def _hue_api_ready() -> bool:
     return bool(_hue_bridge_host() and HUE_APPLICATION_KEY)
 
@@ -578,6 +569,31 @@ def _hue_breathe_resource(resource_id: str, resource_type: str = "grouped_light"
     return {"resource_id": resource_id, "resource_type": resource_type, "response": payload}
 
 
+def _hue_find_grouped_light_id_by_name(area_name: str) -> str:
+    target = str(area_name or "").strip().lower()
+    if not target:
+        return ""
+    try:
+        areas = _hue_list_areas().get("areas", [])
+        for area in areas:
+            names = [
+                str(area.get("hue_name") or ""),
+                str(area.get("grouped_light_name") or ""),
+            ]
+            if any(name.strip().lower() == target for name in names):
+                return str(area.get("id") or "")
+        for area in areas:
+            names = [
+                str(area.get("hue_name") or ""),
+                str(area.get("grouped_light_name") or ""),
+            ]
+            if any(target in name.strip().lower() or name.strip().lower() in target for name in names if name):
+                return str(area.get("id") or "")
+    except Exception as e:
+        log.info(f"[hue] resolve area failed name={area_name}: {e}")
+    return ""
+
+
 def _fetch_todo_light_reminders() -> list[dict]:
     url = f"{HOME_BUTLER_URL.rstrip('/')}/api/todos/light-reminders"
     headers = {"X-API-Key": HOME_BUTLER_API_KEY}
@@ -595,40 +611,40 @@ def _fetch_todo_light_reminders() -> list[dict]:
 
 
 def _trigger_hue_breathe(reminders: list[dict]) -> None:
-    global _last_hue_breathe_minute
     minute = int(time.time() // 60)
-    if _last_hue_breathe_minute == minute:
-        return
 
-    host = _hue_bridge_host()
-    url = f"https://{host}/clip/v2/resource/grouped_light/{HUE_NOTIFY_GROUPED_LIGHT_ID}"
-    headers = {
-        "hue-application-key": HUE_APPLICATION_KEY,
-        "Accept": "application/json",
-    }
-    try:
-        r = httpx.put(
-            url,
-            headers=headers,
-            json={"alert": {"action": "breathe"}},
-            verify=False,
-            timeout=10.0,
-        )
-        if r.status_code >= 300:
-            log.info(f"[hue] HTTP {r.status_code}: {r.text[:200]}")
-            return
-        _last_hue_breathe_minute = minute
-        names = "、".join(str(x.get("item", "")) for x in reminders[:3] if x.get("item"))
-        more = "" if len(reminders) <= 3 else f" +{len(reminders) - 3}"
-        log.info(f"[hue] breathe todo_reminders={len(reminders)} {names}{more}")
-    except Exception as e:
-        log.info(f"[hue] breathe failed: {e}")
+    groups: dict[str, list[dict]] = {}
+    for reminder in reminders:
+        area_id = str(reminder.get("light_area_id") or "").strip()
+        if not area_id:
+            area_id = _hue_find_grouped_light_id_by_name(str(reminder.get("light_area_name") or ""))
+        if not area_id:
+            area_id = HUE_NOTIFY_GROUPED_LIGHT_ID
+        if not area_id:
+            log.info(f"[hue] todo reminder skipped: no target area for {reminder.get('item', '')}")
+            continue
+        groups.setdefault(area_id, []).append(reminder)
+
+    for area_id, area_reminders in groups.items():
+        if _last_hue_breathe_minute_by_resource.get(area_id) == minute:
+            continue
+        try:
+            _hue_breathe_resource(area_id, "grouped_light")
+            _last_hue_breathe_minute_by_resource[area_id] = minute
+            names = "、".join(str(x.get("item", "")) for x in area_reminders[:3] if x.get("item"))
+            more = "" if len(area_reminders) <= 3 else f" +{len(area_reminders) - 3}"
+            area_name = str(area_reminders[0].get("light_area_name") or area_id)
+            log.info(f"[hue] breathe todo_area={area_name} reminders={len(area_reminders)} {names}{more}")
+        except Exception as e:
+            log.info(f"[hue] breathe failed area={area_id}: {e}")
 
 
 def process_todo_light_reminders() -> None:
     global _hue_config_warning_printed
-    if not _hue_config_ready():
-        if HUE_LIGHT_REMINDERS_ENABLED and (HUE_BRIDGE_IP or HUE_APPLICATION_KEY or HUE_NOTIFY_GROUPED_LIGHT_ID):
+    if not HUE_LIGHT_REMINDERS_ENABLED:
+        return
+    if not _hue_api_ready():
+        if HUE_BRIDGE_IP or HUE_APPLICATION_KEY or HUE_NOTIFY_GROUPED_LIGHT_ID:
             if not _hue_config_warning_printed:
                 log.info("[hue] light reminders disabled: incomplete Hue config")
                 _hue_config_warning_printed = True
