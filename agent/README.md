@@ -132,7 +132,7 @@ HUE_LIGHT_REMINDERS_ENABLED = True
 
 ### 5. WebSocket 即時通道
 
-agent 會主動連到 home-butler 的 `/api/agent/ws`，建立一條從 Render 回到家中 PC 的即時通道。第一階段只做 hello、heartbeat、在線狀態查詢；後續 Hue 區域控制、Dashboard 照明頁面的即時按鈕會走這條通道。
+agent 會主動連到 home-butler 的 `/api/agent/ws`，建立一條從 Render 回到家中 PC 的即時通道。通道會做 hello、heartbeat、在線狀態查詢，也會承接 Hue 指令；Dashboard 照明頁面的列區域與呼吸燈測試按鈕都走這條通道。
 
 這個通道預設開啟，使用同一個 `HOME_BUTLER_API_KEY` 驗證。如果要暫時停用，可以在 `agent_config.py` 加：
 

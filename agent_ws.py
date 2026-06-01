@@ -8,6 +8,7 @@ this registry after the connection path is proven stable.
 import asyncio
 import secrets
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -19,6 +20,7 @@ from config import HOME_BUTLER_API_KEY
 router = APIRouter(prefix="/api")
 
 _agents: dict[str, dict[str, Any]] = {}
+_pending_commands: dict[str, asyncio.Future] = {}
 _lock = asyncio.Lock()
 
 
@@ -46,6 +48,7 @@ async def _register_agent(agent_id: str, websocket: WebSocket, hello: dict[str, 
         previous_ws = previous.get("websocket") if previous else None
         _agents[agent_id] = {
             "websocket": websocket,
+            "send_lock": asyncio.Lock(),
             "hostname": str(hello.get("hostname") or ""),
             "ip": str(hello.get("ip") or ""),
             "capabilities": hello.get("capabilities") if isinstance(hello.get("capabilities"), list) else [],
@@ -68,6 +71,15 @@ async def _mark_seen(agent_id: str, message_type: str) -> None:
             return
         info["last_seen"] = time.time()
         info["last_message"] = message_type
+
+
+async def _resolve_command_result(message: dict[str, Any]) -> None:
+    command_id = str(message.get("command_id") or "")
+    if not command_id:
+        return
+    future = _pending_commands.get(command_id)
+    if future and not future.done():
+        future.set_result(message)
 
 
 async def _unregister_agent(agent_id: str, websocket: WebSocket) -> None:
@@ -120,9 +132,7 @@ async def agent_websocket(websocket: WebSocket):
                     "server_time": time.time(),
                 })
             elif message_type == "command_result":
-                # Placeholder for the next phase. Keeping this accepted now
-                # lets agents safely report unsupported future command trials.
-                pass
+                await _resolve_command_result(message)
             else:
                 await websocket.send_json({
                     "type": "info",
@@ -146,3 +156,65 @@ async def agent_status():
     async with _lock:
         agents = [_public_agent(agent_id, info, now) for agent_id, info in sorted(_agents.items())]
     return {"count": len(agents), "agents": agents}
+
+
+async def send_agent_command(
+    command_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    agent_id: str = "",
+    required_capability: str = "",
+    timeout: float = 20.0,
+) -> dict[str, Any]:
+    now = time.time()
+    selected_agent_id = ""
+    selected_ws = None
+    selected_send_lock = None
+
+    async with _lock:
+        candidates = []
+        if agent_id:
+            info = _agents.get(agent_id)
+            if info:
+                candidates.append((agent_id, info))
+        else:
+            candidates = sorted(_agents.items())
+
+        for candidate_id, info in candidates:
+            if not info.get("websocket"):
+                continue
+            if now - float(info.get("last_seen") or 0) > 45:
+                continue
+            capabilities = info.get("capabilities", [])
+            if required_capability and required_capability not in capabilities:
+                continue
+            selected_agent_id = candidate_id
+            selected_ws = info.get("websocket")
+            selected_send_lock = info.get("send_lock")
+            break
+
+    if selected_ws is None:
+        capability_text = f" with capability {required_capability}" if required_capability else ""
+        raise RuntimeError(f"No online agent{capability_text}")
+
+    command_id = uuid.uuid4().hex
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _pending_commands[command_id] = future
+    try:
+        message = {
+            "type": "command",
+            "command_id": command_id,
+            "command_type": command_type,
+            "payload": payload or {},
+            "server_time": time.time(),
+        }
+        if selected_send_lock is not None:
+            async with selected_send_lock:
+                await selected_ws.send_json(message)
+        else:
+            await selected_ws.send_json(message)
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return {"agent_id": selected_agent_id, **result}
+    finally:
+        _pending_commands.pop(command_id, None)

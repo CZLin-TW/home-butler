@@ -440,6 +440,144 @@ def _hue_config_ready() -> bool:
     )
 
 
+def _hue_api_ready() -> bool:
+    return bool(_hue_bridge_host() and HUE_APPLICATION_KEY)
+
+
+def _hue_request(method: str, path: str, **kwargs) -> dict:
+    if not _hue_api_ready():
+        raise RuntimeError("Hue bridge IP or application key is not configured")
+
+    host = _hue_bridge_host()
+    headers = {
+        "hue-application-key": HUE_APPLICATION_KEY,
+        "Accept": "application/json",
+    }
+    response = httpx.request(
+        method,
+        f"https://{host}{path}",
+        headers=headers,
+        verify=False,
+        timeout=10.0,
+        **kwargs,
+    )
+    if response.status_code >= 300:
+        raise RuntimeError(f"Hue HTTP {response.status_code}: {response.text[:200]}")
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("errors"):
+        raise RuntimeError(json.dumps(payload.get("errors"), ensure_ascii=False))
+    return payload
+
+
+def _hue_resource_items(payload: dict) -> list[dict]:
+    data = payload.get("data", []) if isinstance(payload, dict) else []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _hue_name(item: dict) -> str:
+    metadata = item.get("metadata") or {}
+    return str(metadata.get("name") or item.get("id") or "")
+
+
+def _hue_owner(item: dict) -> dict:
+    owner = item.get("owner") or {}
+    return owner if isinstance(owner, dict) else {}
+
+
+def _hue_grouped_light_for_container(container: dict, grouped_lights: list[dict]) -> str:
+    for service in container.get("services") or []:
+        if isinstance(service, dict) and service.get("rtype") == "grouped_light" and service.get("rid"):
+            return str(service.get("rid"))
+
+    container_id = str(container.get("id") or "")
+    container_type = str(container.get("type") or "")
+    for grouped in grouped_lights:
+        owner = _hue_owner(grouped)
+        if owner.get("rtype") == container_type and owner.get("rid") == container_id:
+            return str(grouped.get("id") or "")
+    return ""
+
+
+def _hue_area_from_container(container: dict, grouped_light_id: str, kind_label: str) -> dict:
+    return {
+        "id": grouped_light_id,
+        "resource_type": "grouped_light",
+        "hue_resource_id": str(container.get("id") or ""),
+        "hue_resource_type": str(container.get("type") or ""),
+        "hue_name": _hue_name(container),
+        "kind": kind_label,
+        "owner_type": str(container.get("type") or ""),
+        "owner_id": str(container.get("id") or ""),
+    }
+
+
+def _hue_list_areas() -> dict:
+    resources: dict[str, list[dict]] = {}
+    for resource in ("room", "zone", "bridge_home", "grouped_light"):
+        try:
+            resources[resource] = _hue_resource_items(_hue_request("GET", f"/clip/v2/resource/{resource}"))
+        except Exception as e:
+            if resource == "bridge_home":
+                resources[resource] = []
+            else:
+                raise e
+
+    grouped_lights = resources["grouped_light"]
+    grouped_by_id = {str(item.get("id") or ""): item for item in grouped_lights}
+    used_group_ids: set[str] = set()
+    areas: list[dict] = []
+
+    for resource, label in (("room", "房間"), ("zone", "區域"), ("bridge_home", "全家")):
+        for container in resources.get(resource, []):
+            grouped_light_id = _hue_grouped_light_for_container(container, grouped_lights)
+            if not grouped_light_id:
+                continue
+            used_group_ids.add(grouped_light_id)
+            area = _hue_area_from_container(container, grouped_light_id, label)
+            grouped = grouped_by_id.get(grouped_light_id) or {}
+            area["grouped_light_name"] = _hue_name(grouped)
+            areas.append(area)
+
+    for grouped in grouped_lights:
+        grouped_id = str(grouped.get("id") or "")
+        if not grouped_id or grouped_id in used_group_ids:
+            continue
+        owner = _hue_owner(grouped)
+        areas.append({
+            "id": grouped_id,
+            "resource_type": "grouped_light",
+            "hue_resource_id": grouped_id,
+            "hue_resource_type": "grouped_light",
+            "hue_name": _hue_name(grouped),
+            "kind": "燈群",
+            "owner_type": str(owner.get("rtype") or ""),
+            "owner_id": str(owner.get("rid") or ""),
+            "grouped_light_name": _hue_name(grouped),
+        })
+
+    areas.sort(key=lambda x: (str(x.get("kind") or ""), str(x.get("hue_name") or ""), str(x.get("id") or "")))
+    return {
+        "areas": areas,
+        "counts": {resource: len(items) for resource, items in resources.items()},
+    }
+
+
+def _hue_breathe_resource(resource_id: str, resource_type: str = "grouped_light") -> dict:
+    resource_id = str(resource_id or "").strip()
+    resource_type = str(resource_type or "grouped_light").strip() or "grouped_light"
+    if resource_type not in ("grouped_light", "light"):
+        raise RuntimeError(f"Unsupported Hue breathe resource type: {resource_type}")
+    if not resource_id:
+        raise RuntimeError("Hue resource id is required")
+    payload = _hue_request(
+        "PUT",
+        f"/clip/v2/resource/{resource_type}/{resource_id}",
+        json={"alert": {"action": "breathe"}},
+    )
+    log.info(f"[hue] breathe manual {resource_type}:{resource_id}")
+    return {"resource_id": resource_id, "resource_type": resource_type, "response": payload}
+
+
 def _fetch_todo_light_reminders() -> list[dict]:
     url = f"{HOME_BUTLER_URL.rstrip('/')}/api/todos/light-reminders"
     headers = {"X-API-Key": HOME_BUTLER_API_KEY}
@@ -530,6 +668,17 @@ def _agent_ws_hello() -> dict:
     }
 
 
+def _execute_agent_command(command_type: str, payload: dict) -> dict:
+    if command_type == "hue.list_areas":
+        return _hue_list_areas()
+    if command_type == "hue.breathe":
+        return _hue_breathe_resource(
+            str(payload.get("resource_id") or ""),
+            str(payload.get("resource_type") or "grouped_light"),
+        )
+    raise RuntimeError(f"Unsupported command type: {command_type}")
+
+
 async def _agent_ws_receive_loop(ws) -> None:
     async for raw in ws:
         try:
@@ -543,13 +692,24 @@ async def _agent_ws_receive_loop(ws) -> None:
         if message_type == "command":
             command_id = str(message.get("command_id") or "")
             command_type = str(message.get("command_type") or "")
-            log.info(f"[ws] command received but no executor yet: {command_type} id={command_id}")
-            await ws.send(json.dumps({
-                "type": "command_result",
-                "command_id": command_id,
-                "status": "failed",
-                "error": "agent command executor is not implemented yet",
-            }))
+            payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+            log.info(f"[ws] command received: {command_type} id={command_id}")
+            try:
+                result = await asyncio.to_thread(_execute_agent_command, command_type, payload)
+                await ws.send(json.dumps({
+                    "type": "command_result",
+                    "command_id": command_id,
+                    "status": "ok",
+                    "result": result,
+                }, ensure_ascii=False))
+            except Exception as e:
+                log.info(f"[ws] command failed: {command_type} id={command_id} error={e}")
+                await ws.send(json.dumps({
+                    "type": "command_result",
+                    "command_id": command_id,
+                    "status": "failed",
+                    "error": str(e),
+                }, ensure_ascii=False))
             continue
         log.info(f"[ws] message ignored: {message_type}")
 
