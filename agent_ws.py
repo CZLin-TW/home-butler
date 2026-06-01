@@ -216,5 +216,12 @@ async def send_agent_command(
             await selected_ws.send_json(message)
         result = await asyncio.wait_for(future, timeout=timeout)
         return {"agent_id": selected_agent_id, **result}
+    except asyncio.TimeoutError as e:
+        # asyncio.wait_for 逾時丟的 TimeoutError 不帶訊息，str(e) 會是空字串，
+        # 上游 lighting_api 的 detail=str(e) 就變成 {"detail":""} 毫無線索。
+        # 補上有意義訊息，並維持 TimeoutError 型別讓上游照舊對應成 504。
+        raise TimeoutError(
+            f"agent '{selected_agent_id}' did not respond to '{command_type}' within {timeout:.0f}s"
+        ) from e
     finally:
         _pending_commands.pop(command_id, None)

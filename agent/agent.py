@@ -435,7 +435,7 @@ def _hue_api_ready() -> bool:
     return bool(_hue_bridge_host() and HUE_APPLICATION_KEY)
 
 
-def _hue_request(method: str, path: str, **kwargs) -> dict:
+def _hue_request(method: str, path: str, *, client: httpx.Client | None = None, **kwargs) -> dict:
     if not _hue_api_ready():
         raise RuntimeError("Hue bridge IP or application key is not configured")
 
@@ -444,14 +444,19 @@ def _hue_request(method: str, path: str, **kwargs) -> dict:
         "hue-application-key": HUE_APPLICATION_KEY,
         "Accept": "application/json",
     }
-    response = httpx.request(
-        method,
-        f"https://{host}{path}",
-        headers=headers,
-        verify=False,
-        timeout=10.0,
-        **kwargs,
-    )
+    url = f"https://{host}{path}"
+    # 傳入共用 client 時走連線池（verify / timeout 由 client 決定）；否則維持單發行為。
+    if client is not None:
+        response = client.request(method, url, headers=headers, **kwargs)
+    else:
+        response = httpx.request(
+            method,
+            url,
+            headers=headers,
+            verify=False,
+            timeout=10.0,
+            **kwargs,
+        )
     if response.status_code >= 300:
         raise RuntimeError(f"Hue HTTP {response.status_code}: {response.text[:200]}")
     payload = response.json()
@@ -504,14 +509,19 @@ def _hue_area_from_container(container: dict, grouped_light_id: str, kind_label:
 
 def _hue_list_areas() -> dict:
     resources: dict[str, list[dict]] = {}
-    for resource in ("room", "zone", "bridge_home", "grouped_light"):
-        try:
-            resources[resource] = _hue_resource_items(_hue_request("GET", f"/clip/v2/resource/{resource}"))
-        except Exception as e:
-            if resource == "bridge_home":
-                resources[resource] = []
-            else:
-                raise e
+    # 單一 httpx.Client 重用連線：4 個 resource 請求共用一次 TCP + TLS handshake，
+    # 壓低對 bridge 的累積延遲（先前每個請求都新開連線重握手，容易拖過後端 20s 上限觸發 504）。
+    with httpx.Client(verify=False, timeout=10.0) as client:
+        for resource in ("room", "zone", "bridge_home", "grouped_light"):
+            try:
+                resources[resource] = _hue_resource_items(
+                    _hue_request("GET", f"/clip/v2/resource/{resource}", client=client)
+                )
+            except Exception as e:
+                if resource == "bridge_home":
+                    resources[resource] = []
+                else:
+                    raise e
 
     grouped_lights = resources["grouped_light"]
     grouped_by_id = {str(item.get("id") or ""): item for item in grouped_lights}
