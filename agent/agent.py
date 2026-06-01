@@ -11,6 +11,7 @@ Setup：
 """
 
 import json
+import asyncio
 import logging
 import logging.handlers
 import os
@@ -65,6 +66,9 @@ HUE_BRIDGE_IP = str(getattr(agent_config, "HUE_BRIDGE_IP", "") or "").strip()
 HUE_APPLICATION_KEY = str(getattr(agent_config, "HUE_APPLICATION_KEY", "") or "").strip()
 HUE_NOTIFY_GROUPED_LIGHT_ID = str(getattr(agent_config, "HUE_NOTIFY_GROUPED_LIGHT_ID", "") or "").strip()
 HUE_LIGHT_REMINDERS_ENABLED = _config_bool(getattr(agent_config, "HUE_LIGHT_REMINDERS_ENABLED", True), True)
+AGENT_WEBSOCKET_ENABLED = _config_bool(getattr(agent_config, "AGENT_WEBSOCKET_ENABLED", True), True)
+AGENT_WEBSOCKET_HEARTBEAT_SECONDS = max(5, int(getattr(agent_config, "AGENT_WEBSOCKET_HEARTBEAT_SECONDS", 25)))
+AGENT_WEBSOCKET_RECONNECT_SECONDS = max(2, int(getattr(agent_config, "AGENT_WEBSOCKET_RECONNECT_SECONDS", 10)))
 LOG_PATH = getattr(
     agent_config,
     "LOG_PATH",
@@ -104,6 +108,7 @@ _last_tick_at = time.monotonic()
 _watchdog_lock = threading.Lock()
 _last_hue_breathe_minute: int | None = None
 _hue_config_warning_printed = False
+_agent_ws_thread_started = False
 
 
 def _watchdog():
@@ -497,6 +502,125 @@ def process_todo_light_reminders() -> None:
     _trigger_hue_breathe(reminders)
 
 
+def _agent_ws_url() -> str:
+    base = HOME_BUTLER_URL.rstrip("/")
+    if base.startswith("https://"):
+        base = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        base = "ws://" + base[len("http://"):]
+    return f"{base}/api/agent/ws"
+
+
+def _agent_ws_capabilities() -> list[str]:
+    capabilities = ["pc_monitor"]
+    if _hue_bridge_host() and HUE_APPLICATION_KEY:
+        capabilities.append("hue")
+    return capabilities
+
+
+def _agent_ws_hello() -> dict:
+    return {
+        "type": "hello",
+        "agent_id": HOSTNAME,
+        "hostname": HOSTNAME,
+        "ip": detect_local_ip(),
+        "capabilities": _agent_ws_capabilities(),
+        "agent_sha": get_current_sha(),
+        "token": HOME_BUTLER_API_KEY,
+    }
+
+
+async def _agent_ws_receive_loop(ws) -> None:
+    async for raw in ws:
+        try:
+            message = json.loads(raw)
+        except Exception:
+            log.info(f"[ws] non-json message ignored: {str(raw)[:80]}")
+            continue
+        message_type = str(message.get("type") or "unknown")
+        if message_type in ("heartbeat_ack", "hello_ack"):
+            continue
+        if message_type == "command":
+            command_id = str(message.get("command_id") or "")
+            command_type = str(message.get("command_type") or "")
+            log.info(f"[ws] command received but no executor yet: {command_type} id={command_id}")
+            await ws.send(json.dumps({
+                "type": "command_result",
+                "command_id": command_id,
+                "status": "failed",
+                "error": "agent command executor is not implemented yet",
+            }))
+            continue
+        log.info(f"[ws] message ignored: {message_type}")
+
+
+async def _agent_ws_heartbeat_loop(ws) -> None:
+    while True:
+        await asyncio.sleep(AGENT_WEBSOCKET_HEARTBEAT_SECONDS)
+        await ws.send(json.dumps({
+            "type": "heartbeat",
+            "agent_id": HOSTNAME,
+            "ip": detect_local_ip(),
+            "agent_sha": get_current_sha(),
+            "ts": time.time(),
+        }))
+
+
+async def _agent_ws_session(websockets_module) -> None:
+    url = _agent_ws_url()
+    async with websockets_module.connect(
+        url,
+        ping_interval=20,
+        ping_timeout=20,
+        open_timeout=15,
+    ) as ws:
+        await ws.send(json.dumps(_agent_ws_hello()))
+        raw_ack = await asyncio.wait_for(ws.recv(), timeout=10.0)
+        ack = json.loads(raw_ack)
+        if ack.get("type") != "hello_ack":
+            raise RuntimeError(f"hello rejected: {ack}")
+        log.info(
+            f"[ws] connected agent_id={ack.get('agent_id')} "
+            f"capabilities={','.join(_agent_ws_capabilities())}"
+        )
+        receive_task = asyncio.create_task(_agent_ws_receive_loop(ws))
+        heartbeat_task = asyncio.create_task(_agent_ws_heartbeat_loop(ws))
+        done, pending = await asyncio.wait(
+            {receive_task, heartbeat_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
+
+
+def _run_agent_ws_forever() -> None:
+    try:
+        import websockets
+    except ImportError:
+        log.info("[ws] disabled: missing dependency 'websockets'; run `pip install -r requirements.txt` in agent folder")
+        return
+
+    while True:
+        try:
+            asyncio.run(_agent_ws_session(websockets))
+        except Exception as e:
+            log.info(f"[ws] disconnected: {e}; reconnecting in {AGENT_WEBSOCKET_RECONNECT_SECONDS}s")
+        time.sleep(AGENT_WEBSOCKET_RECONNECT_SECONDS)
+
+
+def start_agent_websocket_thread() -> None:
+    global _agent_ws_thread_started
+    if not AGENT_WEBSOCKET_ENABLED or _agent_ws_thread_started:
+        return
+    _agent_ws_thread_started = True
+    threading.Thread(target=_run_agent_ws_forever, daemon=True).start()
+    log.info(f"[ws] background channel starting url={_agent_ws_url()}")
+
+
 def main():
     global _last_tick_at
     log.info(
@@ -504,6 +628,7 @@ def main():
         f"auto_update={AUTO_UPDATE} → {HOME_BUTLER_URL}  log={LOG_PATH}"
     )
     threading.Thread(target=_watchdog, daemon=True).start()
+    start_agent_websocket_thread()
     tick_count = 0
     while True:
         t0 = time.monotonic()

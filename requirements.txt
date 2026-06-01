@@ -6,3 +6,4 @@ google-auth
 anthropic
 pytz
 httpx
+websockets

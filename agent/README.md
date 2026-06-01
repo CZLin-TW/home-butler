@@ -130,7 +130,24 @@ HUE_LIGHT_REMINDERS_ENABLED = True
 
 之後 agent 每 60 秒會查 home-butler `/api/todos/light-reminders`。如果有「有時間、已到期、未完成、燈光提醒=TRUE」的待辦，這一輪只觸發一次 Hue breathe；多筆待辦同時到期也不連續閃多次。待辦被標記完成後，下一輪 API 不再回傳，燈光提醒自然停止。
 
-### 5. 設置 LibreHardwareMonitor
+### 5. WebSocket 即時通道
+
+agent 會主動連到 home-butler 的 `/api/agent/ws`，建立一條從 Render 回到家中 PC 的即時通道。第一階段只做 hello、heartbeat、在線狀態查詢；後續 Hue 區域控制、Dashboard 照明頁面的即時按鈕會走這條通道。
+
+這個通道預設開啟，使用同一個 `HOME_BUTLER_API_KEY` 驗證。如果要暫時停用，可以在 `agent_config.py` 加：
+
+```python
+AGENT_WEBSOCKET_ENABLED = False
+```
+
+如果 log 出現 `[ws] disabled: missing dependency 'websockets'`，代表程式碼已更新但套件還沒裝，跑一次：
+
+```powershell
+cd C:\butler-agent\repo\agent
+& "C:\Program Files\Python314\python.exe" -m pip install -r requirements.txt
+```
+
+### 6. 設置 LibreHardwareMonitor
 
 CPU 溫度在 Windows 上純 Python 讀不到，要靠 LHM 跑著 + 開 web server 當 sensor bridge：
 
@@ -144,7 +161,7 @@ CPU 溫度在 Windows 上純 Python 讀不到，要靠 LHM 跑著 + 開 web serv
 
 LHM 沒跑 / 端點掛了 agent 不會 crash，只是 `cpu_temp_c` 回 None。
 
-### 6. 第一次手動跑驗證
+### 7. 第一次手動跑驗證
 
 ```powershell
 cd C:\butler-agent\repo\agent
@@ -154,6 +171,8 @@ cd C:\butler-agent\repo\agent
 預期看到：
 ```
 agent start: Xeon-1230V2 (192.168.68.55) → https://home-butler.onrender.com  log=...
+[ws] background channel starting url=wss://home-butler.onrender.com/api/agent/ws
+[ws] connected agent_id=Xeon-1230V2 capabilities=pc_monitor,hue
 [push] ok cpu=1.8% gpu=0.0% cpu_t=45.0C gpu_t=39.0C fah_paused=True
 ```
 
@@ -232,6 +251,8 @@ LOG_PATH = r"C:\butler-agent\agent.log"
 
 **預設自動更新**：agent 每 60 ticks（≈ 1 小時）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。`main` push 完之後 1 小時內所有 PC 自動跟上，**不用手動**。
 
+auto-update 只會拉新程式碼，不會自動安裝新 Python 套件。遇到這類更新（例如 WebSocket 通道新增 `websockets`）時，要在 PC 上手動跑一次 `python -m pip install -r requirements.txt`，之後同一個套件就不用再裝。
+
 第一次套用 auto-update 功能本身那次升級要手動（拉新版 agent.py 進來才會有自更新邏輯）：
 
 ```powershell
@@ -275,6 +296,7 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Head 1
 | `cpu_temp_c` 一直是 None / `[lhm] timed out` | LHM 沒在跑 / port 8085 沒開 / 沒有 admin 權限 | 確認 LHM process 在、Web Server option 勾了、首次啟動給 admin |
 | 重開機後 `cpu_temp_c` 短時間是 None，登入後恢復 | LHM 用 startup folder 模式只在 logon 後啟，agent 是 OnStart 早於 logon | 改 LHM 也用 Task Scheduler at-startup with highest privileges，或設 auto-login |
 | `[fah] lufah not installed` | lufah 套件沒裝、或裝在不同的 python 而 agent 找不到 | `pip install lufah` 到跑 F@H 排程的那個 python；agent 透過 PATH 找 `lufah.exe` 可以跨 python install |
+| `[ws] disabled: missing dependency 'websockets'` | agent 已拉到 WebSocket 版程式碼，但本機 python 還沒安裝新套件 | 在 `C:\butler-agent\repo\agent` 跑 `python -m pip install -r requirements.txt`，再重啟 ButlerAgent |
 | Task Scheduler `/ru SYSTEM` 跑失敗 | SYSTEM 帳號讀不到 user-scoped 套件（pynvml、psutil 等） | 一律用本機使用者帳號 `/ru "$env:USERNAME"`，**不要用 SYSTEM** |
 
 ---

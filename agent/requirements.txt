@@ -1,3 +1,4 @@
 psutil
 nvidia-ml-py
 httpx
+websockets

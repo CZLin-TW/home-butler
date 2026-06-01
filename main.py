@@ -23,6 +23,10 @@ app.include_router(notify_router)
 from web_api import router as web_api_router
 app.include_router(web_api_router)
 
+# Local PC agent realtime channel
+from agent_ws import router as agent_ws_router
+app.include_router(agent_ws_router)
+
 
 # 啟動時把 PC 監控歷史 + 感測器歷史 + 空調狀態歷史從 Sheet 撈回 in-memory ring
 # buffer（解 Render free instance 重啟資料遺失）+ spawn polling thread。

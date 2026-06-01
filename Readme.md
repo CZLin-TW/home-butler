@@ -35,7 +35,7 @@
 | 排程指令 | 定時操作家電（如「11 點關電風扇」「睡前調 27 度，早上 8 點關」），設備排程完成時自動通知 |
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
-| PC 監控 | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
+| PC agent | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖；同一支 agent 也建立 WebSocket 即時通道，供 Hue 等區網設備控制使用。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
 | Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
 
 ---
@@ -88,7 +88,7 @@
 - **天氣**：中央氣象署開放資料 API（全台鄉鎮一週預報，含體感溫度）
 - **外部行事曆**：Notion API（同步到待辦 Sheet，支援每人獨立篩選條件與權限設定）
 - **Dashboard API**：REST API（供網頁版 Dashboard 直接操作裝置、待辦、食品、排程等）
-- **PC 監控**：每台 PC 跑 `agent/agent.py`（psutil + pynvml + LibreHardwareMonitor + lufah），每 60 秒 push 指標到 `/api/computers/heartbeat`；home-butler 端用 in-memory ring buffer（24h × 60s）暫存，Dashboard 透過 `/api/computers/status` 拉
+- **PC agent**：每台 PC 跑 `agent/agent.py`（psutil + pynvml + LibreHardwareMonitor + lufah），每 60 秒 push 指標到 `/api/computers/heartbeat`；home-butler 端用 in-memory ring buffer（24h × 60s）暫存，Dashboard 透過 `/api/computers/status` 拉。agent 同時用 WebSocket 主動連回 `/api/agent/ws`，讓 Render 可以把需要區網執行的任務（例如 Hue）交給家中 PC。
 
 ---
 
@@ -554,6 +554,8 @@ function sendRealtimeNotification() {
 | /api/members | GET | 列出所有啟用的家庭成員 |
 | /api/computers/heartbeat | POST | PC agent 每 60 秒 push 指標（cpu_pct, ram_pct, gpu_pct, gpu_temp_c, cpu_temp_c, fah, ip, hostname, cpu_model, gpu_model）|
 | /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
+| /api/agent/ws | WebSocket | PC agent 主動連回 Render 的即時通道。第一階段提供 hello / heartbeat / 在線狀態，後續用來承接 Hue 等區網命令 |
+| /api/agent/status | GET | 列出目前連線中的 agent 與 capabilities，需 `X-API-Key` |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，走跟 LINE bot 相同的 Claude pipeline，回 `{reply}`；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
 
 ---
@@ -715,6 +717,7 @@ function sendRealtimeNotification() {
 | 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦 |
 | 即時提醒 | 每 15 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
 | Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對設定的 Hue grouped_light 觸發 breathe；同一輪多筆待辦只呼吸一次 |
+| Agent 即時通道 | PC agent 常駐 WebSocket | PC agent 每約 25 秒 heartbeat 到 `/api/agent/ws`，後端可用 `/api/agent/status` 確認在線狀態 |
 
 推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。
 
@@ -827,6 +830,7 @@ function sendRealtimeNotification() {
 | observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
 | web_api.py | REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則，以及 Siri 自然語言入口 `/api/assistant`） |
+| agent_ws.py | PC agent WebSocket registry（agent hello / heartbeat / 在線狀態），讓 Render 有一條可回到家中區網的即時通道 |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
 | sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |

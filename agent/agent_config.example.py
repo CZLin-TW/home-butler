@@ -28,6 +28,12 @@ GPU_MODEL = ""    # 例如 "GTX-1650S"、"RTX-4070Ti"
 # HUE_NOTIFY_GROUPED_LIGHT_ID = ""  # hue_probe.py list 找到的 grouped_light id
 # HUE_LIGHT_REMINDERS_ENABLED = True
 
+# Realtime command channel（選填）：agent 主動用 WebSocket 連到 home-butler/Render。
+# 第一階段只回報在線 + heartbeat，後續會承接 Hue 即時控制 command。
+# AGENT_WEBSOCKET_ENABLED = True
+# AGENT_WEBSOCKET_HEARTBEAT_SECONDS = 25
+# AGENT_WEBSOCKET_RECONNECT_SECONDS = 10
+
 # Auto-update：每小時 check 一次 origin/main，有新 commit 就 git pull
 # + os._exit(1) 讓 Task Scheduler 重啟 process 拉新 code。預設啟用。
 # 緊急時改 False 暫停這台 PC 接收新版（例如 main 推了壞 code 你要鎖版本 debug）。
