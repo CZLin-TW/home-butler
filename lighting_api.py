@@ -24,6 +24,12 @@ class HueBreatheRequest(BaseModel):
     resource_type: Optional[str] = "grouped_light"
 
 
+class HueAreaStateRequest(BaseModel):
+    on: Optional[bool] = None
+    brightness: Optional[float] = None
+    resource_type: Optional[str] = "grouped_light"
+
+
 def _agent_error(status_code: int, e: Exception) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(e))
 
@@ -66,6 +72,36 @@ async def api_update_lighting_area(area_id: str, req: HueAreaUpdateRequest):
         return {"ok": True, "setting": setting}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/lighting/areas/{area_id}/state")
+async def api_set_lighting_area_state(area_id: str, req: HueAreaStateRequest):
+    if req.on is None and req.brightness is None:
+        raise HTTPException(status_code=400, detail="on or brightness is required")
+    try:
+        message = await send_agent_command(
+            "hue.set_state",
+            {
+                "area_id": area_id,
+                "on": req.on,
+                "brightness": req.brightness,
+                "resource_type": req.resource_type or "grouped_light",
+            },
+            required_capability="hue",
+            timeout=15.0,
+        )
+    except TimeoutError as e:
+        raise _agent_error(504, e)
+    except Exception as e:
+        raise _agent_error(503, e)
+
+    if message.get("status") != "ok":
+        raise HTTPException(status_code=502, detail=message.get("error") or "Hue command failed")
+    return {
+        "ok": True,
+        "agent_id": message.get("agent_id", ""),
+        "result": message.get("result", {}),
+    }
 
 
 @router.post("/lighting/breathe")

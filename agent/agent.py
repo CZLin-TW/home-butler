@@ -507,6 +507,17 @@ def _hue_area_from_container(container: dict, grouped_light_id: str, kind_label:
     }
 
 
+def _hue_grouped_state(grouped: dict) -> dict:
+    """Pull current on/brightness out of a grouped_light resource for the dashboard."""
+    on = grouped.get("on") if isinstance(grouped.get("on"), dict) else {}
+    dimming = grouped.get("dimming") if isinstance(grouped.get("dimming"), dict) else {}
+    brightness = dimming.get("brightness")
+    return {
+        "on": bool(on.get("on")) if "on" in on else None,
+        "brightness": float(brightness) if isinstance(brightness, (int, float)) else None,
+    }
+
+
 def _hue_list_areas() -> dict:
     resources: dict[str, list[dict]] = {}
     # 單一 httpx.Client 重用連線：4 個 resource 請求共用一次 TCP + TLS handshake，
@@ -537,6 +548,7 @@ def _hue_list_areas() -> dict:
             area = _hue_area_from_container(container, grouped_light_id, label)
             grouped = grouped_by_id.get(grouped_light_id) or {}
             area["grouped_light_name"] = _hue_name(grouped)
+            area.update(_hue_grouped_state(grouped))
             areas.append(area)
 
     for grouped in grouped_lights:
@@ -554,6 +566,7 @@ def _hue_list_areas() -> dict:
             "owner_type": str(owner.get("rtype") or ""),
             "owner_id": str(owner.get("rid") or ""),
             "grouped_light_name": _hue_name(grouped),
+            **_hue_grouped_state(grouped),
         })
 
     areas.sort(key=lambda x: (str(x.get("kind") or ""), str(x.get("hue_name") or ""), str(x.get("id") or "")))
@@ -577,6 +590,27 @@ def _hue_breathe_resource(resource_id: str, resource_type: str = "grouped_light"
     )
     log.info(f"[hue] breathe manual {resource_type}:{resource_id}")
     return {"resource_id": resource_id, "resource_type": resource_type, "response": payload}
+
+
+def _hue_set_state(resource_id: str, on=None, brightness=None, resource_type: str = "grouped_light") -> dict:
+    resource_id = str(resource_id or "").strip()
+    resource_type = str(resource_type or "grouped_light").strip() or "grouped_light"
+    if resource_type not in ("grouped_light", "light"):
+        raise RuntimeError(f"Unsupported Hue resource type: {resource_type}")
+    if not resource_id:
+        raise RuntimeError("Hue resource id is required")
+
+    body: dict = {}
+    if on is not None:
+        body["on"] = {"on": bool(on)}
+    if brightness is not None:
+        body["dimming"] = {"brightness": max(1.0, min(100.0, float(brightness)))}
+    if not body:
+        raise RuntimeError("Nothing to set: provide on and/or brightness")
+
+    _hue_request("PUT", f"/clip/v2/resource/{resource_type}/{resource_id}", json=body)
+    log.info(f"[hue] set_state {resource_type}:{resource_id} {body}")
+    return {"resource_id": resource_id, "resource_type": resource_type, "applied": body}
 
 
 def _hue_find_grouped_light_id_by_name(area_name: str) -> str:
@@ -701,6 +735,13 @@ def _execute_agent_command(command_type: str, payload: dict) -> dict:
         return _hue_breathe_resource(
             str(payload.get("resource_id") or ""),
             str(payload.get("resource_type") or "grouped_light"),
+        )
+    if command_type == "hue.set_state":
+        return _hue_set_state(
+            str(payload.get("area_id") or payload.get("resource_id") or ""),
+            on=payload.get("on"),
+            brightness=payload.get("brightness"),
+            resource_type=str(payload.get("resource_type") or "grouped_light"),
         )
     raise RuntimeError(f"Unsupported command type: {command_type}")
 
