@@ -109,6 +109,7 @@ _watchdog_lock = threading.Lock()
 _last_hue_breathe_minute_by_resource: dict[str, int] = {}
 _hue_config_warning_printed = False
 _agent_ws_thread_started = False
+_lock_handle = None  # 持有單一實例鎖的檔案 handle；整個 process 生命週期都要 hold 住
 
 
 def _watchdog():
@@ -188,6 +189,7 @@ HOSTNAME = socket.gethostname()
 # 推送到所有 PC 拉新版。
 UPDATE_CHECK_TICKS = max(1, int(getattr(agent_config, "AUTO_UPDATE_CHECK_TICKS", 5)))
 _REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LOCK_PATH = os.path.join(os.path.dirname(_REPO_DIR), "agent.lock")  # 機器層級單一實例鎖（在 repo 外，git 不會看到）
 
 
 def _git(*args, timeout=30) -> str:
@@ -848,8 +850,46 @@ def start_agent_websocket_thread() -> None:
     log.info(f"[ws] background channel starting url={_agent_ws_url()}")
 
 
+def _acquire_singleton_lock(timeout: float = 12.0) -> bool:
+    """單一實例鎖：每台機器只允許一個 agent 程序在跑。
+
+    對 lock file 取得 OS 層級獨佔鎖、整個 process 生命週期 hold 住（process 結束或 crash
+    時 OS 自動釋放，不會留 stale lock）。會重試一小段時間，好讓 self-restart 的後繼 process
+    在前一個 process exit、釋放鎖之後接手。
+
+    回傳 False 代表已有另一個 agent 在跑（呼叫端應直接退出）。用來根治「self-restart 留孤兒
+    / 手動重複啟動」造成多隻 agent 搶同一個 WebSocket 身分互踢（1012）的問題。"""
+    global _lock_handle
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            f = open(_LOCK_PATH, "a+")
+        except Exception as e:
+            log.info(f"[lock] can't open {_LOCK_PATH}: {e}; running without single-instance guard")
+            return True  # fail-open：lock file IO 出問題不該卡死 agent 本身
+        try:
+            f.seek(0)
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            f.close()
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.5)
+            continue
+        _lock_handle = f  # 留住 handle → 鎖一直被持有，直到 process 結束
+        return True
+
+
 def main():
     global _last_tick_at
+    if not _acquire_singleton_lock():
+        log.info("[lock] another agent instance is already running on this machine; exiting")
+        return
     log.info(
         f"agent start: {HOSTNAME} ({detect_local_ip()}) sha={get_current_sha()} "
         f"auto_update={AUTO_UPDATE} → {HOME_BUTLER_URL}  log={LOG_PATH}"
