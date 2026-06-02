@@ -290,6 +290,12 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Head 1
 
 或所有 PC 一起看（home-butler Dashboard 上目前還沒 expose，要的話 agent payload 加一個 sha 欄位即可）。
 
+### 單一實例鎖（防重複 agent）
+
+agent 啟動時先對 `<butler-agent>/agent.lock`（在 repo 外，例如 `C:\butler-agent\agent.lock`）取一個 OS 層級獨佔鎖、整個 process 期間持有（process 結束或 crash 由 OS 自動釋放，不留 stale lock）。**已經有一隻 agent 在跑時，新啟動的會直接乾淨退出（exit 0）**——所以不論 self-restart 留下殘餘、還是手動 `schtasks /run` 重複觸發，每台機器都只會有一隻 agent 活著。self-restart 時鎖會短暫重試，讓後繼 process 在前一個退出、釋放鎖後順利接手，不會把自己擋掉。
+
+> 沒這個鎖時的雷：多隻 agent 用同一個 hostname 連回 `/api/agent/ws` 會互相把對方踢下線（server 對同 agent_id 的舊連線送 close 1012），Hue 指令時好時壞——送到舊記憶體 code 的那隻回「Unsupported command type」、送到互踢中途的會 timeout。
+
 ---
 
 ## 踩過的雷（快速排查指南）
