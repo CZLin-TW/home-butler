@@ -40,6 +40,11 @@ class HueAreaEffectRequest(BaseModel):
     resource_type: Optional[str] = "grouped_light"
 
 
+class HueAreaNotificationRequest(BaseModel):
+    notification: Optional[str] = "alert:breathe"
+    resource_type: Optional[str] = "grouped_light"
+
+
 def _agent_error(status_code: int, e: Exception) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(e))
 
@@ -159,6 +164,35 @@ async def api_set_lighting_area_effect(area_id: str, req: HueAreaEffectRequest):
             },
             required_capability="hue",
             timeout=20.0,
+        )
+    except TimeoutError as e:
+        raise _agent_error(504, e)
+    except Exception as e:
+        raise _agent_error(503, e)
+
+    if message.get("status") != "ok":
+        raise HTTPException(status_code=502, detail=message.get("error") or "Hue command failed")
+    return {
+        "ok": True,
+        "agent_id": message.get("agent_id", ""),
+        "result": message.get("result", {}),
+    }
+
+
+@router.post("/lighting/areas/{area_id}/notification")
+async def api_send_lighting_area_notification(area_id: str, req: HueAreaNotificationRequest):
+    if not area_id:
+        raise HTTPException(status_code=400, detail="area_id is required")
+    try:
+        message = await send_agent_command(
+            "hue.notify",
+            {
+                "area_id": area_id,
+                "notification": req.notification or "alert:breathe",
+                "resource_type": req.resource_type or "grouped_light",
+            },
+            required_capability="hue",
+            timeout=15.0,
         )
     except TimeoutError as e:
         raise _agent_error(504, e)

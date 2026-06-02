@@ -756,6 +756,75 @@ def _hue_effect_options(light_ids: list[str], lights_by_id: dict[str, dict]) -> 
     return options
 
 
+_HUE_NOTIFICATION_LABELS = {
+    "breathe": "呼吸燈",
+    "no_signal": "無訊號",
+    "on_off": "閃爍",
+    "on_off_color": "彩色閃爍",
+    "alternating": "交替閃爍",
+}
+
+
+def _hue_notification_label(action: str) -> str:
+    action = str(action or "").strip()
+    if action in _HUE_NOTIFICATION_LABELS:
+        return _HUE_NOTIFICATION_LABELS[action]
+    return action.replace("_", " ").strip().title() or action
+
+
+def _hue_action_values(block) -> set[str]:
+    values: set[str] = set()
+
+    def walk(value) -> None:
+        if isinstance(value, dict):
+            for key, raw in value.items():
+                if key == "action_values" and isinstance(raw, list):
+                    values.update(str(item).strip() for item in raw if str(item or "").strip())
+                else:
+                    walk(raw)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(block)
+    return values
+
+
+def _hue_notification_options(grouped: dict) -> list[dict]:
+    options: list[dict] = [{
+        "key": "alert:breathe",
+        "label": "呼吸燈",
+        "kind": "alert",
+        "action": "breathe",
+    }]
+
+    seen = {"alert:breathe"}
+    for action in sorted(_hue_action_values(grouped.get("alert"))):
+        key = f"alert:{action}"
+        if action == "none" or key in seen:
+            continue
+        seen.add(key)
+        options.append({
+            "key": key,
+            "label": _hue_notification_label(action),
+            "kind": "alert",
+            "action": action,
+        })
+
+    for action in sorted(_hue_action_values(grouped.get("signaling"))):
+        key = f"signaling:{action}"
+        if action in ("no_signal", "none") or key in seen:
+            continue
+        seen.add(key)
+        options.append({
+            "key": key,
+            "label": _hue_notification_label(action),
+            "kind": "signaling",
+            "action": action,
+        })
+    return options
+
+
 def _hue_list_areas() -> dict:
     # 單一 httpx.Client 重用連線：多個 resource 請求共用一次 TCP + TLS handshake，
     # 壓低對 bridge 的累積延遲（先前每個請求都新開連線重握手，容易拖過後端 20s 上限觸發 504）。
@@ -794,6 +863,7 @@ def _hue_list_areas() -> dict:
                 resources.get("scene", []),
                 resources.get("smart_scene", []),
             )
+            area["notifications"] = _hue_notification_options(grouped)
             area["effects"] = _hue_effect_options(light_ids, lights_by_id)
             areas.append(area)
 
@@ -815,6 +885,7 @@ def _hue_list_areas() -> dict:
             **_hue_grouped_state(grouped),
             "light_count": 0,
             "scenes": [],
+            "notifications": _hue_notification_options(grouped),
             "effects": [],
         })
 
@@ -839,6 +910,44 @@ def _hue_breathe_resource(resource_id: str, resource_type: str = "grouped_light"
     )
     log.info(f"[hue] breathe manual {resource_type}:{resource_id}")
     return {"resource_id": resource_id, "resource_type": resource_type, "response": payload}
+
+
+def _hue_notify_resource(
+    resource_id: str,
+    notification: str = "alert:breathe",
+    resource_type: str = "grouped_light",
+) -> dict:
+    resource_id = str(resource_id or "").strip()
+    resource_type = str(resource_type or "grouped_light").strip() or "grouped_light"
+    notification = str(notification or "alert:breathe").strip() or "alert:breathe"
+    if resource_type not in ("grouped_light", "light"):
+        raise RuntimeError(f"Unsupported Hue notification resource type: {resource_type}")
+    if not resource_id:
+        raise RuntimeError("Hue resource id is required")
+
+    if ":" in notification:
+        kind, action = notification.split(":", 1)
+    else:
+        kind, action = "alert", notification
+    kind = kind.strip()
+    action = action.strip()
+    if kind == "alert":
+        body = {"alert": {"action": action}}
+    elif kind == "signaling":
+        body = {"signaling": {"signal": action}}
+    else:
+        raise RuntimeError(f"Unsupported Hue notification kind: {kind}")
+    if not action:
+        raise RuntimeError("Hue notification action is required")
+
+    payload = _hue_request("PUT", f"/clip/v2/resource/{resource_type}/{resource_id}", json=body)
+    log.info(f"[hue] notify {resource_type}:{resource_id} {notification}")
+    return {
+        "resource_id": resource_id,
+        "resource_type": resource_type,
+        "notification": notification,
+        "response": payload,
+    }
 
 
 def _hue_set_state(resource_id: str, on=None, brightness=None, resource_type: str = "grouped_light") -> dict:
@@ -1115,6 +1224,12 @@ def _execute_agent_command(command_type: str, payload: dict) -> dict:
     if command_type == "hue.breathe":
         return _hue_breathe_resource(
             str(payload.get("resource_id") or ""),
+            str(payload.get("resource_type") or "grouped_light"),
+        )
+    if command_type == "hue.notify":
+        return _hue_notify_resource(
+            str(payload.get("area_id") or payload.get("resource_id") or ""),
+            str(payload.get("notification") or "alert:breathe"),
             str(payload.get("resource_type") or "grouped_light"),
         )
     if command_type == "hue.set_state":
