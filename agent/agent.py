@@ -778,7 +778,7 @@ def _hue_action_values(block) -> set[str]:
     def walk(value) -> None:
         if isinstance(value, dict):
             for key, raw in value.items():
-                if key == "action_values" and isinstance(raw, list):
+                if key in ("action_values", "signal_values") and isinstance(raw, list):
                     values.update(str(item).strip() for item in raw if str(item or "").strip())
                 else:
                     walk(raw)
