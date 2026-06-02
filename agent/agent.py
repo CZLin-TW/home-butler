@@ -520,24 +520,195 @@ def _hue_grouped_state(grouped: dict) -> dict:
     }
 
 
-def _hue_list_areas() -> dict:
+def _hue_fetch_resources(client: httpx.Client, resource_names: tuple[str, ...]) -> dict[str, list[dict]]:
     resources: dict[str, list[dict]] = {}
-    # 單一 httpx.Client 重用連線：4 個 resource 請求共用一次 TCP + TLS handshake，
+    optional = {"bridge_home", "device", "light", "scene"}
+    for resource in resource_names:
+        try:
+            resources[resource] = _hue_resource_items(
+                _hue_request("GET", f"/clip/v2/resource/{resource}", client=client)
+            )
+        except Exception as e:
+            if resource in optional:
+                log.info(f"[hue] optional resource {resource} unavailable: {e}")
+                resources[resource] = []
+            else:
+                raise
+    return resources
+
+
+def _hue_device_light_ids(device: dict) -> list[str]:
+    ids: list[str] = []
+    for service in device.get("services") or []:
+        if isinstance(service, dict) and service.get("rtype") == "light" and service.get("rid"):
+            ids.append(str(service.get("rid")))
+    return ids
+
+
+def _hue_container_light_ids(
+    container: dict,
+    containers_by_key: dict[tuple[str, str], dict],
+    devices_by_id: dict[str, dict],
+    lights_by_id: dict[str, dict],
+    seen_containers: set[tuple[str, str]] | None = None,
+) -> list[str]:
+    container_key = (str(container.get("type") or ""), str(container.get("id") or ""))
+    if seen_containers is None:
+        seen_containers = set()
+    if container_key in seen_containers:
+        return []
+    seen_containers.add(container_key)
+
+    ids: list[str] = []
+    seen_light_ids: set[str] = set()
+
+    def add_light(light_id: str) -> None:
+        if light_id and light_id in lights_by_id and light_id not in seen_light_ids:
+            seen_light_ids.add(light_id)
+            ids.append(light_id)
+
+    for child in container.get("children") or []:
+        if not isinstance(child, dict):
+            continue
+        rid = str(child.get("rid") or "")
+        rtype = str(child.get("rtype") or "")
+        if rtype == "light":
+            add_light(rid)
+        elif rtype == "device":
+            for light_id in _hue_device_light_ids(devices_by_id.get(rid, {})):
+                add_light(light_id)
+        elif rtype in ("room", "zone"):
+            nested = containers_by_key.get((rtype, rid))
+            if nested:
+                for light_id in _hue_container_light_ids(
+                    nested,
+                    containers_by_key,
+                    devices_by_id,
+                    lights_by_id,
+                    seen_containers,
+                ):
+                    add_light(light_id)
+    return ids
+
+
+def _hue_scene_summary(scene: dict) -> dict:
+    group = scene.get("group") if isinstance(scene.get("group"), dict) else {}
+    return {
+        "id": str(scene.get("id") or ""),
+        "name": _hue_name(scene) or str(scene.get("id") or ""),
+        "group_id": str(group.get("rid") or ""),
+        "group_type": str(group.get("rtype") or ""),
+    }
+
+
+def _hue_scenes_for_container(container: dict, scenes: list[dict]) -> list[dict]:
+    container_id = str(container.get("id") or "")
+    container_type = str(container.get("type") or "")
+    items: list[dict] = []
+    for scene in scenes:
+        group = scene.get("group") if isinstance(scene.get("group"), dict) else {}
+        if str(group.get("rid") or "") == container_id and str(group.get("rtype") or "") == container_type:
+            summary = _hue_scene_summary(scene)
+            if summary["id"]:
+                items.append(summary)
+    items.sort(key=lambda item: (str(item.get("name") or ""), str(item.get("id") or "")))
+    return items
+
+
+_HUE_EFFECT_LABELS = {
+    "no_effect": "無效果",
+    "candle": "燭火",
+    "fire": "火焰",
+    "prism": "Prism",
+    "sparkle": "Sparkle",
+    "glisten": "Glisten",
+    "opal": "Opal",
+    "cosmos": "Cosmos",
+    "enchant": "Enchant",
+    "sunbeam": "Sunbeam",
+    "underwater": "Underwater",
+}
+
+
+def _hue_effect_label(effect: str) -> str:
+    effect = str(effect or "").strip()
+    if effect in _HUE_EFFECT_LABELS:
+        return _HUE_EFFECT_LABELS[effect]
+    return effect.replace("_", " ").strip().title() or effect
+
+
+def _hue_effect_values(block) -> set[str]:
+    values: set[str] = set()
+    keys = {"effect_values", "status_values", "action_values"}
+
+    def walk(value) -> None:
+        if isinstance(value, dict):
+            for key, raw in value.items():
+                if key in keys and isinstance(raw, list):
+                    values.update(str(item).strip() for item in raw if str(item or "").strip())
+                else:
+                    walk(raw)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(block)
+    return values
+
+
+def _hue_effect_values_for_light(light: dict) -> set[str]:
+    return (
+        _hue_effect_values(light.get("effects"))
+        | _hue_effect_values(light.get("effects_v2"))
+    )
+
+
+def _hue_effect_options(light_ids: list[str], lights_by_id: dict[str, dict]) -> list[dict]:
+    total = len(light_ids)
+    if total <= 0:
+        return []
+
+    counts: dict[str, int] = {}
+    for light_id in light_ids:
+        for effect in _hue_effect_values_for_light(lights_by_id.get(light_id, {})):
+            counts[effect] = counts.get(effect, 0) + 1
+
+    def sort_key(item: tuple[str, int]) -> tuple[int, str]:
+        effect, _count = item
+        return (0 if effect == "no_effect" else 1, _hue_effect_label(effect).lower())
+
+    options: list[dict] = []
+    for effect, count in sorted(counts.items(), key=sort_key):
+        if not effect:
+            continue
+        options.append({
+            "key": effect,
+            "label": _hue_effect_label(effect),
+            "supported_count": count,
+            "total_count": total,
+            "partial": count < total,
+        })
+    return options
+
+
+def _hue_list_areas() -> dict:
+    # 單一 httpx.Client 重用連線：多個 resource 請求共用一次 TCP + TLS handshake，
     # 壓低對 bridge 的累積延遲（先前每個請求都新開連線重握手，容易拖過後端 20s 上限觸發 504）。
     with httpx.Client(verify=False, timeout=10.0) as client:
-        for resource in ("room", "zone", "bridge_home", "grouped_light"):
-            try:
-                resources[resource] = _hue_resource_items(
-                    _hue_request("GET", f"/clip/v2/resource/{resource}", client=client)
-                )
-            except Exception as e:
-                if resource == "bridge_home":
-                    resources[resource] = []
-                else:
-                    raise e
+        resources = _hue_fetch_resources(
+            client,
+            ("room", "zone", "bridge_home", "grouped_light", "device", "light", "scene"),
+        )
 
     grouped_lights = resources["grouped_light"]
     grouped_by_id = {str(item.get("id") or ""): item for item in grouped_lights}
+    lights_by_id = {str(item.get("id") or ""): item for item in resources.get("light", [])}
+    devices_by_id = {str(item.get("id") or ""): item for item in resources.get("device", [])}
+    containers_by_key = {
+        (str(container.get("type") or ""), str(container.get("id") or "")): container
+        for resource in ("room", "zone", "bridge_home")
+        for container in resources.get(resource, [])
+    }
     used_group_ids: set[str] = set()
     areas: list[dict] = []
 
@@ -551,6 +722,10 @@ def _hue_list_areas() -> dict:
             grouped = grouped_by_id.get(grouped_light_id) or {}
             area["grouped_light_name"] = _hue_name(grouped)
             area.update(_hue_grouped_state(grouped))
+            light_ids = _hue_container_light_ids(container, containers_by_key, devices_by_id, lights_by_id)
+            area["light_count"] = len(light_ids)
+            area["scenes"] = _hue_scenes_for_container(container, resources.get("scene", []))
+            area["effects"] = _hue_effect_options(light_ids, lights_by_id)
             areas.append(area)
 
     for grouped in grouped_lights:
@@ -569,6 +744,9 @@ def _hue_list_areas() -> dict:
             "owner_id": str(owner.get("rid") or ""),
             "grouped_light_name": _hue_name(grouped),
             **_hue_grouped_state(grouped),
+            "light_count": 0,
+            "scenes": [],
+            "effects": [],
         })
 
     areas.sort(key=lambda x: (str(x.get("kind") or ""), str(x.get("hue_name") or ""), str(x.get("id") or "")))
@@ -613,6 +791,113 @@ def _hue_set_state(resource_id: str, on=None, brightness=None, resource_type: st
     _hue_request("PUT", f"/clip/v2/resource/{resource_type}/{resource_id}", json=body)
     log.info(f"[hue] set_state {resource_type}:{resource_id} {body}")
     return {"resource_id": resource_id, "resource_type": resource_type, "applied": body}
+
+
+def _hue_recall_scene(scene_id: str, action: str = "active") -> dict:
+    scene_id = str(scene_id or "").strip()
+    action = str(action or "active").strip() or "active"
+    if action not in ("active", "dynamic_palette", "static"):
+        raise RuntimeError(f"Unsupported Hue scene recall action: {action}")
+    if not scene_id:
+        raise RuntimeError("Hue scene id is required")
+    payload = _hue_request("PUT", f"/clip/v2/resource/scene/{scene_id}", json={"recall": {"action": action}})
+    log.info(f"[hue] recall_scene {scene_id} action={action}")
+    return {"scene_id": scene_id, "action": action, "response": payload}
+
+
+def _hue_container_for_grouped_light_id(grouped_light_id: str, resources: dict[str, list[dict]]) -> dict:
+    grouped_lights = resources.get("grouped_light", [])
+    grouped_by_id = {str(item.get("id") or ""): item for item in grouped_lights}
+    for resource in ("room", "zone", "bridge_home"):
+        for container in resources.get(resource, []):
+            if _hue_grouped_light_for_container(container, grouped_lights) == grouped_light_id:
+                return container
+
+    grouped = grouped_by_id.get(grouped_light_id) or {}
+    owner = _hue_owner(grouped)
+    owner_key = (str(owner.get("rtype") or ""), str(owner.get("rid") or ""))
+    for resource in ("room", "zone", "bridge_home"):
+        for container in resources.get(resource, []):
+            if (str(container.get("type") or ""), str(container.get("id") or "")) == owner_key:
+                return container
+    return {}
+
+
+def _hue_effect_payloads_for_light(light: dict, effect: str) -> list[dict]:
+    payloads: list[dict] = []
+    if effect in _hue_effect_values(light.get("effects")):
+        payloads.append({"effects": {"effect": effect}})
+    if effect in _hue_effect_values(light.get("effects_v2")):
+        # Newer Hue firmware exposes richer effect families through effects_v2. The
+        # API shape has evolved, so try the documented action form first and keep a
+        # plain effect fallback for bridges that surface the simpler schema.
+        payloads.append({"effects_v2": {"action": {"effect": effect}}})
+        payloads.append({"effects_v2": {"effect": effect}})
+    return payloads
+
+
+def _hue_set_effect(resource_id: str, effect: str, resource_type: str = "grouped_light") -> dict:
+    resource_id = str(resource_id or "").strip()
+    resource_type = str(resource_type or "grouped_light").strip() or "grouped_light"
+    effect = str(effect or "").strip()
+    if resource_type not in ("grouped_light", "light"):
+        raise RuntimeError(f"Unsupported Hue effect resource type: {resource_type}")
+    if not resource_id:
+        raise RuntimeError("Hue resource id is required")
+    if not effect:
+        raise RuntimeError("Hue effect is required")
+
+    with httpx.Client(verify=False, timeout=10.0) as client:
+        resources = _hue_fetch_resources(client, ("room", "zone", "bridge_home", "grouped_light", "device", "light"))
+        lights_by_id = {str(item.get("id") or ""): item for item in resources.get("light", [])}
+        if resource_type == "light":
+            target_light_ids = [resource_id] if resource_id in lights_by_id else []
+        else:
+            container = _hue_container_for_grouped_light_id(resource_id, resources)
+            if not container:
+                raise RuntimeError(f"Hue grouped_light area not found: {resource_id}")
+            containers_by_key = {
+                (str(item.get("type") or ""), str(item.get("id") or "")): item
+                for resource in ("room", "zone", "bridge_home")
+                for item in resources.get(resource, [])
+            }
+            devices_by_id = {str(item.get("id") or ""): item for item in resources.get("device", [])}
+            target_light_ids = _hue_container_light_ids(container, containers_by_key, devices_by_id, lights_by_id)
+
+        applied: list[str] = []
+        skipped: list[str] = []
+        errors: list[str] = []
+        for light_id in target_light_ids:
+            light = lights_by_id.get(light_id, {})
+            payloads = _hue_effect_payloads_for_light(light, effect)
+            if not payloads:
+                skipped.append(light_id)
+                continue
+            last_error = ""
+            for body in payloads:
+                try:
+                    _hue_request("PUT", f"/clip/v2/resource/light/{light_id}", client=client, json=body)
+                    applied.append(light_id)
+                    last_error = ""
+                    break
+                except Exception as e:
+                    last_error = str(e)
+            if last_error:
+                errors.append(f"{light_id}: {last_error}")
+
+    if not applied:
+        reason = "; ".join(errors[:2]) if errors else f"effect '{effect}' is not supported by lights in this area"
+        raise RuntimeError(reason)
+
+    log.info(f"[hue] set_effect {resource_type}:{resource_id} effect={effect} applied={len(applied)} skipped={len(skipped)}")
+    return {
+        "resource_id": resource_id,
+        "resource_type": resource_type,
+        "effect": effect,
+        "applied_light_ids": applied,
+        "skipped_light_ids": skipped,
+        "errors": errors,
+    }
 
 
 def _hue_find_grouped_light_id_by_name(area_name: str) -> str:
@@ -744,6 +1029,17 @@ def _execute_agent_command(command_type: str, payload: dict) -> dict:
             on=payload.get("on"),
             brightness=payload.get("brightness"),
             resource_type=str(payload.get("resource_type") or "grouped_light"),
+        )
+    if command_type == "hue.recall_scene":
+        return _hue_recall_scene(
+            str(payload.get("scene_id") or ""),
+            str(payload.get("action") or "active"),
+        )
+    if command_type == "hue.set_effect":
+        return _hue_set_effect(
+            str(payload.get("area_id") or payload.get("resource_id") or ""),
+            str(payload.get("effect") or ""),
+            str(payload.get("resource_type") or "grouped_light"),
         )
     raise RuntimeError(f"Unsupported command type: {command_type}")
 
