@@ -557,10 +557,10 @@ function sendRealtimeNotification() {
 | /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
 | /api/agent/ws | WebSocket | PC agent 主動連回 Render 的即時通道。第一階段提供 hello / heartbeat / 在線狀態，後續用來承接 Hue 等區網命令 |
 | /api/agent/status | GET | 列出目前連線中的 agent 與 capabilities，需 `X-API-Key` |
-| /api/lighting/areas | GET | 透過在線 PC agent 讀取 Hue rooms / zones / grouped_light（含各區當下 on/brightness、該區場景、可用燈效），並合併 Sheet「Hue 照明區域」的顯示名稱 |
+| /api/lighting/areas | GET | 透過在線 PC agent 讀取 Hue rooms / zones / grouped_light（含各區當下 on/brightness、該區一般 scene / 全天 smart_scene、可用燈效），並合併 Sheet「Hue 照明區域」的顯示名稱 |
 | /api/lighting/areas/{area_id} | PATCH | 更新 Hue 區域顯示名稱，寫入 Sheet「Hue 照明區域」 |
 | /api/lighting/areas/{area_id}/state | PATCH | 控制 Hue 區域 grouped_light 的電源 (on) 與亮度 (brightness 1–100)，透過 agent 的 `hue.set_state` 下發 |
-| /api/lighting/scenes/{scene_id}/recall | POST | 套用 Hue App 內已建立的場景，透過 agent 的 `hue.recall_scene` 下發 |
+| /api/lighting/scenes/{scene_id}/recall | POST | 套用 Hue App 內已建立的一般 scene 或全天 smart_scene，透過 agent 的 `hue.recall_scene` 下發 |
 | /api/lighting/areas/{area_id}/effect | POST | 對區域內支援指定 effect 的燈具套用燈效，透過 agent 的 `hue.set_effect` 下發；部分支援時只套用支援的燈 |
 | /api/lighting/breathe | POST | 透過在線 PC agent 對指定 Hue grouped_light 觸發 breathe |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，走跟 LINE bot 相同的 Claude pipeline，回 `{reply}`；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |

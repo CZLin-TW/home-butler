@@ -32,6 +32,7 @@ class HueAreaStateRequest(BaseModel):
 
 class HueSceneRecallRequest(BaseModel):
     action: Optional[str] = "active"
+    resource_type: Optional[str] = "scene"
 
 
 class HueAreaEffectRequest(BaseModel):
@@ -123,6 +124,7 @@ async def api_recall_lighting_scene(scene_id: str, req: HueSceneRecallRequest):
             {
                 "scene_id": scene_id,
                 "action": req.action or "active",
+                "resource_type": req.resource_type or "scene",
             },
             required_capability="hue",
             timeout=15.0,

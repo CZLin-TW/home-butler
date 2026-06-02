@@ -136,7 +136,7 @@ def cmd_auth(args: argparse.Namespace) -> None:
 def cmd_list(args: argparse.Namespace) -> None:
     bridge_ip = _bridge_ip(args)
     app_key = _app_key(args)
-    resources = args.resources or ["light", "grouped_light", "room", "zone", "scene"]
+    resources = args.resources or ["light", "grouped_light", "room", "zone", "scene", "smart_scene"]
     with _client(bridge_ip, app_key) as client:
         for resource in resources:
             payload = _request_json(client, "GET", f"/clip/v2/resource/{resource}")
