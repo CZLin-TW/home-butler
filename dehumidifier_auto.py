@@ -4,11 +4,10 @@
 獨立 dropdown，跟除濕機機體的目標濕度設定分離）。
 
 - 運轉中 hysteresis（不對稱、置中 threshold）：
-    H_on  = threshold + 3   ≥ 連續 T → ON
-    H_off = threshold − 2   ≤ 連續 T → OFF
+    H_on  = threshold + 2   ≥ 連續 T → ON
+    H_off = threshold − 1   ≤ 連續 T → OFF
     (H_off, H_on) 灰色區維持當前狀態
-  例：threshold=60 → 實際控制帶 58~63、置中接近 60。比原本 [60, 65] 對稱
-  在 threshold 之上的設計更貼近使用者「目標 60%」的直覺。
+  例：threshold=60 → 實際控制帶 59~62、置中接近 60。
 - Toggle 從 OFF→ON 瞬間採對稱單一門檻：sensor ≥ threshold 立即 ON、
   < threshold 立即 OFF（不等 T，因為使用者意圖明確）
 
@@ -36,8 +35,8 @@ import dehumidifier_driver
 from sheets import _get_spreadsheet
 
 RULES_SHEET = "除濕機自動規則"
-HYSTERESIS_ABOVE = 3               # H_on  = threshold + 3
-HYSTERESIS_BELOW = 2               # H_off = threshold − 2
+HYSTERESIS_ABOVE = 2               # H_on  = threshold + 2
+HYSTERESIS_BELOW = 1               # H_off = threshold − 1
 SENSOR_WARNING_TICKS = 6           # 30min（6 × 5min polling）
 SENSOR_DISABLE_TICKS = 12          # 60min
 # 自動模式下強制走「連續除濕」：其他模式（尤其「目標濕度」）會讓除濕機看自己
@@ -282,8 +281,8 @@ def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
     h_on = threshold + HYSTERESIS_ABOVE
     h_off = threshold - HYSTERESIS_BELOW
     # 四捨五入後再比較：sensor 0.x 小數 vs 整數門檻精準匹配不會卡。
-    # 例：target=60 → h_off=58、h_on=63；57.5~58.4 累積關閉、58.5~62.4 灰色區、
-    # 62.5~63.4 累積開啟。實際控制帶 58~63、置中接近 target 60。
+    # 例：target=60 → h_off=59、h_on=62；58.5~59.4 累積關閉、59.5~61.4 灰色區、
+    # 61.5~62.4 累積開啟。實際控制帶 59~62、置中接近 target 60。
     humidity_int = _round_humidity(humidity)
 
     fire = None
@@ -324,7 +323,7 @@ def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
             else:
                 phase = "idle_dry"
         else:
-            # 灰色區 (h_off, h_on) = (threshold−2, threshold+3)：
+            # 灰色區 (h_off, h_on) = (threshold−1, threshold+2)：
             # reset 計時器，維持當前 power
             state["above_since"] = None
             state["below_since"] = None

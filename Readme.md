@@ -376,7 +376,7 @@ DIY IR 設備（電風扇、喇叭等）的開關使用標準 turnOn/turnOff 指
    - 狀態：啟用
 6. **校準**：LG 除濕機的 property 欄位名 / 值因機型而異。部署後打 `GET /lg/devices/{deviceId}/profile` 與 `GET /lg/devices/{deviceId}/state`，對照回應調整 `lg_api.py` 頂部「校準點」常數（電源 / 模式 / 目標濕度的 node / key / 值）。
 
-> **LG 自動模式策略**：Panasonic 用「連續除濕」讓機器忽略自身目標濕度；LG 改用 **智慧除濕 + 把機器目標濕度設成「自動規則門檻 − 10%」**（`lg_api.py:AUTO_CONTINUOUS_MODE` / `AUTO_TARGET_OFFSET`）。機器目標壓在我們 OFF 門檻（threshold−2）之下，hysteresis 一定先 fire OFF、機器不會自己先達標停機，外部 sensor 完全掌控 on/off。
+> **LG 自動模式策略**：Panasonic 用「連續除濕」讓機器忽略自身目標濕度；LG 改用 **智慧除濕 + 把機器目標濕度設成「自動規則門檻 − 10%」**（`lg_api.py:AUTO_CONTINUOUS_MODE` / `AUTO_TARGET_OFFSET`）。機器目標壓在我們 OFF 門檻（threshold−1）之下，hysteresis 一定先 fire OFF、機器不會自己先達標停機，外部 sensor 完全掌控 on/off。
 
 ---
 
