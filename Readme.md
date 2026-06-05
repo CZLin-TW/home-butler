@@ -537,7 +537,7 @@ function sendRealtimeNotification() {
 | /api/devices/sensor | GET | 查詢感測器（device_name） |
 | /api/sensors/status | GET | 所有感測器當下讀值 + 24h history（溫度 / 濕度 / CO2），給 Dashboard chart 用 |
 | /api/ac/status | GET | 所有空調當下狀態 + 24h history snapshot，給 Dashboard chart 背景畫 AC on 區段用 |
-| /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state（auto_phase / countdown / last_event） |
+| /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state，並回傳後端計算的 `humidity_on_threshold` / `humidity_off_threshold`，供 Dashboard 共用同一組 hysteresis |
 | /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
 | /api/todos | GET | 列出所有待辦事項 |
 | /api/todos | POST | 新增待辦事項 |

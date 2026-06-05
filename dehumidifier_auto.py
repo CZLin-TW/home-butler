@@ -129,11 +129,22 @@ def is_locked(device_name: str) -> bool:
         return rule is not None and rule.get("auto_mode", False)
 
 
+def _public_rule(rule: dict, runtime: dict) -> dict:
+    """Attach effective humidity thresholds for API clients."""
+    threshold = rule.get("threshold", 50)
+    return {
+        **rule,
+        "humidity_on_threshold": threshold + HYSTERESIS_ABOVE,
+        "humidity_off_threshold": threshold - HYSTERESIS_BELOW,
+        "runtime": dict(runtime),
+    }
+
+
 def get_all_rules() -> dict:
     """For API + LINE bot 讀。"""
     with _lock:
         return {
-            n: {**r, "runtime": dict(_state.get(n, _new_runtime()))}
+            n: _public_rule(r, _state.get(n, _new_runtime()))
             for n, r in _rules.items()
         }
 
@@ -175,7 +186,7 @@ def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
     _write_sheet(device_name, rule, phase, None, last_event, last_event_at, preserve_history=last_event is None)
 
     with _lock:
-        return {**rule, "runtime": dict(_state.get(device_name, _new_runtime()))}
+        return _public_rule(rule, _state.get(device_name, _new_runtime()))
 
 
 def evaluate_all(ctx, sensor_snapshot):
