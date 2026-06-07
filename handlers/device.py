@@ -382,8 +382,8 @@ def handle_set_dehumidifier_auto(data, ctx):
 
     if auto_mode and threshold is not None and not 30 <= threshold <= 80:
         return "❌ 自動除濕目標濕度需介於 30%～80%"
-    if duration_min is not None and duration_min <= 0:
-        return "❌ 自動除濕持續時間必須大於 0 分鐘"
+    if duration_min is not None and duration_min < 0:
+        return "❌ 自動除濕等待時間不能小於 0 分鐘"
 
     snapshot = sensor_state.snapshot()
     successes = []
@@ -419,9 +419,14 @@ def handle_set_dehumidifier_auto(data, ctx):
             snapshot=snapshot,
         )
         rule = result["rule"]
+        duration_text = (
+            "立即"
+            if rule["duration_min"] == 0
+            else f"持續 {rule['duration_min']} 分鐘"
+        )
         line = (
             f"✅ {device_name} 已開啟自動除濕模式，目標 {rule['threshold']}%，"
-            f"使用 {sensor['name']}，持續 {rule['duration_min']} 分鐘"
+            f"使用 {sensor['name']}，{duration_text}"
         )
         if sensor["humidity"] is not None:
             line += f"，目前濕度 {sensor['humidity']}%"

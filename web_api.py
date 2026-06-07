@@ -7,7 +7,7 @@ Web Dashboard REST API
 import threading
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import SIRI_USER_ID, TZ, now_taipei
@@ -282,7 +282,7 @@ class DehumAutoRuleRequest(BaseModel):
     device_name: str
     auto_mode: bool
     sensor_name: Optional[str] = None
-    duration_min: Optional[int] = None
+    duration_min: Optional[int] = Field(default=None, ge=0)
     threshold: Optional[int] = None        # = UI 目標濕度 segment 當下值
     on_mode: Optional[str] = None          # = UI 模式 segment 當下值
 

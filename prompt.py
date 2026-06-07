@@ -36,7 +36,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/防霉抑菌/目標濕度/空氣清淨/AI舒適), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
 - query_dehumidifier：device_name
-- set_dehumidifier_auto：設定除濕機的外部 sensor 自動除濕模式。device_name(單台時填設備名稱；全家/全部時可省略), scope(single/all), auto_mode(on/off), threshold(目標濕度整數，如55), 選填 duration_min, sensor_name。sensor_name 未指定時系統會依除濕機位置自動配對同位置感應器
+- set_dehumidifier_auto：設定除濕機的外部 sensor 自動除濕模式。device_name(單台時填設備名稱；全家/全部時可省略), scope(single/all), auto_mode(on/off), threshold(目標濕度整數，如55), 選填 duration_min（0=立即）, sensor_name。sensor_name 未指定時系統會依除濕機位置自動配對同位置感應器
 - query_devices：無參數
 - query_weather：選填 date(YYYY-MM-DD,最多未來7天,預設今天), location(完整地名如「雲林縣莿桐鄉」,預設竹北市)。回應會同時包含「當下觀測值」（若地點有對應測站）跟「當日預報」，使用者問「現在/目前」類問題優先用觀測值，問「明天/週末」類未來問題用預報
 - add_schedule：device_name, target_action(control_ac/control_ir/control_dehumidifier), params(與原 action 參數相同), trigger_time(YYYY-MM-DD HH:MM，根據現在時間自行計算)

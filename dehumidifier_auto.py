@@ -112,7 +112,9 @@ def load_rules():
                 _rules[name] = {
                     "auto_mode": _bool(r.get("auto_mode")),
                     "sensor_name": r.get("sensor_name", ""),
-                    "duration_min": int(r.get("duration_min") or 30),
+                    "duration_min": int(
+                        30 if r.get("duration_min") in (None, "") else r.get("duration_min")
+                    ),
                     "threshold": int(r.get("threshold") or 50),
                     "on_mode": r.get("on_mode", "目標濕度"),
                 }
@@ -228,14 +230,14 @@ def evaluate_all(ctx, sensor_snapshot):
         dehumidifier_history.record(device_name, location, power_now)
 
         # 手動介入偵測：比對機器實際狀態 vs 系統命令的基準狀態。
-        # 模式被改 / (LG) 目標被改 / 電源跟預期不符 → 視為使用者手動接管 → 解除自動模式、不動機器。
+        # 模式被改 / 電源跟預期不符 → 視為使用者手動接管 → 解除自動模式、不動機器。
         with _lock:
             state = _state.setdefault(device_name, _new_runtime())
             expected = state.get("expected")
         actual = driver.read_state(status)
 
         if expected is None:
-            # 首次 / 重啟後：建立基準。機器開著就把模式（+LG 目標）對齊持續除濕，
+            # 首次 / 重啟後：建立基準。機器開著就把模式對齊自動規則指定模式，
             # 記下 expected，本 tick 不做偵測（使用者確認的「第一個 tick 跳過」）。
             if actual.get("power"):
                 try:
