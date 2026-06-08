@@ -214,9 +214,16 @@ MODE_DISPLAY = {
     "CLOTHES_DRY": "衣物乾燥", "SMART_HUMIDITY": "智慧除濕", "QUIET_HUMIDITY": "靜音除濕",
 }
 
-# 自動模式策略：使用「快速除濕」，開關完全交給外部 sensor + hysteresis。
-# 快速除濕不設定或比對機體目標濕度，避免該模式拒絕 targetHumidity 指令。
-AUTO_CONTINUOUS_MODE = "快速除濕"
+# 自動模式策略（自 2026-06 起）：使用「智慧除濕」(SMART_HUMIDITY)，並把機體目標濕度
+# 設成「外部 sensor 目標 − AUTO_TARGET_OFFSET」。
+#
+# 為什麼改掉「快速除濕」：LG 的快速除濕(RAPID_HUMIDITY)跑一陣子會自己跳回智慧除濕，
+# 害自動模式的「手動介入偵測」(dehumidifier_driver.state_diverged)誤判 mode 被人改掉
+# → 整個自動模式被當成手動接管而關閉。智慧除濕正是它會跳回去的穩定模式，故不再 mode flip。
+# 機體目標壓低 OFFSET 是補償「機體周邊通常比房間乾」的落差：智慧除濕會看機體自身濕度停機，
+# 把目標壓低讓機器多跑一段，巨觀的 ON/OFF 仍由外部 sensor + hysteresis 主導。
+AUTO_MODE_JOBMODE = "智慧除濕"
+AUTO_TARGET_OFFSET = 10
 
 # ════════════════════════════════════════════
 
@@ -240,6 +247,12 @@ def snap_humidity(humidity: int) -> int:
     """snap 到 step 的倍數並 clamp 到支援範圍（機器只吃 30~70、step 5）。"""
     h = int(round(int(humidity) / TARGET_HUMIDITY_STEP) * TARGET_HUMIDITY_STEP)
     return max(TARGET_HUMIDITY_MIN, min(TARGET_HUMIDITY_MAX, h))
+
+
+def auto_target_humidity(threshold: int) -> int:
+    """自動模式下 LG 機體目標濕度 = 外部 sensor 目標 − AUTO_TARGET_OFFSET，
+    再 snap 到合法級距/範圍。設定指令與偵測基準(expected)都走這個，確保兩邊一致。"""
+    return snap_humidity(int(threshold) - AUTO_TARGET_OFFSET)
 
 
 def dehumidifier_set_humidity(device_id: str, humidity: int) -> dict:

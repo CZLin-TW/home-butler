@@ -106,10 +106,17 @@ class LGDriver:
         return lg_api._dig(status, lg_api.POWER_NODE, lg_api.POWER_KEY) == lg_api.POWER_ON_VALUE
 
     def read_state(self, status):
+        target_raw = lg_api._dig(status, lg_api.HUMIDITY_NODE, lg_api.TARGET_HUMIDITY_KEY)
+        try:
+            target = int(target_raw) if target_raw is not None else None
+        except (ValueError, TypeError):
+            target = None
         return {
             "power": lg_api._dig(status, lg_api.POWER_NODE, lg_api.POWER_KEY) == lg_api.POWER_ON_VALUE,
             "mode": lg_api._dig(status, lg_api.JOBMODE_NODE, lg_api.JOBMODE_KEY),
-            "target": lg_api._dig(status, lg_api.HUMIDITY_NODE, lg_api.TARGET_HUMIDITY_KEY),
+            # 自動模式改用智慧除濕後會比對 target，coerce 成 int 對齊 expected（snap 後也是 int），
+            # 避免機器回字串造成 state_diverged 誤判。
+            "target": target,
         }
 
     def status_fields(self, status):
@@ -118,8 +125,10 @@ class LGDriver:
     def expected_on_state(self, threshold=None):
         return {
             "power": True,
-            "mode": lg_api.DEHUMIDIFIER_MODE_MAP.get(lg_api.AUTO_CONTINUOUS_MODE),
-            "target": None,
+            "mode": lg_api.DEHUMIDIFIER_MODE_MAP.get(lg_api.AUTO_MODE_JOBMODE),
+            # 智慧除濕模式機器會看機體目標停機，我們設成 外部目標−OFFSET；expected 帶同一個
+            # 值，讓 state_diverged 也能偵測「使用者手動改機體目標」。
+            "target": lg_api.auto_target_humidity(threshold) if threshold is not None else None,
         }
 
     def expected_off_state(self):
@@ -127,15 +136,21 @@ class LGDriver:
 
     def fire_on(self, threshold=None):
         r1 = lg_api.dehumidifier_turn_on(self.device_id)
-        r2 = lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_CONTINUOUS_MODE)
-        return bool(r1.get("success")), bool(r2.get("success"))
+        r2 = lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_MODE_JOBMODE)
+        # 智慧除濕：把機體目標壓到 外部目標−OFFSET，機器才會多跑、不提早停。
+        r3 = {"success": True}
+        if threshold is not None:
+            r3 = lg_api.dehumidifier_set_humidity(self.device_id, threshold - lg_api.AUTO_TARGET_OFFSET)
+        return bool(r1.get("success")), bool(r2.get("success")) and bool(r3.get("success"))
 
     def fire_off(self):
         lg_api.dehumidifier_turn_off(self.device_id)
 
     def align_continuous(self, threshold=None):
-        """只把模式對齊快速除濕，不動電源（建立偵測基準用）。"""
-        lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_CONTINUOUS_MODE)
+        """把模式對齊智慧除濕 + 設機體目標 = 外部目標−OFFSET（建立偵測基準用，idempotent）。"""
+        lg_api.dehumidifier_set_mode(self.device_id, lg_api.AUTO_MODE_JOBMODE)
+        if threshold is not None:
+            lg_api.dehumidifier_set_humidity(self.device_id, threshold - lg_api.AUTO_TARGET_OFFSET)
 
 
 def make_driver(device_row):
