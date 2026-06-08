@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import httpx
+import re
 import traceback
 import threading
 
 from config import line_bot_api, webhook_handler, LINE_CHANNEL_ACCESS_TOKEN
 from sheets import RequestContext, get_sheet
+import device_auth
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
 from assistant import process_message
@@ -270,6 +272,34 @@ def handle_message(event):
 
     try:
         print(f"[1] user_id={user_id}, text={text}")
+
+        # Dashboard 裝置配對登入：使用者輸入「登入 123456」核准一台 PWA 登入。
+        # 不經 Claude（regex 早退、零成本）。身分來自 webhook 的 user_id（LINE 認證過）。
+        login_match = re.match(r"^登入\s*(\d{6})$", text.strip())
+        if login_match:
+            code = login_match.group(1)
+            members = get_sheet("家庭成員").get_all_records()
+            member = next(
+                (m for m in members
+                 if str(m.get("Line User ID", "")) == user_id and m.get("狀態") == "啟用"),
+                None,
+            )
+            if not member:
+                reply = "❌ 你不是家庭成員，無法登入 Dashboard。"
+            else:
+                name = member.get("名稱", "")
+                picture = ""
+                try:
+                    profile = line_bot_api.get_profile(user_id)
+                    picture = getattr(profile, "picture_url", "") or ""
+                except Exception as e:
+                    print(f"[LOGIN] get_profile failed: {e}")
+                if device_auth.approve(code, user_id, name, picture):
+                    reply = f"✅ 已授權登入 Dashboard（以 {name} 的身分），回到網頁就會自動進入 🏠"
+                else:
+                    reply = "❌ 驗證碼錯誤或已過期，請回 Dashboard 重新取得一組。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            return
 
         # 廣播功能
         if text.strip().startswith("@all"):

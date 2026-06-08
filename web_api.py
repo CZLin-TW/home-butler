@@ -28,6 +28,7 @@ from handlers.device import (
 )
 from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
+import device_auth
 import switchbot_api
 import panasonic_api
 import lg_api
@@ -324,6 +325,22 @@ def api_query_sensor(device_name: str = ""):
     result = handle_query_sensor({"device_name": device_name}, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
+
+
+# ── Dashboard 裝置配對登入（device-code）──
+# 流程與安全細節見 device_auth.py。Dashboard BFF（帶 X-API-Key）呼叫這兩個端點；
+# 核准動作在 LINE Bot（main.py）那邊做。PWA 全程不直接打 home-butler、也不離開容器。
+
+@router.post("/auth/device/create")
+def api_device_create():
+    """PWA 取得一組 user_code + device_token。"""
+    return device_auth.create_pairing()
+
+
+@router.get("/auth/device/status")
+def api_device_status(token: str):
+    """PWA 輪詢配對狀態（帶自己保管的 device_token）。"""
+    return device_auth.get_status(token)
 
 
 # ── 待辦事項 ──
