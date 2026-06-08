@@ -274,10 +274,13 @@ def handle_message(event):
         print(f"[1] user_id={user_id}, text={text}")
 
         # Dashboard 裝置配對登入：使用者輸入「登入 123456」核准一台 PWA 登入。
-        # 不經 Claude（regex 早退、零成本）。身分來自 webhook 的 user_id（LINE 認證過）。
-        login_match = re.match(r"^登入\s*(\d{6})$", text.strip())
-        if login_match:
-            code = login_match.group(1)
+        # 不經 Claude（早退、零成本）。身分來自 webhook 的 user_id（LINE 認證過）。
+        # 容忍空格/分隔（畫面把碼顯示成「123 456」好讀，使用者可能照打）——抽出純數字、
+        # 剛好 6 位才當登入碼；否則（如「登入很麻煩」）落到下面正常處理。
+        _stripped = text.strip()
+        login_code = re.sub(r"\D", "", _stripped[2:]) if _stripped.startswith("登入") else ""
+        if len(login_code) == 6:
+            code = login_code
             members = get_sheet("家庭成員").get_all_records()
             member = next(
                 (m for m in members
