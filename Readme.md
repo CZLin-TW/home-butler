@@ -22,10 +22,11 @@
 |------|------|
 | 食品庫存管理 | 新增、查詢、消耗、修改（品名/數量/單位/過期日），到期前自動提醒 |
 | 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
+| 週期性待辦 | 每天 / 每週幾 / 每月 N 號 / 間隔 N 天的重複提醒，模板與實例分離，每 15 分鐘自動把當天該出現的生成成普通待辦（完成單次不影響週期、停止整個週期可再啟用），LINE 與 Dashboard 共用。受環境變數 RECURRING_TODO_ENABLED 控制生成（預設關） |
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
 | 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
 | 除濕機控制 | 開關、模式、目標濕度。支援 Panasonic（Smart App API）與 LG（ThinQ Connect API），多台並存，依「智能居家」品牌欄分流 |
-| 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 可選立即或持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑持續除濕（Panasonic 連續除濕 / LG 快速除濕）並由外部 sensor 完全掌控。Panasonic、LG 皆支援（品牌無關狀態機 + driver 分流） |
+| 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 可選立即或持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑持續除濕（Panasonic 連續除濕 / LG 智慧除濕，機體目標壓低 10%）並由外部 sensor 完全掌控。Panasonic、LG 皆支援（品牌無關狀態機 + driver 分流） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
 | 溫濕度查詢 | 即時讀取室內溫度與濕度（含 SwitchBot Meter Pro CO2 三合一感測器的 CO2 ppm 讀值） |
 | 天氣預報 | 全台鄉鎮一週天氣（含體感溫度與相對濕度），支援自然語言查詢 |
@@ -136,7 +137,7 @@ code .
 ```
 python -m venv venv
 venv\Scripts\activate
-pip install fastapi uvicorn line-bot-sdk gspread google-auth anthropic pytz httpx
+pip install fastapi uvicorn line-bot-sdk gspread google-auth anthropic pytz httpx websockets
 ```
 
 建立 `.gitignore`：
@@ -171,7 +172,7 @@ git push -u origin main
 2. 選 home-butler repo
 3. 填入：
    - Language: Python 3
-   - Build Command: `pip install -r requirements.txt`
+   - Build Command: `pip install -r requirements.lock`
    - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
    - Instance Type: **Free**
 4. 環境變數填入（見下方環境變數說明）
@@ -203,14 +204,15 @@ git push
 - 已消耗的食品自動移至此分頁，Claude 不會讀取
 
 **待辦事項**
-| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 | 燈光提醒 | 燈光區域ID |
-|------|------|------|--------|------|------|------|------|----------|------------|
+| 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 | 來源 | 屬性 | 燈光提醒 | 燈光區域ID | 規則ID |
+|------|------|------|--------|------|------|------|------|----------|------------|--------|
 - 狀態值：待辦 / 已完成
 - 類型值：公開 / 私人
 - 來源值：本地 / Notion（程式自動填入，本地新增的待辦填「本地」，外部行事曆同步的填來源名稱）
 - 屬性值：讀寫 / 唯讀（本地項目為「讀寫」，外部項目依成員的權限設定填入）
 - 燈光提醒：TRUE/FALSE。只有有「時間」且已到期、狀態仍為待辦時，PC agent 會每分鐘觸發 Hue breathe 一次，直到該待辦完成
 - 燈光區域ID：Hue grouped_light id。Dashboard 用顯示名稱下拉選擇，Sheet 內保存穩定 ID；LINE Bot 未指定區域時預設使用「客廳」
+- 規則ID：程式自動加欄（`ensure_columns`）。由「週期待辦模板」生成的當次待辦會帶上模板的規則ID（list 上以 🔁 標記、完成後同日不重生靠它去重），一般待辦留空，手動建 sheet 時不需填
 
 **待辦封存**
 | 事項 | 日期 | 時間 | 負責人 | 狀態 | 類型 |
@@ -275,7 +277,10 @@ home-butler 啟動 / 第一次寫入時自動建出來，header 也自動補：
 |------|--------|------|
 | 感測器歷史 | `sensor_state.py` 每 5 min polling 寫入 | timestamp, device_name, location, temp, humidity, co2（24h 後自動 trim） |
 | 空調歷史 | `ac_history.py` 每 5 min polling 寫入 | timestamp, device_name, location, power, temp, mode, fan_speed（24h 後自動 trim） |
+| 除濕機歷史 | `dehumidifier_history.py` 自動模式 polling 時寫入 | timestamp, device_name, location, power（24h 後自動 trim，給 Dashboard 自動模式 chart 背景畫運轉區段） |
 | 除濕機自動規則 | `dehumidifier_auto.py` 規則設定 / 評估時寫入 | device_name, auto_mode, sensor_name, duration_min, threshold, on_mode, auto_phase, countdown_min, last_event, last_event_at（每台一行，覆蓋更新） |
+| 週期待辦模板 | `handlers/recurring_todo.py` 設定週期規則時寫入 | 規則ID, 事項, 重複類型, 星期, 月日, 間隔天數, 時間, 負責人, 類型, 燈光提醒, 燈光區域ID, 起始日期, 結束日期, 狀態, 最後生成日期, 建立者, 建立時間 |
+| 裝置配對 | `device_auth.py` Dashboard 登入配對時寫入 | user_code, device_token, status, line_user_id, name, picture, created, expires（5 分鐘過期、單次使用） |
 
 ---
 
@@ -499,6 +504,7 @@ function sendRealtimeNotification() {
 | PANASONIC_PASSWORD | Panasonic Smart App 密碼 | 選配 |
 | CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
 | NOTION_TOKEN | Notion Internal Integration Token | 選配 |
+| RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 15 分鐘 materialize 成當日待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出當日待辦；上線或收手只需改這個變數，不必 revert code | 選配 |
 
 ---
 
@@ -554,6 +560,12 @@ function sendRealtimeNotification() {
 | /api/schedules | DELETE | 取消排程 |
 | /api/weather | GET | 查詢天氣（date, location） |
 | /api/members | GET | 列出所有啟用的家庭成員 |
+| /api/recurring-todos | GET | 列出啟用中的週期待辦模板（每筆附後端算好的人類可讀「摘要」字串給前端直接顯示） |
+| /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/start_date/end_date） |
+| /api/recurring-todos | PATCH | 修改週期待辦模板（Dashboard 走 rule_id 精準定位，或用 item + recur_type 消歧） |
+| /api/recurring-todos | DELETE | 停整個週期（模板狀態 → 停用，不刪除；可帶 rule_id 或 item + recur_type） |
+| /api/auth/device/create | POST | Dashboard 裝置配對登入：發一組 6 位 user_code + device_token（device_token 由 PWA 保管）給前端顯示與輪詢用 |
+| /api/auth/device/status | GET | Dashboard 裝置配對登入：PWA 帶自己保管的 `token`（device_token）輪詢配對狀態（pending/approved/expired/consumed/not_found）；approved 時回核准者身分 `{lineUserId, name, picture}` 並把狀態標成 consumed（單次使用） |
 | /api/computers/heartbeat | POST | PC agent 每 60 秒 push 指標（cpu_pct, ram_pct, gpu_pct, gpu_temp_c, cpu_temp_c, fah, ip, hostname, cpu_model, gpu_model）|
 | /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
 | /api/agent/ws | WebSocket | PC agent 主動連回 Render 的即時通道。第一階段提供 hello / heartbeat / 在線狀態，後續用來承接 Hue 等區網命令 |
@@ -640,8 +652,14 @@ function sendRealtimeNotification() {
 | modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify, light_area |
 | delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
+| add_recurring_todo | 新增週期提醒（自動在對的日子產生當日待辦） | item, recur_type（每天/每週/每月/間隔天），選填：weekdays（每週，[1,3,5]，一=1…日=7）, month_day（每月，1~31）, interval_days（間隔天，>=1）, time, person, type, light_notify, light_area, start_date, end_date |
+| modify_recurring_todo | 修改週期提醒（多筆同名加 recur_type 消歧） | item，選填：item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date |
+| stop_recurring_todo | 永久停止整個週期（模板改停用，可再啟用；執行前先反問確認） | item，選填：recur_type |
+| query_recurring_todo | 列出啟用中的週期提醒 | 無 |
 
 有時間的家事/起身處理類待辦（例如收衣服、倒垃圾、拿包裹、關瓦斯）在對話新增時會預設開啟 `light_notify=true`；使用者明確說不要燈光提醒時會優先關閉。若只說要燈光提醒但沒指定區域，預設使用客廳。
+
+週期 vs 單次：說「每天/每週X/每月N號/每隔N天提醒」走 `add_recurring_todo`；說「明天/某個日期」走 `add_todo`。對週期產生出的當次待辦說「做完了」用 `delete_todo`（只完成當次，模板不動、下次照常出現）；說「不要再…了/停掉每天的X」才用 `stop_recurring_todo`（永久停整個週期，執行前會先反問確認）。
 
 ### 智能居家
 
@@ -672,6 +690,15 @@ function sendRealtimeNotification() {
 - 訊息格式：`📢 發送者名稱：內容`
 - 廣播內容會存入每位收到者的對話暫存，Claude 可參考上下文
 - 不經過 Claude 解析，直接發送
+
+### Dashboard 登入（裝置配對）
+
+在 LINE 傳送 `登入 123456`（6 位驗證碼）即可核准一台 Dashboard PWA 登入。
+
+- 驗證碼由 Dashboard 登入頁顯示，使用者在 Bot 輸入後核准，前端輪詢拿到 session
+- 身分（lineUserId / 名字 / 頭像）來自「誰在 Bot 輸入碼」（webhook user_id，已由 LINE 認證）
+- 非家庭成員輸入會被拒絕
+- 不經過 Claude 解析，regex 抽出 6 位純數字後直接核准（早退、零成本）；對應後端 `device_auth.py` 與 `/api/auth/device/*` 端點
 
 ### 排程
 
@@ -829,6 +856,8 @@ function sendRealtimeNotification() {
 | calendar_sync.py | 外部行事曆同步（Notion → 待辦 Sheet） |
 | handlers/food.py | 食品庫存 handler（新增、刪除、修改、查詢） |
 | handlers/todo.py | 待辦事項 handler（新增、刪除、修改、查詢） |
+| handlers/recurring_todo.py | 週期性待辦：模板/實例分離，每 15 分鐘 materialize 當日待辦（冪等查重含活表+封存表）+ add/modify/stop/query 的 CRUD handler，受 RECURRING_TODO_ENABLED 控制生成 |
+| handlers/todo_helpers.py | 待辦 / 週期待辦共用工具（燈光提醒自動判斷、布林解析、照明區域解析），從 todo.py 抽出供兩邊複用 |
 | handlers/device.py | 智能居家 handler（空調、IR、感應器、除濕機、天氣） |
 | handlers/schedule.py | 排程指令 handler（新增、刪除、查詢） |
 | handlers/style.py | 自訂風格 handler |
@@ -838,17 +867,21 @@ function sendRealtimeNotification() {
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
-| web_api.py | REST API（裝置控制、待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則，以及 Siri 自然語言入口 `/api/assistant`） |
+| web_api.py | REST API（裝置控制、待辦、週期待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則、Dashboard 裝置配對登入，以及 Siri 自然語言入口 `/api/assistant`） |
+| device_auth.py | Dashboard 裝置配對登入（OAuth Device Grant 風格）：發 user_code/device_token、LINE Bot 端核准、PWA 輪詢領 session。狀態存 Sheets「裝置配對」分頁。解 iOS PWA 登入被踢去 Safari 的問題 |
 | agent_ws.py | PC agent WebSocket registry（agent hello / heartbeat / 在線狀態），讓 Render 有一條可回到家中區網的即時通道 |
 | lighting_api.py | Hue 照明 API（列區域含 on/brightness/場景/通知/燈效、更新顯示名稱、控制電源/亮度、套用場景/通知/燈效、觸發 breathe），實際 Hue LAN 呼叫交給 PC agent 執行 |
 | hue_area_settings.py | Sheet「Hue 照明區域」讀寫：保存 Hue ID 與 Dashboard 顯示名稱的對應 |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
 | sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
+| ring_buffer.py | pc_state / sensor_state / ac_history / dehumidifier_history 共用的純機制（`to_float_or_none`、24h `trim_sheet`）。各模組資料形狀差異刻意不抽繼承基類，只共用這兩段逐字重複的工具 |
 | dehumidifier_auto.py | 除濕機條件式自動 ON/OFF（hysteresis + sensor 失聯 fallback + 排他鎖）。品牌無關狀態機，控制/狀態委派給 dehumidifier_driver。runtime state in-memory，rule 設定值持久化到 Sheet「除濕機自動規則」 |
-| dehumidifier_driver.py | 除濕機品牌無關 driver：把 Panasonic（auth+gwid+CommandType）與 LG（deviceId+ThinQ property）的控制/狀態差異收斂成統一介面，給 dehumidifier_auto 用 |
+| dehumidifier_driver.py | 除濕機品牌無關 driver：把 Panasonic（auth+gwid+CommandType）與 LG（deviceId+ThinQ property）的控制/狀態差異收斂成統一介面，給 dehumidifier_auto 用。LG 自動模式用「智慧除濕」+ 機體目標 = 外部目標 −`AUTO_TARGET_OFFSET`(10%) |
+| dehumidifier_history.py | 除濕機 ON/OFF 狀態 in-memory ring buffer（24h）+ Sheet append/backfill，給 Dashboard 自動模式 chart 背景畫運轉區段 |
 | agent/ | Windows PC 端 monitoring agent（agent.py + agent_config.example.py + README）含 watchdog 防 hang + 預設每 5 分鐘自動 git pull + py_compile 驗新 code syntax + 自己 spawn detached process 重啟（不靠 Task Scheduler restart-on-fail）。Render 部署不會 import 這個目錄 |
-| requirements.txt | Python 套件 |
+| requirements.txt | 直接依賴（程式直接 import 的，已 pin 版本）。升級從這裡改起 |
+| requirements.lock | 完整鎖檔（含 transitive，共 51 套），由 requirements.txt 在乾淨環境 pip freeze 重生。render.yaml 實際安裝走這個檔以求每次 rebuild 可重現 |
 | render.yaml | Render.com 部署設定 |
 
 ---
