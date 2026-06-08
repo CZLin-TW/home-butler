@@ -20,6 +20,7 @@ from threading import Lock
 import gspread
 
 from sheets import _get_spreadsheet
+import ring_buffer
 
 MAX_HISTORY_POINTS = 1440          # 24h × 60s 上限
 OFFLINE_THRESHOLD_S = 300          # 5 分鐘沒 heartbeat 視為離線（agent watchdog 也是 5 分鐘）
@@ -134,50 +135,17 @@ def _sheet_append_async(point: dict, ip: str) -> None:
             if should_trim:
                 _append_counter = 0
         if should_trim:
-            _trim_sheet(ws)
+            ring_buffer.trim_sheet(
+                ws, log_prefix="[pc_state]",
+                keep_points=MAX_HISTORY_POINTS * max(1, len(_pcs)),
+                hard_limit=SHEET_HARD_LIMIT_ROWS,
+            )
     except Exception as e:
         print(f"[pc_state] sheet append error: {e}")
 
 
-def _trim_sheet(ws) -> None:
-    """刪掉 timestamp < now - 24h 的 row。row 1 是 header，從 row 2 起算。
-
-    假設 row 按 append 順序排（=按 timestamp 升序），所以過期 row 都在最前面，
-    一次 batch delete 一段最便宜（不必逐筆 API call）。"""
-    try:
-        records = ws.get_all_records()
-        cutoff = time.time() - 86400
-        last_old_idx = -1
-        for i, r in enumerate(records):
-            try:
-                t = float(r.get("timestamp", 0))
-            except (ValueError, TypeError):
-                continue
-            if t < cutoff:
-                last_old_idx = i
-            else:
-                break  # 遇到第一個 fresh 即停（chronological 假設）
-
-        # Hard limit 防呆：即使 timestamp 都 fresh，row 數量爆了也強制砍
-        if last_old_idx < 0 and len(records) > SHEET_HARD_LIMIT_ROWS:
-            last_old_idx = len(records) - MAX_HISTORY_POINTS - 1
-            print(f"[pc_state] hard-limit trim: row count {len(records)} > {SHEET_HARD_LIMIT_ROWS}")
-
-        if last_old_idx >= 0:
-            count = last_old_idx + 1
-            ws.delete_rows(2, 2 + count - 1)
-            print(f"[pc_state] trimmed {count} old rows")
-    except Exception as e:
-        print(f"[pc_state] trim error: {e}")
-
-
-def _to_float_or_none(v):
-    if v == "" or v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None
+# trim 與 to_float_or_none 是與資料形狀無關的純機制，抽到 ring_buffer 共用。
+_to_float_or_none = ring_buffer.to_float_or_none
 
 
 def backfill_from_sheet() -> None:

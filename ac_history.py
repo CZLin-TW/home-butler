@@ -15,6 +15,7 @@ from threading import Lock
 import gspread
 
 from sheets import _get_spreadsheet
+import ring_buffer
 
 MAX_HISTORY_POINTS = 288           # 24h / 5min
 SHEET_NAME = "空調狀態歷史"
@@ -117,45 +118,17 @@ def _sheet_append_async(point, device_name, location):
             if should_trim:
                 _append_counter = 0
         if should_trim:
-            _trim_sheet(ws)
+            ring_buffer.trim_sheet(
+                ws, log_prefix="[ac_history]",
+                keep_points=MAX_HISTORY_POINTS * max(1, len(_acs)),
+                hard_limit=SHEET_HARD_LIMIT_ROWS,
+            )
     except Exception as e:
         print(f"[ac_history] sheet append error: {e}")
 
 
-def _trim_sheet(ws) -> None:
-    try:
-        records = ws.get_all_records()
-        cutoff = time.time() - 86400
-        last_old_idx = -1
-        for i, r in enumerate(records):
-            try:
-                t = float(r.get("timestamp", 0))
-            except (ValueError, TypeError):
-                continue
-            if t < cutoff:
-                last_old_idx = i
-            else:
-                break
-
-        if last_old_idx < 0 and len(records) > SHEET_HARD_LIMIT_ROWS:
-            last_old_idx = len(records) - MAX_HISTORY_POINTS - 1
-            print(f"[ac_history] hard-limit trim: row count {len(records)} > {SHEET_HARD_LIMIT_ROWS}")
-
-        if last_old_idx >= 0:
-            count = last_old_idx + 1
-            ws.delete_rows(2, 2 + count - 1)
-            print(f"[ac_history] trimmed {count} old rows")
-    except Exception as e:
-        print(f"[ac_history] trim error: {e}")
-
-
-def _to_float_or_none(v):
-    if v == "" or v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None
+# trim 與 to_float_or_none 是與資料形狀無關的純機制，抽到 ring_buffer 共用。
+_to_float_or_none = ring_buffer.to_float_or_none
 
 
 def backfill_from_sheet() -> None:
