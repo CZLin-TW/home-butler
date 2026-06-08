@@ -9,6 +9,7 @@ from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
 from handlers.device import handle_control_ac, handle_control_ir, handle_control_dehumidifier
+from handlers.recurring_todo import materialize_recurring_todos
 from auth import verify_api_key
 import weather_api
 
@@ -319,11 +320,15 @@ def _archive_processed_schedules(processed_devices, ctx):
 async def notify_realtime():
     """每 15 分鐘由 GAS cron 呼叫的 endpoint：
     1. 同步外部行事曆
-    2. 推播即將到期/未完成的待辦提醒
-    3. 執行到時間的設備排程
-    4. 把收尾完的排程封存
+    2. 生成今天該出現的週期性待辦（materialize；總開關關閉時 no-op）
+    3. 推播即將到期/未完成的待辦提醒
+    4. 執行到時間的設備排程
+    5. 把收尾完的排程封存
 
     is_near_hour 寬鬆容忍 ±5 分鐘，避免 cron 漂移漏掉整點提醒。
+
+    註：週期性待辦的生成「只」掛在這條 cron tick，絕不掛 main.py 的記憶體
+    polling thread——雙時間源會重入重生，且 cron 會喚醒睡著的 Render instance。
     """
     try:
         now = now_taipei()
@@ -334,6 +339,8 @@ async def notify_realtime():
         ctx.load()
 
         sync_external_events(ctx)
+        # 先 materialize：生成的當日實例要能被同一 tick 後段的 _process_todo_reminders 納入
+        materialize_recurring_todos(now, ctx)
         _process_todo_reminders(now, today, is_near_hour, ctx)
         processed_devices = _execute_pending_schedules(now, ctx)
         _archive_processed_schedules(processed_devices, ctx)

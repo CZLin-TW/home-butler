@@ -42,6 +42,15 @@ def now_taipei():
     return datetime.now(TZ)
 
 
+# 週期性待辦功能總開關（kill-switch）。預設「關閉」。
+# 設為 1/true/yes/on 才會啟用「週期待辦模板 → 每 15 分鐘 materialize 成當日待辦」
+# 的生成邏輯（materialize_recurring_todos）。
+# 關閉時：模板 CRUD 仍可正常使用（可先把規則建好），但生成邏輯整段 no-op，
+# 對現有使用者零影響。要上線/收手只需在 Render 後台改這個環境變數，不必 revert code。
+def recurring_todo_enabled():
+    return os.environ.get("RECURRING_TODO_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 # LLM 自己從日期推算「星期幾」很不可靠（常算錯），所以一律用 Python 算好再餵給它。
 _WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]  # Python weekday(): Mon=0..Sun=6
 

@@ -17,6 +17,10 @@ from conversation import save_conversation, cleanup_conversation
 from sheets import RequestContext, get_all_devices_by_type, get_device_id_by_name, get_device_auth_by_name
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo
+from handlers.recurring_todo import (
+    handle_add_recurring_todo, handle_modify_recurring_todo,
+    handle_stop_recurring_todo, list_recurring_rules,
+)
 from handlers.device import (
     handle_control_ac, handle_control_ir, handle_query_sensor,
     handle_control_dehumidifier, handle_query_dehumidifier,
@@ -463,6 +467,106 @@ def api_delete_todo(req: TodoDeleteRequest):
     if req.date_orig is not None: data["date_orig"] = req.date_orig
     if req.time_orig is not None: data["time_orig"] = req.time_orig
     result = handle_delete_todo(data, ctx)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
+
+
+# ── 週期性待辦（recurring todo）──
+# 模板 CRUD 純 proxy 到 handlers/recurring_todo.py。實際「生成」由 notify.py 的
+# /notify_realtime tick 跑，受 config.recurring_todo_enabled() 總開關控制。
+
+@router.get("/recurring-todos")
+def api_get_recurring_todos():
+    """列出啟用中的週期模板（每筆附『摘要』人類可讀字串給前端直接顯示）。"""
+    return list_recurring_rules(active_only=True)
+
+
+class RecurringTodoAddRequest(BaseModel):
+    item: str
+    recur_type: str                          # 每天 / 每週 / 每月 / 間隔天
+    weekdays: Optional[list[int]] = None     # 每週：isoweekday [1,3,5]
+    month_day: Optional[int] = None          # 每月：1~31
+    interval_days: Optional[int] = None      # 間隔天：>=1
+    time: Optional[str] = ""
+    person: Optional[str] = None
+    type: Optional[str] = "私人"
+    light_notify: Optional[bool] = None
+    light_area: Optional[str] = None
+    light_area_id: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+@router.post("/recurring-todos")
+def api_add_recurring_todo(req: RecurringTodoAddRequest):
+    ctx = RequestContext()
+    ctx.load()
+    data = {"item": req.item, "recur_type": req.recur_type}
+    for field in ("weekdays", "month_day", "interval_days", "time", "person",
+                  "type", "light_notify", "light_area", "light_area_id",
+                  "start_date", "end_date"):
+        value = getattr(req, field)
+        if value is not None:
+            data[field] = value
+    result = handle_add_recurring_todo(data, req.person or "", ctx)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
+
+
+class RecurringTodoModifyRequest(BaseModel):
+    rule_id: Optional[str] = None            # Dashboard 走精準 ID
+    item: Optional[str] = None               # 或用事項名（+ recur_type 消歧）
+    recur_type: Optional[str] = None
+    item_new: Optional[str] = None
+    recur_type_new: Optional[str] = None
+    weekdays: Optional[list[int]] = None
+    month_day: Optional[int] = None
+    interval_days: Optional[int] = None
+    time: Optional[str] = None
+    person: Optional[str] = None
+    type: Optional[str] = None
+    light_notify: Optional[bool] = None
+    light_area: Optional[str] = None
+    light_area_id: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    requester: Optional[str] = None
+
+
+@router.patch("/recurring-todos")
+def api_modify_recurring_todo(req: RecurringTodoModifyRequest):
+    ctx = RequestContext()
+    ctx.load()
+    data = {}
+    for field in ("rule_id", "item", "recur_type", "item_new", "recur_type_new",
+                  "weekdays", "month_day", "interval_days", "time", "person",
+                  "type", "light_notify", "light_area", "light_area_id",
+                  "start_date", "end_date"):
+        value = getattr(req, field)
+        if value is not None:
+            data[field] = value
+    result = handle_modify_recurring_todo(data, req.requester or "", ctx)
+    if "❌" in result: raise HTTPException(status_code=400, detail=result)
+    return {"message": result}
+
+
+class RecurringTodoStopRequest(BaseModel):
+    rule_id: Optional[str] = None
+    item: Optional[str] = None
+    recur_type: Optional[str] = None
+
+
+@router.delete("/recurring-todos")
+def api_stop_recurring_todo(req: RecurringTodoStopRequest):
+    """停整個週期（模板狀態 → 停用，不刪除）。"""
+    ctx = RequestContext()
+    ctx.load()
+    data = {}
+    for field in ("rule_id", "item", "recur_type"):
+        value = getattr(req, field)
+        if value is not None:
+            data[field] = value
+    result = handle_stop_recurring_todo(data, "", ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 

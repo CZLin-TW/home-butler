@@ -4,70 +4,17 @@ from config import line_bot_api, date_with_weekday
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
 from sheets import append_record, ensure_columns, update_row_fields
-from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
-
-
-LIGHT_NOTIFY_COLUMN = "燈光提醒"
-LIGHT_AREA_ID_COLUMN = "燈光區域ID"
-HOUSEHOLD_LIGHT_NOTIFY_KEYWORDS = (
-    "收衣服", "收衣", "晾衣服", "晾衣", "曬衣服", "曬衣", "洗衣服", "洗衣", "烘衣服", "烘衣",
-    "洗衣機", "烘衣機", "倒垃圾", "垃圾", "回收", "廚餘", "拿包裹", "收包裹", "包裹", "取貨",
-    "餵食", "餵貓", "餵狗", "貓砂", "澆花", "澆水", "關瓦斯", "瓦斯", "爐火", "關火",
-    "洗碗", "掃地", "拖地", "吸地", "打掃",
+from hue_area_settings import DEFAULT_LIGHT_AREA_NAME
+# 燈光提醒 / 布林解析等共用工具搬到 todo_helpers，讓 recurring_todo 也能複用。
+# 用 as 別名保留原本的私有命名，下方 handler body 完全不動。
+from handlers.todo_helpers import (
+    LIGHT_NOTIFY_COLUMN,
+    LIGHT_AREA_ID_COLUMN,
+    parse_bool as _parse_bool,
+    bool_cell as _bool_cell,
+    resolve_light_notify as _resolve_light_notify,
+    resolve_light_area as _resolve_light_area,
 )
-HOUSEHOLD_LIGHT_NOTIFY_EXCLUSIONS = (
-    "買", "購物", "採買", "預約", "牙醫", "看診", "醫生", "會議", "開會",
-)
-
-
-def _parse_bool(value, default=False):
-    if value is None or value == "":
-        return default
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in ("true", "1", "yes", "y", "on", "是", "要", "需要", "開", "開啟", "啟用"):
-        return True
-    if text in ("false", "0", "no", "n", "off", "否", "不要", "不用", "關", "關閉", "停用"):
-        return False
-    return default
-
-
-def _bool_cell(value):
-    return "TRUE" if _parse_bool(value) else "FALSE"
-
-
-def _is_household_light_notify_item(item):
-    text = str(item or "").strip()
-    if not text:
-        return False
-    if any(word in text for word in HOUSEHOLD_LIGHT_NOTIFY_EXCLUSIONS):
-        return False
-    return any(word in text for word in HOUSEHOLD_LIGHT_NOTIFY_KEYWORDS)
-
-
-def _default_light_notify(data):
-    return bool(data.get("time") and _is_household_light_notify_item(data.get("item")))
-
-
-def _resolve_light_notify(data):
-    if "light_notify" in data:
-        return _parse_bool(data.get("light_notify"), default=False)
-    return _default_light_notify(data)
-
-
-def _resolve_light_area(data, light_notify, existing_area_id=""):
-    time_value = data.get("time") if "time" in data else data.get("時間")
-    if not light_notify or not time_value:
-        return {"id": "", "name": ""}
-
-    explicit_id = str(data.get("light_area_id") or "").strip()
-    explicit_name = str(data.get("light_area") or "").strip()
-    if explicit_id or explicit_name:
-        return resolve_area(explicit_name, area_id=explicit_id)
-    if existing_area_id:
-        return resolve_area(area_id=existing_area_id)
-    return resolve_area(DEFAULT_LIGHT_AREA_NAME)
 
 
 def handle_add_todo(data, user_name, ctx):
