@@ -1,5 +1,6 @@
 from datetime import datetime
 import notion_api
+from sheets import build_row
 
 
 def sync_external_events(ctx):
@@ -47,6 +48,9 @@ def sync_external_events(ctx):
         members = ctx.get("家庭成員")
         new_rows = []
         new_event_keys = set()
+        # 依 header 名組 row（與全專案 append_record / build_row 一致），而非 8 欄位置硬寫，
+        # 避免家人在待辦表插入/重排欄位時，這支同步靜默寫到錯欄。讀一次 header 重用。
+        headers = sheet.row_values(1)
 
         for member in members:
             if member.get("狀態") != "啟用":
@@ -96,7 +100,11 @@ def sync_external_events(ctx):
                     new_event_keys.add(event_key)
                     continue
 
-                new_row = [name, date_part, time_part, member_name, "待辦", "私人", "Notion", permission]
+                new_row = build_row(headers, {
+                    "事項": name, "日期": date_part, "時間": time_part,
+                    "負責人": member_name, "狀態": "待辦", "類型": "私人",
+                    "來源": "Notion", "屬性": permission,
+                })
                 new_rows.append(new_row)
                 new_event_keys.add(event_key)
                 records.append({
