@@ -226,6 +226,8 @@ def backfill_from_sheet() -> None:
                     pc["current"] = {**point, "fah": None}
                 loaded += 1
         print(f"[pc_state] backfilled {loaded} points from Sheet (cutoff={cutoff:.0f})")
+        _backfilled = True
     except Exception as e:
+        # 失敗時刻意不設 _backfilled，讓 polling loop 下個 tick 自動重試——否則一次
+        # 暫時性失敗（cold start / gspread 5xx / quota）就永久放棄 cold-start 還原。
         print(f"[pc_state] backfill error: {e}")
-    _backfilled = True

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from linebot.models import TextSendMessage
 from datetime import datetime, timedelta
 import json
@@ -140,13 +141,22 @@ async def notify():
             if quota_info:
                 message += quota_info
 
-            line_bot_api.push_message(user_id, TextSendMessage(text=message))
-            save_conversation(user_id, "assistant", message)
-            cleanup_conversation(user_id)
+            # per-member 例外隔離：某成員 user_id 失效 / 封鎖 bot / 429 不該中斷
+            # 後面所有人的推播。
+            try:
+                line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                save_conversation(user_id, "assistant", message)
+                cleanup_conversation(user_id)
+            except Exception as e:
+                print(f"[NOTIFY] push to {member_name or user_id} failed: {e}")
+                continue
 
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        # cron 端點失敗回非 2xx（而非 HTTP 200 + status:error），讓 GAS 的 responseCode
+        # 至少非 200，silent failure 才有機會被察覺。
+        print(f"[NOTIFY ERROR] {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 
 
@@ -177,9 +187,14 @@ def _push_todo_reminder(person, todo_type, todo_item, data_summary, fallback, ct
 
         member_style = get_style_instruction(member.get("名稱", ""), ctx)
         message = generate_notify_message(data_summary, member_style) or fallback
-        line_bot_api.push_message(user_id, TextSendMessage(text=message))
-        save_conversation(user_id, "assistant", message)
-        cleanup_conversation(user_id)
+        # per-member 例外隔離：單一成員推播失敗不中斷其他人。
+        try:
+            line_bot_api.push_message(user_id, TextSendMessage(text=message))
+            save_conversation(user_id, "assistant", message)
+            cleanup_conversation(user_id)
+        except Exception as e:
+            print(f"[REMINDER] push to {member.get('名稱', user_id)} failed: {e}")
+            continue
 
 
 def _process_todo_reminders(now, today, is_near_hour, ctx):
@@ -347,4 +362,6 @@ async def notify_realtime():
 
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        # cron 端點失敗回非 2xx（理由同 /notify），讓 silent failure 可被察覺。
+        print(f"[NOTIFY_REALTIME ERROR] {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})

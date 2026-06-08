@@ -64,6 +64,13 @@ def _on_startup():
         """
         while True:
             try:
+                # 若 startup backfill 曾失敗（cold start / gspread 5xx / quota），這裡每個
+                # tick 補做一次：成功的內部 early-return no-op，失敗的下個 tick 再試，
+                # 避免一次暫時性失敗就永久放棄 cold-start 還原。
+                pc_state.backfill_from_sheet()
+                sensor_state.backfill_from_sheet()
+                ac_history.backfill_from_sheet()
+                dehumidifier_history.backfill_from_sheet()
                 ctx = RequestContext()
                 ctx.load()
                 for d in ctx.get("智能居家"):

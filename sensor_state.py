@@ -216,6 +216,8 @@ def backfill_from_sheet() -> None:
                 s["history_dict"][int(t)] = point
                 loaded += 1
         print(f"[sensor_state] backfilled {loaded} points from Sheet")
+        _backfilled = True
     except Exception as e:
+        # 失敗時刻意不設 _backfilled，讓 polling loop 下個 tick 自動重試——否則一次
+        # 暫時性失敗（cold start / gspread 5xx / quota）就永久放棄 cold-start 還原。
         print(f"[sensor_state] backfill error: {e}")
-    _backfilled = True

@@ -213,61 +213,72 @@ def evaluate_all(ctx, sensor_snapshot):
         if not d:
             print(f"[dehum-auto] {device_name} 不在「智能居家」啟用列表，skip")
             continue
-        driver = dehumidifier_driver.make_driver(d)
-        if driver is None:
-            print(f"[dehum-auto] {device_name} 缺少品牌所需識別碼（Panasonic 需 Auth+Device ID / LG 需 Device ID），skip")
+        # per-device 例外隔離：單台殘留逃逸路徑（如 update_cell quota 例外）不影響
+        # 其它台這個 tick 的評估與 countdown。
+        try:
+            _evaluate_one_device(device_name, rule, d, sensor_snapshot, now)
+        except Exception as e:
+            print(f"[dehum-auto] {device_name} evaluate error: {e}")
             continue
 
-        status = driver.get_status()
-        if not isinstance(status, dict) or "error" in status:
-            err = status.get("error") if isinstance(status, dict) else status
-            print(f"[dehum-auto] {device_name} status fetch: {err}")
-            continue
-        power_now = driver.is_power_on(status)
 
-        # Record power 狀態到 history（給 Dashboard 自動模式 chart 背景畫 on segments）
-        location = d.get("位置", "")
-        dehumidifier_history.record(device_name, location, power_now)
+def _evaluate_one_device(device_name, rule, d, sensor_snapshot, now):
+    """單台除濕機一個 tick 的評估（從 evaluate_all 抽出，方便 per-device 例外隔離）。"""
+    driver = dehumidifier_driver.make_driver(d)
+    if driver is None:
+        print(f"[dehum-auto] {device_name} 缺少品牌所需識別碼（Panasonic 需 Auth+Device ID / LG 需 Device ID），skip")
+        return
 
-        # 手動介入偵測：比對機器實際狀態 vs 系統命令的基準狀態。
-        # 模式被改 / 電源跟預期不符 → 視為使用者手動接管 → 解除自動模式、不動機器。
+    status = driver.get_status()
+    if not isinstance(status, dict) or "error" in status:
+        err = status.get("error") if isinstance(status, dict) else status
+        print(f"[dehum-auto] {device_name} status fetch: {err}")
+        return
+    power_now = driver.is_power_on(status)
+
+    # Record power 狀態到 history（給 Dashboard 自動模式 chart 背景畫 on segments）
+    location = d.get("位置", "")
+    dehumidifier_history.record(device_name, location, power_now)
+
+    # 手動介入偵測：比對機器實際狀態 vs 系統命令的基準狀態。
+    # 模式被改 / 電源跟預期不符 → 視為使用者手動接管 → 解除自動模式、不動機器。
+    with _lock:
+        state = _state.setdefault(device_name, _new_runtime())
+        expected = state.get("expected")
+    actual = driver.read_state(status)
+
+    if expected is None:
+        # 首次 / 重啟後：建立基準。機器開著就把模式對齊自動規則指定模式，
+        # 記下 expected，本 tick 不做偵測（使用者確認的「第一個 tick 跳過」）。
+        if actual.get("power"):
+            try:
+                driver.align_continuous(rule["threshold"])
+            except Exception as e:
+                print(f"[dehum-auto] {device_name} align baseline error: {e}")
+            new_expected = driver.expected_on_state(rule["threshold"])
+        else:
+            new_expected = driver.expected_off_state()
         with _lock:
-            state = _state.setdefault(device_name, _new_runtime())
-            expected = state.get("expected")
-        actual = driver.read_state(status)
+            _state.setdefault(device_name, _new_runtime())["expected"] = new_expected
+    elif dehumidifier_driver.state_diverged(expected, actual):
+        print(f"[dehum-auto] {device_name} 偵測到手動變更：expected={expected} actual={actual}")
+        _disable_due_to_manual(device_name, rule, now)
+        return
 
-        if expected is None:
-            # 首次 / 重啟後：建立基準。機器開著就把模式對齊自動規則指定模式，
-            # 記下 expected，本 tick 不做偵測（使用者確認的「第一個 tick 跳過」）。
-            if actual.get("power"):
-                try:
-                    driver.align_continuous(rule["threshold"])
-                except Exception as e:
-                    print(f"[dehum-auto] {device_name} align baseline error: {e}")
-                new_expected = driver.expected_on_state(rule["threshold"])
-            else:
-                new_expected = driver.expected_off_state()
-            with _lock:
-                _state.setdefault(device_name, _new_runtime())["expected"] = new_expected
-        elif dehumidifier_driver.state_diverged(expected, actual):
-            print(f"[dehum-auto] {device_name} 偵測到手動變更：expected={expected} actual={actual}")
-            _disable_due_to_manual(device_name, rule, now)
-            continue
+    sensor = sensor_snapshot.get(rule["sensor_name"], {})
+    humidity = None
+    if sensor.get("online", False):
+        humidity = sensor.get("current", {}).get("humidity")
 
-        sensor = sensor_snapshot.get(rule["sensor_name"], {})
-        humidity = None
-        if sensor.get("online", False):
-            humidity = sensor.get("current", {}).get("humidity")
+    if humidity is None:
+        _handle_sensor_missing(device_name, rule, power_now, driver, now)
+        return
 
-        if humidity is None:
-            _handle_sensor_missing(device_name, rule, power_now, driver, now)
-            continue
+    with _lock:
+        state = _state.setdefault(device_name, _new_runtime())
+        state["sensor_missing_ticks"] = 0
 
-        with _lock:
-            state = _state.setdefault(device_name, _new_runtime())
-            state["sensor_missing_ticks"] = 0
-
-        _evaluate_steady(device_name, rule, humidity, power_now, driver, now)
+    _evaluate_steady(device_name, rule, humidity, power_now, driver, now)
 
 
 # ── Internal evaluators ─────────────────────────────────
@@ -433,9 +444,11 @@ def _fire_on(device_name, rule, driver):
     """送開機 → 設成持續除濕等效模式（機器忽略自身目標濕度，threshold 只是本規則的
     判斷門檻、不下發到機器）。品牌差異收斂在 driver.fire_on()。
     任一指令真的拋 exception 才走 except；success flag 區分「呼叫到了」vs「沒生效」。"""
+    fully_ok = False
     try:
         turn_on_ok, set_mode_ok = driver.fire_on(rule["threshold"])
-        if turn_on_ok and set_mode_ok:
+        fully_ok = bool(turn_on_ok and set_mode_ok)
+        if fully_ok:
             print(f"[dehum-auto] FIRE ON {device_name}: 持續除濕 threshold={rule['threshold']}")
         else:
             print(
@@ -444,9 +457,14 @@ def _fire_on(device_name, rule, driver):
             )
     except Exception as e:
         print(f"[dehum-auto] fire on {device_name} error: {e}")
-    # 記下系統命令的基準狀態，供下個 tick 偵測手動介入
+    # 記下系統命令的基準狀態，供下個 tick 偵測手動介入。
+    # 只有「完整成功」才寫理想 ON state；partial / 例外時設 None，讓下個 tick 走
+    # evaluate 的「重新對齊」分支（align_continuous 重送沒生效的指令並重記基準），
+    # 避免把『指令沒生效』誤判成『使用者手動介入』而自廢自動模式——LG 多了
+    # set_humidity 這個失敗點後尤其容易踩到。
     with _lock:
-        _state.setdefault(device_name, _new_runtime())["expected"] = driver.expected_on_state(rule["threshold"])
+        st = _state.setdefault(device_name, _new_runtime())
+        st["expected"] = driver.expected_on_state(rule["threshold"]) if fully_ok else None
 
 
 def _fire_off(device_name, driver):
