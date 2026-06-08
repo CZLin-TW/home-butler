@@ -1,0 +1,56 @@
+# 完整鎖檔（含 transitive）——由 Render 實際成功安裝的版本產生（2026-06）。
+# render.yaml 安裝走這個檔，確保每次 rebuild 裝到完全相同的版本，避免某套件發
+# breaking 版讓後端起不來（後端是 LINE+Siri+Dashboard 的單點）。
+# 直接依賴見 requirements.txt。升級流程：改 requirements.txt → 乾淨環境 pip install
+# → pip freeze 重生此檔 → 部署觀察。
+Deprecated==1.3.1
+aenum==3.1.17
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anthropic==0.107.1
+anyio==4.13.0
+attrs==26.1.0
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+click==8.4.1
+cryptography==48.0.0
+distro==1.9.0
+docstring-parser==0.18.0
+fastapi==0.136.3
+frozenlist==1.8.0
+future==1.0.0
+google-auth==2.53.0
+google-auth-oauthlib==1.4.0
+gspread==6.2.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+jiter==0.15.0
+line-bot-sdk==3.23.0
+multidict==6.7.1
+oauthlib==3.3.1
+propcache==0.5.2
+pyasn1==0.6.3
+pyasn1-modules==0.4.2
+pycparser==3.0
+pydantic==2.13.4
+pydantic-core==2.46.4
+python-dateutil==2.9.0.post0
+pytz==2026.2
+requests==2.34.2
+requests-oauthlib==2.0.0
+six==1.17.0
+sniffio==1.3.1
+starlette==1.2.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+uvicorn==0.49.0
+websockets==16.0
+wrapt==2.2.1
+yarl==1.24.2
