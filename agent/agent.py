@@ -66,6 +66,10 @@ HUE_BRIDGE_IP = str(getattr(agent_config, "HUE_BRIDGE_IP", "") or "").strip()
 HUE_APPLICATION_KEY = str(getattr(agent_config, "HUE_APPLICATION_KEY", "") or "").strip()
 HUE_NOTIFY_GROUPED_LIGHT_ID = str(getattr(agent_config, "HUE_NOTIFY_GROUPED_LIGHT_ID", "") or "").strip()
 HUE_LIGHT_REMINDERS_ENABLED = _config_bool(getattr(agent_config, "HUE_LIGHT_REMINDERS_ENABLED", True), True)
+# Theater-agent 轉送（選填）：同機跑 theater_agent.py（FastAPI :8080）的那台 PC 設定
+# THEATER_AGENT_URL 後，agent 會宣告 theater capability，把 theater.* 指令轉打過去。
+THEATER_AGENT_URL = str(getattr(agent_config, "THEATER_AGENT_URL", "") or "").strip()
+THEATER_AGENT_KEY = str(getattr(agent_config, "THEATER_AGENT_KEY", "") or "").strip()
 AGENT_WEBSOCKET_ENABLED = _config_bool(getattr(agent_config, "AGENT_WEBSOCKET_ENABLED", True), True)
 AGENT_WEBSOCKET_HEARTBEAT_SECONDS = max(5, int(getattr(agent_config, "AGENT_WEBSOCKET_HEARTBEAT_SECONDS", 25)))
 AGENT_WEBSOCKET_RECONNECT_SECONDS = max(2, int(getattr(agent_config, "AGENT_WEBSOCKET_RECONNECT_SECONDS", 10)))
@@ -1203,7 +1207,27 @@ def _agent_ws_capabilities() -> list[str]:
     capabilities = ["pc_monitor"]
     if _hue_bridge_host() and HUE_APPLICATION_KEY:
         capabilities.append("hue")
+    if THEATER_AGENT_URL:
+        capabilities.append("theater")
     return capabilities
+
+
+# ── Theater-agent 轉送 ────────────────────────────────
+# theater_agent.py 是同機獨立 process（SYSTEM 帳號、純內網 :8080），這裡只做
+# localhost HTTP 轉送，不合併進本 process：theater 有自己的設備連動迴圈，
+# 不該被本 agent 的 auto-update self-restart 連坐。
+
+def _theater_request(method: str, path: str, json_body: dict | None = None) -> dict:
+    if not THEATER_AGENT_URL:
+        raise RuntimeError("THEATER_AGENT_URL is not configured")
+    url = f"{THEATER_AGENT_URL.rstrip('/')}{path}"
+    headers = {"x-api-key": THEATER_AGENT_KEY} if THEATER_AGENT_KEY else {}
+    # timeout 15s < send_agent_command 的 20s，讓「theater-agent 沒回」在 server 端
+    # 看到的是本 agent 回報的 failed（帶錯誤訊息），而不是空白的 504。
+    response = httpx.request(method, url, headers=headers, json=json_body, timeout=15.0)
+    if response.status_code >= 300:
+        raise RuntimeError(f"theater-agent HTTP {response.status_code}: {response.text[:200]}")
+    return response.json()
 
 
 def _agent_ws_hello() -> dict:
@@ -1251,6 +1275,11 @@ def _execute_agent_command(command_type: str, payload: dict) -> dict:
             str(payload.get("effect") or ""),
             str(payload.get("resource_type") or "grouped_light"),
         )
+    if command_type == "theater.summary":
+        return _theater_request("GET", "/summary")
+    if command_type == "theater.set_flags":
+        flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
+        return _theater_request("POST", "/flags", json_body=flags)
     raise RuntimeError(f"Unsupported command type: {command_type}")
 
 

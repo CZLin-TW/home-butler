@@ -34,6 +34,12 @@ GPU_MODEL = ""    # 例如 "GTX-1650S"、"RTX-4070Ti"
 # AGENT_WEBSOCKET_HEARTBEAT_SECONDS = 25
 # AGENT_WEBSOCKET_RECONNECT_SECONDS = 10
 
+# Theater-agent 轉送（選填）：只有同機跑 theater_agent.py 的那台 PC（XEON-1230V2）要設。
+# 設了 URL 就會宣告 theater capability，Dashboard 的劇院區塊指令會經本 agent 轉送。
+# KEY 對應 theater-agent 的 THEATER_AGENT_KEY（沒設環境變數覆蓋的話是它的預設值）。
+# THEATER_AGENT_URL = "http://127.0.0.1:8080"
+# THEATER_AGENT_KEY = "czhometheater"
+
 # Auto-update：預設每 5 ticks check 一次 origin/main（TICK_SECONDS=60 時約 5 分鐘），有新 commit 就 git pull
 # + os._exit(1) 讓 Task Scheduler 重啟 process 拉新 code。預設啟用。
 # 緊急時改 False 暫停這台 PC 接收新版（例如 main 推了壞 code 你要鎖版本 debug）。

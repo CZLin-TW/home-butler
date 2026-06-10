@@ -36,10 +36,10 @@
 
 ## 各台差異
 
-| Hostname | IP | Python | Windows user |
-|---|---|---|---|
-| `A7600X_N4070Ti` | 192.168.68.53 | `C:\Python313\python.exe` | `chuan` |
-| `XEON-1230V2` | 192.168.68.55 | `C:\Program Files\Python314\python.exe` | `User1` |
+| Hostname | IP | Python | Windows user | 額外 capability |
+|---|---|---|---|---|
+| `A7600X_N4070Ti` | 192.168.68.53 | `C:\Python313\python.exe` | `chuan` | — |
+| `XEON-1230V2` | 192.168.68.55 | `C:\Program Files\Python314\python.exe` | `User1` | `theater`（agent_config.py 設 `THEATER_AGENT_URL="http://127.0.0.1:8080"` + `THEATER_AGENT_KEY`，轉送到同機 `C:\theater-agent` 的 theater_agent.py；那個 repo 是 github.com/CZLin-TW/theater-agent，有自己的 auto-update） |
 
 bat 範本（python 路徑要對應該台，不要兩台共用同一個 bat）：
 ```bat

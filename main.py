@@ -33,6 +33,10 @@ app.include_router(agent_ws_router)
 from lighting_api import router as lighting_api_router
 app.include_router(lighting_api_router)
 
+# Theater control via local PC agent (relay to theater-agent on the same PC)
+from theater_api import router as theater_api_router
+app.include_router(theater_api_router)
+
 
 # 啟動時把 PC 監控歷史 + 感測器歷史 + 空調狀態歷史從 Sheet 撈回 in-memory ring
 # buffer（解 Render free instance 重啟資料遺失）+ spawn polling thread。
