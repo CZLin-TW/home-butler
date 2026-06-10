@@ -164,6 +164,62 @@ def get_hub_sensor(device_id):
     return {"temperature": temp, "humidity": humidity, "co2": co2}
 
 
+# ── Webhook 管理（照明自動化用） ──
+# SwitchBot 一個 token 只能註冊一個 webhook URL；目前唯一的 consumer 是
+# home-butler /switchbot/webhook（Hub 2 lightLevel → 自動夜燈）。
+
+def _webhook_request(path, payload):
+    try:
+        resp = httpx.post(
+            f"{BASE_URL}/webhook/{path}",
+            headers=_make_headers(),
+            json=payload,
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("statusCode") == 100:
+            return {"success": True, "body": data.get("body") or {}}
+        return {"success": False, "error": data.get("message", "未知錯誤")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def query_webhook():
+    """查詢目前註冊的 webhook URL。從未註冊過時 SwitchBot 回非 100（視為無）。"""
+    result = _webhook_request("queryWebhook", {"action": "queryUrl"})
+    if not result["success"]:
+        return {"urls": [], "error": result["error"]}
+    return {"urls": result["body"].get("urls") or []}
+
+
+def setup_webhook(url):
+    return _webhook_request("setupWebhook", {
+        "action": "setupWebhook", "url": url, "deviceList": "ALL",
+    })
+
+
+def update_webhook(url):
+    return _webhook_request("updateWebhook", {
+        "action": "updateWebhook", "config": {"url": url, "enable": True},
+    })
+
+
+def delete_webhook(url):
+    return _webhook_request("deleteWebhook", {"action": "deleteWebhook", "url": url})
+
+
+def ensure_webhook(url):
+    """確保 webhook 指向 url（冪等，startup 呼叫）。
+    沒註冊過 → setup；已註冊別的 URL → update；已是目標 URL → no-op。"""
+    q = query_webhook()
+    urls = q.get("urls") or []
+    if url in urls:
+        return {"success": True, "already": True}
+    if urls:
+        return update_webhook(url)
+    return setup_webhook(url)
+
+
 # ── 高階封裝：DIY IR 設備控制 ──
 
 # 會被映射到標準 turnOn/turnOff 的按鈕名稱

@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import asyncio
 import httpx
+import os
 import re
 import traceback
 import threading
@@ -38,6 +40,15 @@ from theater_api import router as theater_api_router
 app.include_router(theater_api_router)
 
 
+# 照明自動化的 Hue 指令從 sync thread（polling / webhook 衍生 thread）發出，
+# 需要 FastAPI 的 running loop 才能 run_coroutine_threadsafe 到 agent WS。
+# 這個 handler 要註冊在 _on_startup 之前，確保 polling thread 起跑前 loop 已就緒。
+@app.on_event("startup")
+async def _capture_event_loop():
+    import lighting_auto
+    lighting_auto.set_event_loop(asyncio.get_running_loop())
+
+
 # 啟動時把 PC 監控歷史 + 感測器歷史 + 空調狀態歷史從 Sheet 撈回 in-memory ring
 # buffer（解 Render free instance 重啟資料遺失）+ spawn polling thread。
 @app.on_event("startup")
@@ -50,6 +61,7 @@ def _on_startup():
     import dehumidifier_auto
     import dehumidifier_history
     import dehumidifier_driver
+    import lighting_auto
     from sheets import RequestContext
     import switchbot_api
     from handlers.device import apply_sensor_compensation
@@ -59,6 +71,21 @@ def _on_startup():
     ac_history.backfill_from_sheet()
     dehumidifier_history.backfill_from_sheet()
     dehumidifier_auto.load_rules()
+    lighting_auto.load_rules()
+
+    # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
+    # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。
+    # 沒設就跳過——自動夜燈仍可運作，只是退化成 5min 輪詢的反應速度。
+    public_base = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip()
+    if public_base:
+        def _register_webhook():
+            url = public_base.rstrip("/") + "/switchbot/webhook"
+            result = switchbot_api.ensure_webhook(url)
+            print(f"[light-auto] webhook register {url}: {result}")
+        threading.Thread(target=_register_webhook, daemon=True).start()
+    else:
+        print("[light-auto] PUBLIC_BASE_URL / RENDER_EXTERNAL_URL 未設定，跳過 webhook 註冊"
+              "（自動夜燈退化為 5min 輪詢反應）")
 
     def _polling_loop():
         """每 5 分鐘掃一次「智能居家」分頁：
@@ -126,6 +153,12 @@ def _on_startup():
                 dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())
             except Exception as e:
                 print(f"[poll] tick error: {e}")
+            # 照明自動化（自動夜燈）：時段邊界處理 + webhook 漏接兜底。
+            # 獨立 try 隔離——上面 sensor/dehum 任一掛掉不影響夜燈時段結束關燈。
+            try:
+                lighting_auto.tick()
+            except Exception as e:
+                print(f"[light-auto] tick error: {e}")
             _time.sleep(300)
 
     threading.Thread(target=_polling_loop, daemon=True).start()
@@ -248,6 +281,39 @@ def test_switchbot_turnon(device_id: str):
     result = switchbot_api.send_command(device_id, "turnOn", "default", "command")
     print(f"[TEST] turnOn result: {result}")
     return {"status": "ok" if result.get("success") else "error", "result": result}
+
+
+@app.get("/switchbot/webhook/status", dependencies=[Depends(verify_api_key)])
+def switchbot_webhook_status():
+    """Debug: 看 SwitchBot Cloud 目前註冊的 webhook URL，確認自動夜燈推播路徑活著。"""
+    return switchbot_api.query_webhook()
+
+
+@app.post("/switchbot/webhook")
+async def switchbot_webhook(request: Request):
+    """SwitchBot Cloud webhook 接收端（Hub 2 changeReport → 自動夜燈秒級評估）。
+
+    SwitchBot 不對請求簽名，這個端點無法驗證來源；payload 只拿來跟已設定規則的
+    sensor_device_id 比對，不匹配就忽略——偽造流量最多只能在啟用時段內觸發一次
+    既有夜燈規則的重新評估，無法控制其他任何設備。
+    評估丟背景 thread 跑（含 agent WS 往返），立刻回 200 讓 SwitchBot 不重送。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "ignored"}
+    context = body.get("context") if isinstance(body, dict) else None
+    if not isinstance(context, dict):
+        return {"status": "ignored"}
+    device_mac = context.get("deviceMac") or context.get("deviceId") or ""
+    light_level = context.get("lightLevel")
+    if device_mac and light_level is not None:
+        import lighting_auto
+        threading.Thread(
+            target=lighting_auto.on_light_report,
+            args=(str(device_mac), light_level),
+            daemon=True,
+        ).start()
+    return {"status": "ok"}
 
 
 # ════════════════════════════════════════════
