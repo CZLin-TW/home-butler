@@ -38,6 +38,7 @@
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 | PC agent | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖；同一支 agent 也建立 WebSocket 即時通道，供 Hue 等區網設備控制使用。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
 | 劇院 agent 轉送 | 劇院 PC 的 agent 設了 `THEATER_AGENT_URL` 會宣告 theater capability，把 `theater.summary` / `theater.set_flags` 指令轉送到同機 [theater-agent](https://github.com/CZLin-TW/theater-agent)（純內網 :8080，Render 連不到，靠 WebSocket 中繼）。`theater_api.py` 對 Dashboard 提供 `/api/theater/summary`（功能開關 + 設備狀態 + log 尾端）與 `/api/theater/flags`（開關寫入） |
+| 自動夜燈 | 依 SwitchBot Hub 2 亮度（lightLevel 1~20）條件式控制 Hue 區域：啟用時段內亮度 ≤ 門檻且燈關著 → 套用指定場景＋亮度；亮度 > 門檻 → 關燈；時段結束關燈一次後不再理會。主路徑走 SwitchBot Webhook 推播（秒級），5 分鐘輪詢兜底時段邊界與漏接。每個 Hue 區域一條規則，Dashboard 照明卡片設定，持久化在 Sheet「照明自動規則」（詳見「自動夜燈機制」章節） |
 | Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
 
 ---
@@ -501,6 +502,7 @@ function sendRealtimeNotification() {
 | LG_CLIENT_ID | LG ThinQ client 識別字串，固定一組即可。預設 `home-butler-client` | 選配 |
 | SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
 | SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
+| PUBLIC_BASE_URL | 本服務的公開網址，startup 用來向 SwitchBot 註冊 webhook（自動夜燈的秒級路徑）。**Render 上不用設**（自帶 `RENDER_EXTERNAL_URL`），部署在其他平台才需要。兩者都沒有時跳過註冊，自動夜燈退化為 5 分鐘輪詢反應 | 選配 |
 | PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
 | PANASONIC_PASSWORD | Panasonic Smart App 密碼 | 選配 |
 | CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
@@ -520,6 +522,8 @@ function sendRealtimeNotification() {
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
+| /switchbot/webhook | POST | SwitchBot Cloud webhook 接收端，Hub 2 changeReport 觸發自動夜燈秒級評估。無 API key 保護（SwitchBot 不支援自訂 header）；payload 只拿來比對已設定規則的感應器，不匹配即忽略 |
+| /switchbot/webhook/status | GET | Debug：查 SwitchBot Cloud 目前註冊的 webhook URL，確認自動夜燈推播路徑活著 |
 | /panasonic/devices | GET | 列出 Panasonic 帳號下所有設備（GWID / Auth），新增除濕機抓參數用 |
 | /panasonic/dehumidifier/{name}/full_status | GET | Debug：掃某 Panasonic 除濕機 CommandType 0x00~0x1F 全欄位 |
 | /lg/devices | GET | 列出 LG ThinQ 帳號下所有裝置，抓 deviceId 用 |
@@ -532,7 +536,7 @@ function sendRealtimeNotification() {
 
 > **🔒 認證**：所有 `/api/*` 端點都要求 `X-API-Key` header，值為環境變數 `HOME_BUTLER_API_KEY`。
 > 沒有 header 或 key 不對會回 401；伺服器端未設定 `HOME_BUTLER_API_KEY` 則回 503（fail-closed）。
-> 同樣的保護也套用在 `/notify*` 和 `/switchbot/*` 端點。`/`（健康檢查）和 `/callback`（LINE webhook，由 X-Line-Signature 驗證）不在保護範圍內。
+> 同樣的保護也套用在 `/notify*` 和 `/switchbot/*` 端點。`/`（健康檢查）、`/callback`（LINE webhook，由 X-Line-Signature 驗證）和 `/switchbot/webhook`（SwitchBot Cloud 推播，SwitchBot 不支援自訂 header，靠感應器比對過濾）不在保護範圍內。
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
@@ -578,6 +582,11 @@ function sendRealtimeNotification() {
 | /api/lighting/areas/{area_id}/notification | POST | 對 Hue 區域下發通知動作，例如 `alert:breathe` 呼吸燈；若 Bridge 回傳 signaling 支援值也會列入通知清單 |
 | /api/lighting/areas/{area_id}/effect | POST | 對區域內支援指定 effect 的燈具套用燈效，透過 agent 的 `hue.set_effect` 下發；部分支援時只套用支援的燈 |
 | /api/lighting/breathe | POST | 透過在線 PC agent 對指定 Hue grouped_light 觸發 breathe |
+| /api/lighting/auto/rules | GET | 列出所有 Hue 區域的自動夜燈規則 + runtime state（時段旗標、最後亮度值與時間） |
+| /api/lighting/auto/rules/{area_id} | PATCH | 設定 / 更新該區域的自動夜燈規則（光感應器、亮度門檻 1–20、場景、開燈亮度 1–100、啟用時段 HH:MM 可跨午夜、啟用開關）。啟用且當下在時段內會立即評估一次 |
+| /api/lighting/auto/rules/{area_id} | DELETE | 刪除該區域的自動夜燈規則 |
+| /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
+| /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，走跟 LINE bot 相同的 Claude pipeline，回 `{reply}`；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
 
 ---
@@ -760,6 +769,33 @@ function sendRealtimeNotification() {
 
 ---
 
+## 自動夜燈機制
+
+每個 Hue 區域可設定一條規則（Dashboard 照明卡片下方）：光感應器（SwitchBot Hub 2）+ 亮度門檻（lightLevel 1~20）+ 觸發場景 + 開燈亮度（1~100）+ 啟用時段（支援跨午夜）。
+
+**時段內邏輯**（規則引擎 `lighting_auto.py`，跑在 home-butler 後端，網頁關閉仍運作）：
+
+| 條件 | 動作 |
+|------|------|
+| 亮度 ≤ 門檻 且 該區燈是關的 | recall 場景 → 設定開燈亮度 |
+| 亮度 ≤ 門檻 且 燈已開著 | 不動作（不覆蓋使用者手動設定） |
+| 亮度 > 門檻 且 燈開著 | 關燈 |
+
+時段結束時關燈一次，之後到下個時段前不再理會。
+
+**兩條評估路徑**：
+
+- **SwitchBot Webhook（主）**：startup 自動向 SwitchBot 註冊 `/switchbot/webhook`（一個 token 只能註冊一個 URL）。Hub 2 任一數值（溫/濕/亮度）變化都推 changeReport、皆附當下 lightLevel → 收到就評估，秒級反應。
+- **5 分鐘輪詢（輔）**：處理時段開始（主動拉一次評估）、時段結束（關燈）、webhook 漏接兜底。
+
+**已知限制（實測，已接受）**：
+
+- Hub 2 對雲端的亮度回報是「變化幅度驅動」——劇變（如 3→11）秒級更新；小幅變化（如 1↔3）要等數分鐘的定期同步。webhook 訊息雖然秒級送達，裡面搭車的 lightLevel 可能仍是 Hub 上次登錄的舊值，低亮度區間與 SwitchBot APP 直讀值（手機藍牙直連，官方雲端 API 拿不到）可差 ±1~2 級。
+- 因此**調門檻一律以 Dashboard 偵測按鈕的數字為準**（規則引擎看的就是同一份數據），不要以 APP 為準。
+- 開燈後環境變亮可能跨過門檻造成開關循環（閃爍）——刻意不做抑制，由使用者把門檻設在「夜燈開著時的環境亮度」之上、「天亮亮度」之下迴避（兩個值都可用偵測按鈕實測）。
+
+---
+
 ## 資料封存機制
 
 | 分頁 | 觸發條件 | 封存至 |
@@ -847,7 +883,7 @@ function sendRealtimeNotification() {
 
 | 檔案 | 說明 |
 |------|------|
-| main.py | FastAPI 主程式（LINE Webhook、啟動 polling thread、SwitchBot debug 端點）。訊息處理委派給 `assistant.py` |
+| main.py | FastAPI 主程式（LINE Webhook、SwitchBot Cloud webhook 接收與 startup 註冊、啟動 polling thread、SwitchBot debug 端點）。訊息處理委派給 `assistant.py` |
 | assistant.py | 自然語言處理核心：`process_message`（Claude 解析 → action 分派 → 組句）與 action 路由表。LINE webhook 與 `/api/assistant`（Siri）共用，避免邏輯複製兩份 |
 | config.py | 環境變數、LINE/Claude 初始化、時區設定 |
 | sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取、append_record / update_row_fields 集中寫入） |
@@ -862,7 +898,7 @@ function sendRealtimeNotification() {
 | handlers/device.py | 智能居家 handler（空調、IR、感應器、除濕機、天氣） |
 | handlers/schedule.py | 排程指令 handler（新增、刪除、查詢） |
 | handlers/style.py | 自訂風格 handler |
-| switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取 含 Meter Pro CO2、DIY IR） |
+| switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取 含 Meter Pro CO2、DIY IR、webhook 註冊管理） |
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | lg_api.py | LG ThinQ Connect API 封裝（PAT 認證、裝置探索、除濕機控制與狀態查詢）。除濕機 property 校準點集中在檔案頂部常數 |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
@@ -871,7 +907,8 @@ function sendRealtimeNotification() {
 | web_api.py | REST API（裝置控制、待辦、週期待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則、Dashboard 裝置配對登入，以及 Siri 自然語言入口 `/api/assistant`） |
 | device_auth.py | Dashboard 裝置配對登入（OAuth Device Grant 風格）：發 user_code/device_token、LINE Bot 端核准、PWA 輪詢領 session。狀態存 Sheets「裝置配對」分頁。解 iOS PWA 登入被踢去 Safari 的問題 |
 | agent_ws.py | PC agent WebSocket registry（agent hello / heartbeat / 在線狀態），讓 Render 有一條可回到家中區網的即時通道 |
-| lighting_api.py | Hue 照明 API（列區域含 on/brightness/場景/通知/燈效、更新顯示名稱、控制電源/亮度、套用場景/通知/燈效、觸發 breathe），實際 Hue LAN 呼叫交給 PC agent 執行 |
+| lighting_api.py | Hue 照明 API（列區域含 on/brightness/場景/通知/燈效、更新顯示名稱、控制電源/亮度、套用場景/通知/燈效、觸發 breathe）＋自動夜燈規則 CRUD / 光感應器清單 / lightLevel 偵測端點，實際 Hue LAN 呼叫交給 PC agent 執行 |
+| lighting_auto.py | 自動夜燈規則引擎：SwitchBot Hub 2 亮度條件式控制 Hue 區域。Webhook 推播主路徑（秒級）+ 5min tick 兜底時段邊界與漏接；規則持久化 Sheet「照明自動規則」、runtime in-memory；webhook 進來順手快取各感應器 lightLevel 供偵測端點用。Hue 指令從 sync thread 經 run_coroutine_threadsafe 橋接到 agent WebSocket |
 | hue_area_settings.py | Sheet「Hue 照明區域」讀寫：保存 Hue ID 與 Dashboard 顯示名稱的對應 |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
 | sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
