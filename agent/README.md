@@ -180,6 +180,28 @@ agent start: Xeon-1230V2 (192.168.68.55) → https://home-butler.onrender.com  l
 
 ---
 
+## Theater-agent 轉送（選配，只在劇院 PC 設定）
+
+同一台 PC 如果也跑著 [theater-agent](https://github.com/CZLin-TW/theater-agent)（家庭劇院控制服務，純內網 :8080），在 `agent_config.py` 加：
+
+```python
+THEATER_AGENT_URL = "http://127.0.0.1:8080"
+THEATER_AGENT_KEY = "czhometheater"   # theater-agent 的 API key（有用 THEATER_AGENT_KEY env var 覆蓋就填那個值）
+```
+
+設了 URL 之後 agent 會在 WebSocket hello 多宣告一個 `theater` capability，並把 `theater.summary` / `theater.set_flags` 指令轉打到 localhost——Dashboard PC 卡片的「劇院 agent」區塊（功能開關 + log 監看）就是走這條鏈：
+
+```
+Dashboard → home-butler /api/theater/* → agent WebSocket → 本 agent → localhost:8080 theater-agent
+```
+
+注意：
+- **沒跑 theater-agent 的 PC 不要設**——server 端按 capability 路由，誤設會把劇院指令派到一台打 localhost 撲空的機器。
+- theater-agent 本身是獨立 process（SYSTEM 帳號、有自己的 auto-update），這裡只做轉送，兩邊的重啟互不影響。
+- 改了這兩行 config 要手動重啟 agent 才生效（`schtasks /end + /run`；注意若 agent 是 self-restart 過的孤兒，`/end` 殺不到，要按 PID 殺——見「踩過的雷」）。
+
+---
+
 ## 開機自啟（Task Scheduler）
 
 仿 F@H 自動化的同款 pattern。
@@ -310,6 +332,7 @@ agent 啟動時先對 `<butler-agent>/agent.lock`（在 repo 外，例如 `C:\bu
 | `[fah] lufah not installed` | lufah 套件沒裝、或裝在不同的 python 而 agent 找不到 | `pip install lufah` 到跑 F@H 排程的那個 python；agent 透過 PATH 找 `lufah.exe` 可以跨 python install |
 | `[ws] disabled: missing dependency 'websockets'` | agent 已拉到 WebSocket 版程式碼，但本機 python 還沒安裝新套件 | 在 `C:\butler-agent\repo\agent` 跑 `python -m pip install -r requirements.txt`，再重啟 ButlerAgent |
 | Task Scheduler `/ru SYSTEM` 跑失敗 | SYSTEM 帳號讀不到 user-scoped 套件（pynvml、psutil 等） | 一律用本機使用者帳號 `/ru "$env:USERNAME"`，**不要用 SYSTEM** |
+| 改了 `agent_config.py` 後 `schtasks /end + /run`，log 只多一行 `[lock] another agent instance is already running`、新設定沒生效 | 跑著的 agent 是 auto-update self-restart 後的孤兒 process，Task Scheduler 的 `/end` 殺不到它；`/run` 啟動的新實例被單一實例鎖擋退（鎖運作正常，但本尊還抱著舊 config） | 用 `Get-CimInstance Win32_Process -Filter "Name like 'python%'"` 列出 CommandLine 含 `butler-agent` 的 process（**別誤殺 `theater_agent.py`**），`Stop-Process -Id <PID> -Force` 後 `schtasks /run` |
 
 ---
 

@@ -37,6 +37,7 @@
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 | PC agent | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖；同一支 agent 也建立 WebSocket 即時通道，供 Hue 等區網設備控制使用。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
+| 劇院 agent 轉送 | 劇院 PC 的 agent 設了 `THEATER_AGENT_URL` 會宣告 theater capability，把 `theater.summary` / `theater.set_flags` 指令轉送到同機 [theater-agent](https://github.com/CZLin-TW/theater-agent)（純內網 :8080，Render 連不到，靠 WebSocket 中繼）。`theater_api.py` 對 Dashboard 提供 `/api/theater/summary`（功能開關 + 設備狀態 + log 尾端）與 `/api/theater/flags`（開關寫入） |
 | Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
 
 ---
