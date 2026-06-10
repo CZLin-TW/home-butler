@@ -1,6 +1,7 @@
 """Dashboard lighting API backed by the local PC agent."""
 
 import re
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -302,13 +303,33 @@ async def api_lighting_auto_sensors():
 
 @router.get("/lighting/auto/sensors/{device_id}/light-level")
 async def api_lighting_auto_sensor_light_level(device_id: str):
-    """實測某感應器當下的 lightLevel（1~20），給 UI 調門檻時參考。
-    回 null 表示該設備不回報亮度（不是 Hub 2）。"""
+    """系統當下可得的最新 lightLevel（1~20），給 UI 調門檻時參考。
+
+    Hub 2 對雲端的回報是變化幅度驅動：小幅變化不會立刻更新 /status 雲端快取，
+    但任何 changeReport（含溫濕度觸發的）都帶當下 lightLevel。所以 webhook
+    近期報過就優先回快取值（附 age_seconds 資料年齡），否則才打 status
+    （雲端快取值，樣本時間未知 → age_seconds=null）。
+    light_level=null 表示該設備不回報亮度（不是 Hub 2）。"""
+    cached = lighting_auto.get_cached_light_level(device_id)
+    now = time.time()
+    if cached and now - cached["at"] <= lighting_auto.WEBHOOK_FRESH_S:
+        return {
+            "light_level": cached["level"],
+            "source": "webhook",
+            "age_seconds": int(now - cached["at"]),
+        }
     status = switchbot_api.get_device_status(device_id)
     if not isinstance(status, dict) or "error" in status:
+        if cached:
+            # status 打不到但有舊 webhook 快取 → 還是給值，年齡誠實標示
+            return {
+                "light_level": cached["level"],
+                "source": "webhook",
+                "age_seconds": int(now - cached["at"]),
+            }
         detail = status.get("error") if isinstance(status, dict) else str(status)
         raise HTTPException(status_code=502, detail=str(detail))
-    return {"light_level": status.get("lightLevel")}
+    return {"light_level": status.get("lightLevel"), "source": "status", "age_seconds": None}
 
 
 @router.post("/lighting/breathe")

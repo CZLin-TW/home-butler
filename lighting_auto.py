@@ -47,10 +47,16 @@ HEADERS = [
 # 不重打 hue.list_areas，省 agent 往返。
 EVAL_DEBOUNCE_S = 10
 
+# Hub 2 對雲端的回報是「變化幅度驅動」：亮度劇變立刻報、小幅變化要等定期同步，
+# 所以 /status 的雲端快取常常是舊值。但任何 changeReport（含溫濕度觸發的）都
+# 帶當下 lightLevel → webhook 進來順手快取，這個年齡內的快取值視為比 status 新鮮。
+WEBHOOK_FRESH_S = 360
+
 _lock = Lock()
-_rules: dict = {}      # area_id → rule config
-_runtime: dict = {}    # area_id → runtime state（不持久化）
-_loop = None           # FastAPI event loop（橋接 async agent 指令用）
+_rules: dict = {}          # area_id → rule config
+_runtime: dict = {}        # area_id → runtime state（不持久化）
+_sensor_levels: dict = {}  # normalized device id → {"level", "at"}（webhook 亮度快取）
+_loop = None               # FastAPI event loop（橋接 async agent 指令用）
 
 
 def _new_runtime():
@@ -207,6 +213,8 @@ def on_light_report(device_id, light_level):
         return
     now = now_taipei()
     with _lock:
+        # 不限有規則的感應器都快取——偵測按鈕（light-level 端點）也吃這份
+        _sensor_levels[key] = {"level": light_level, "at": time.time()}
         matches = [
             (aid, dict(r)) for aid, r in _rules.items()
             if r.get("enabled") and _normalize_device_id(r.get("sensor_device_id")) == key
@@ -253,11 +261,16 @@ def tick():
             if not sensor_id:
                 continue
             if sensor_id not in levels:
-                status = switchbot_api.get_device_status(sensor_id)
-                levels[sensor_id] = (
-                    status.get("lightLevel")
-                    if isinstance(status, dict) and "error" not in status else None
-                )
+                cached = get_cached_light_level(sensor_id)
+                if cached and time.time() - cached["at"] <= WEBHOOK_FRESH_S:
+                    # webhook 剛報過 → 比 status 雲端快取新鮮，且省一次 API 呼叫
+                    levels[sensor_id] = cached["level"]
+                else:
+                    status = switchbot_api.get_device_status(sensor_id)
+                    levels[sensor_id] = (
+                        status.get("lightLevel")
+                        if isinstance(status, dict) and "error" not in status else None
+                    )
             light = _int(levels[sensor_id], None)
 
             with _lock:
@@ -338,6 +351,14 @@ def get_all_rules() -> dict:
             aid: {**r, "runtime": dict(_runtime.get(aid) or _new_runtime())}
             for aid, r in _rules.items()
         }
+
+
+def get_cached_light_level(device_id):
+    """某感應器最後一次 webhook 回報的亮度。回 {"level", "at"} 或 None。"""
+    key = _normalize_device_id(device_id)
+    with _lock:
+        entry = _sensor_levels.get(key)
+        return dict(entry) if entry else None
 
 
 def set_rule(area_id, *, enabled, sensor_device_id="", sensor_name="",
