@@ -69,14 +69,6 @@ def _new_runtime():
     return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0, "expected": None}
 
 
-def _round_humidity(h: float) -> int:
-    """四捨五入到整數（0.5 進位）。Python 內建 round() 是 banker's rounding
-    (round half to even)，60.5 會變 60 不是 61，跟「四捨五入」直覺不一致。
-    sensor 小數值 vs 整數門檻比對時用這個，避免 60.0 卡點、60.1 reset 的問題。
-    濕度永遠非負，這寫法安全。"""
-    return int(h + 0.5)
-
-
 def _ensure_sheet():
     global _cached_ws
     if _cached_ws is not None:
@@ -285,10 +277,10 @@ def _evaluate_one_device(device_name, rule, d, sensor_snapshot, now):
 
 def _toggle_on_immediate(device_name, rule, sensor_humidity, power_now, driver):
     """Toggle 從 OFF→ON 瞬間：對稱單一門檻判斷（無 hysteresis，用 ≥ 端贏 tie）。
-    sensor 四捨五入後比，跟 steady-state 一致。"""
+    直接比較 sensor 原始濕度，跟 steady-state 一致。"""
     threshold = rule["threshold"]
-    humidity_int = _round_humidity(sensor_humidity)
-    if humidity_int >= threshold:
+    humidity_value = float(sensor_humidity)
+    if humidity_value >= threshold:
         if not power_now:
             _fire_on(device_name, rule, driver)
             return "toggled_immediate_on"
@@ -304,10 +296,9 @@ def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
     duration_s = rule["duration_min"] * 60
     h_on = threshold + HYSTERESIS_ABOVE
     h_off = threshold - HYSTERESIS_BELOW
-    # 四捨五入後再比較：sensor 0.x 小數 vs 整數門檻精準匹配不會卡。
-    # 例：target=60 → h_off=59、h_on=62；58.5~59.4 累積關閉、59.5~61.4 灰色區、
-    # 61.5~62.4 累積開啟。實際控制帶 59~62、置中接近 target 60。
-    humidity_int = _round_humidity(humidity)
+    # 直接比較 sensor 原始濕度，讓觸發點與 API / Dashboard 顯示一致。
+    # 例：target=60 → <=59 累積關閉、59<humidity<62 維持、>=62 累積開啟。
+    humidity_value = float(humidity)
 
     fire = None
     countdown_min = None
@@ -316,7 +307,7 @@ def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
     with _lock:
         state = _state.setdefault(device_name, _new_runtime())
 
-        if humidity_int >= h_on:
+        if humidity_value >= h_on:
             state["below_since"] = None
             if state["above_since"] is None:
                 state["above_since"] = now
@@ -330,9 +321,8 @@ def _evaluate_steady(device_name, rule, humidity, power_now, driver, now):
                     phase = "armed_above"
             else:
                 phase = "idle_humid"
-        elif humidity_int <= h_off:
-            # 邊界用 <=（含等於）：剛好打到 h_off 就算「夠乾」進關閉累積，
-            # 避免 sensor 在邊界值 ±0.1 抖動造成 reset / 計時器歸零。h_on 同樣含等於。
+        elif humidity_value <= h_off:
+            # 邊界用 <=（含等於）：剛好打到 h_off 就進關閉累積；h_on 同樣含等於。
             state["above_since"] = None
             if state["below_since"] is None:
                 state["below_since"] = now
@@ -421,7 +411,7 @@ def _disable_due_to_manual(device_name, rule, now):
 
 def _phase_for_set(rule, sensor_humidity, power_now):
     """set_rule 後計算當下 phase。下個 tick evaluate_all 會覆寫成更精準的值。
-    四捨五入規則同 _evaluate_steady。"""
+    原始濕度比較規則同 _evaluate_steady。"""
     if not rule.get("auto_mode"):
         return "disabled"
     if sensor_humidity is None:
@@ -429,10 +419,10 @@ def _phase_for_set(rule, sensor_humidity, power_now):
     threshold = rule["threshold"]
     h_on = threshold + HYSTERESIS_ABOVE
     h_off = threshold - HYSTERESIS_BELOW
-    humidity_int = _round_humidity(sensor_humidity)
-    if humidity_int >= h_on:
+    humidity_value = float(sensor_humidity)
+    if humidity_value >= h_on:
         return "idle_humid" if power_now else "armed_above"
-    elif humidity_int <= h_off:
+    elif humidity_value <= h_off:
         return "armed_below" if power_now else "idle_dry"
     else:
         return "idle_humid" if power_now else "idle_dry"
