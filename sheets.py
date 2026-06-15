@@ -114,6 +114,20 @@ def get_sheet(name):
     return _get_spreadsheet().worksheet(name)
 
 
+def get_sheet_records(name):
+    """Read one worksheet as records without loading the full RequestContext."""
+    ss = _get_spreadsheet()
+    try:
+        result = ss.values_get(
+            f"'{name}'",
+            params={'valueRenderOption': 'FORMATTED_VALUE'},
+        )
+        return _parse_sheet_values(result.get('values', []))
+    except Exception as e:
+        print(f"[SHEET READ ERROR] {name}: {e}，改用 get_all_records")
+        return ss.worksheet(name).get_all_records()
+
+
 def get_or_create_sheet(name, headers, rows=100):
     """Return a worksheet, creating it with the given header row if missing."""
     ss = _get_spreadsheet()

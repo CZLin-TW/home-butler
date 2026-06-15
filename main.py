@@ -61,6 +61,7 @@ def _on_startup():
     import dehumidifier_auto
     import dehumidifier_history
     import dehumidifier_driver
+    import device_status
     import lighting_auto
     from sheets import RequestContext
     import switchbot_api
@@ -106,6 +107,7 @@ def _on_startup():
                 dehumidifier_history.backfill_from_sheet()
                 ctx = RequestContext()
                 ctx.load()
+                device_status.load_catalog(ctx.get("智能居家"))
                 for d in ctx.get("智能居家"):
                     if d.get("狀態") != "啟用":
                         continue
@@ -127,6 +129,10 @@ def _on_startup():
                         co2 = result.get("co2")
                         temp, humidity = apply_sensor_compensation(temp, humidity, d)
                         sensor_state.record(name, location, temp, humidity, co2)
+                        device_status.update(name, {
+                            "temperature": temp,
+                            "humidity": humidity,
+                        })
                     elif dtype == "空調":
                         power = str(d.get("最後電源", "")).strip()
                         if not power:
@@ -148,6 +154,7 @@ def _on_startup():
                             err = status.get("error") if isinstance(status, dict) else status
                             print(f"[dehum poll] {name}: {err}")
                             continue
+                        device_status.update(name, driver.status_fields(status))
                         dehumidifier_history.record(name, location, driver.is_power_on(status))
                 # 除濕機自動規則：先 sensor poll 跑完寫進 snapshot 再評估
                 dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())

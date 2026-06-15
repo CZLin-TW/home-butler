@@ -31,6 +31,7 @@ from threading import Lock
 import gspread
 
 import dehumidifier_history
+import device_status
 import dehumidifier_driver
 from sheets import _get_spreadsheet
 
@@ -227,6 +228,7 @@ def _evaluate_one_device(device_name, rule, d, sensor_snapshot, now):
         print(f"[dehum-auto] {device_name} status fetch: {err}")
         return
     power_now = driver.is_power_on(status)
+    device_status.update(device_name, driver.status_fields(status))
 
     # Record power 狀態到 history（給 Dashboard 自動模式 chart 背景畫 on segments）
     location = d.get("位置", "")

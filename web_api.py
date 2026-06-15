@@ -14,7 +14,13 @@ from config import SIRI_USER_ID, TZ, now_taipei
 from assistant import process_message
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
-from sheets import RequestContext, get_all_devices_by_type, get_device_id_by_name, get_device_auth_by_name
+from sheets import (
+    RequestContext,
+    get_all_devices_by_type,
+    get_device_id_by_name,
+    get_device_auth_by_name,
+    get_sheet_records,
+)
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo
 from handlers.recurring_todo import (
@@ -40,6 +46,7 @@ import dehumidifier_auto
 import dehumidifier_auto_service
 import dehumidifier_driver
 import dehumidifier_history
+import device_status
 from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
@@ -87,7 +94,7 @@ def api_assistant(req: AssistantRequest):
 @router.get("/dashboard")
 def api_dashboard():
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
-    不含感測器/除濕機即時狀態——前端另呼叫 /api/devices/status 補齊。
+    不含頻繁變動的統一裝置狀態——前端另呼叫 /api/devices/status 補齊。
 
     註：ThreadPoolExecutor 內同時跑兩個天氣 future，主緒程並行跑 ctx.load()
     （同步）拉 Sheet。進入 with 區塊後才 .result()，讓這三件事重疊起來。
@@ -160,6 +167,70 @@ def _fetch_dehumidifier_status(device_row):
         return {}
 
 
+def _ensure_device_status_catalog():
+    """Cold-start fallback: hydrate only 智能居家, not all six batch sheets."""
+    if device_status.has_catalog():
+        return
+
+    device_status.load_catalog(get_sheet_records("智能居家"))
+
+    # Existing background services may already have useful current values.
+    for device_name, state in sensor_state.snapshot().items():
+        current = state.get("current", {})
+        device_status.update(device_name, {
+            "temperature": current.get("temp"),
+            "humidity": current.get("humidity"),
+        })
+    for device_name, state in dehumidifier_history.snapshot().items():
+        power = state.get("current", {}).get("power")
+        if power in ("on", "off"):
+            device_status.update(device_name, {"power": power == "on"})
+
+
+def _refresh_device_statuses(devices):
+    """Refresh cloud-backed devices and merge successful results into cache."""
+    futures = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for row in devices:
+            device_name = row.get("名稱", "")
+            if row.get("類型") == "感應器" and row.get("Device ID"):
+                future = executor.submit(_fetch_sensor_status, row["Device ID"])
+                futures[future] = (device_name, row)
+            elif row.get("類型") == "除濕機" and row.get("Device ID"):
+                future = executor.submit(_fetch_dehumidifier_status, row)
+                futures[future] = (device_name, row)
+
+        for future in as_completed(futures):
+            device_name, device_row = futures[future]
+            try:
+                status = future.result(timeout=15)
+                if "temperature" in status or "humidity" in status:
+                    temp, humidity = apply_sensor_compensation(
+                        status.get("temperature"),
+                        status.get("humidity"),
+                        device_row,
+                    )
+                    status["temperature"] = temp
+                    status["humidity"] = humidity
+                if status:
+                    device_status.update(device_name, status)
+            except Exception as e:
+                print(f"[DEVICE STATUS] {device_name} query error: {e}")
+
+
+def _refresh_device_statuses_in_background(devices):
+    if not device_status.try_begin_refresh():
+        return
+
+    def _run():
+        try:
+            _refresh_device_statuses(devices)
+        finally:
+            device_status.finish_refresh()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 @router.get("/devices")
 def api_get_devices():
     """列出所有啟用裝置（Sheet 資料，不含即時狀態）"""
@@ -185,45 +256,25 @@ def api_get_devices():
 
 @router.get("/devices/status")
 def api_get_device_status(name: str = ""):
-    """查詢感測器/除濕機即時狀態，回傳 {裝置名稱: 狀態}。
+    """查詢統一裝置狀態，回傳 {裝置名稱: 狀態}。
 
-    - 無 `name` query：所有啟用裝置並行查（給 Dashboard 60s 全局 polling 用）
-    - 帶 `name=X` query：只查該裝置，避開 ThreadPoolExecutor 的 max(all latency)
-      行為（給命令送出後樂觀更新 polling 用，不被其他雲端慢的裝置拖累）。
+    - 無 `name` query：立即回傳 in-memory cache，雲端裝置以 single-flight 背景更新。
+    - 帶 `name=X` query：感應器/除濕機同步查詢，供命令確認；空調直接回傳
+      last-command cache，因為紅外線空調無法 readback。
     """
-    ctx = RequestContext()
-    ctx.load()
-    devices = [r for r in ctx.get("智能居家") if r.get("狀態") == "啟用"]
-    if name:
-        devices = [d for d in devices if d.get("名稱") == name]
+    _ensure_device_status_catalog()
+    devices = device_status.device_rows()
 
-    status_map = {}
-    futures = {}
+    if not name:
+        _refresh_device_statuses_in_background(devices)
+        return device_status.snapshot()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for d in devices:
-            name = d.get("名稱", "")
-            if d.get("類型") == "感應器" and d.get("Device ID"):
-                future = executor.submit(_fetch_sensor_status, d["Device ID"])
-                futures[future] = (name, d)
-            if d.get("類型") == "除濕機" and d.get("Device ID"):
-                future = executor.submit(_fetch_dehumidifier_status, d)
-                futures[future] = (name, d)
-
-        for future in as_completed(futures):
-            name, device_row = futures[future]
-            try:
-                status = future.result(timeout=15)
-                if "temperature" in status or "humidity" in status:
-                    t, h = apply_sensor_compensation(status.get("temperature"), status.get("humidity"), device_row)
-                    status["temperature"] = t
-                    status["humidity"] = h
-                if status:
-                    status_map[name] = status
-            except Exception as e:
-                print(f"[DEVICE STATUS] {name} query error: {e}")
-
-    return status_map
+    target_devices = [row for row in devices if row.get("名稱") == name]
+    if not target_devices:
+        return {}
+    if target_devices[0].get("類型") != "空調":
+        _refresh_device_statuses(target_devices)
+    return device_status.snapshot(name)
 
 
 class AcControlRequest(BaseModel):

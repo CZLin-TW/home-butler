@@ -10,6 +10,7 @@ import weather_api
 import dehumidifier_auto
 import dehumidifier_auto_service
 import sensor_state
+import device_status
 
 # 紅外線 AC 是 write-only 的絕對命令，SwitchBot 無法回讀當前狀態。
 # 為了支援「調低1度」這類相對調整，我們把每次成功送出的指令寫回「智能居家」分頁，
@@ -117,6 +118,13 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
         for header, value in new_values.items():
             if header in header_to_col:
                 rec[header] = value
+        device_status.update(device_name=rec.get("名稱", ""), fields={
+            "lastPower": rec.get("最後電源", ""),
+            "lastTemperature": rec.get("最後溫度", ""),
+            "lastMode": rec.get("最後模式", ""),
+            "lastFanSpeed": rec.get("最後風速", ""),
+            "lastUpdatedAt": rec.get("最後更新時間", ""),
+        })
     except Exception as e:
         print(f"[AC STATE SAVE ERROR] device={device_id}: {e}")
 

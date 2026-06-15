@@ -541,7 +541,7 @@ function sendRealtimeNotification() {
 | 端點 | 方法 | 說明 |
 |------|------|------|
 | /api/devices | GET | 列出所有啟用裝置基本資料（Sheet 欄位 + AC 上次指令快照），不含即時讀值 |
-| /api/devices/status | GET | 感應器/除濕機即時狀態，回傳 `{裝置名稱: 狀態}`（前端載入裝置清單後再呼叫補齊） |
+| /api/devices/status | GET | 統一裝置狀態快取，包含空調 last-command、感應器與除濕機狀態，回傳 `{裝置名稱: 狀態}`。無 name 時立即回快取並在背景更新雲端裝置；`?name=` 用於單台命令確認 |
 | /api/devices/options | GET | 各類裝置的可用選項（空調模式/風速、除濕機模式/濕度），供前端動態渲染 |
 | /api/devices/control/ac | POST | 控制空調（power, temperature, mode, fan_speed） |
 | /api/devices/control/ir | POST | 控制 IR 裝置（device_name, button） |
@@ -868,6 +868,7 @@ function sendRealtimeNotification() {
 
 - **Google Sheets 批次讀取**：RequestContext 使用 values_batch_get 一次讀取所有分頁，取代原本多次個別 API 呼叫
 - **Google Sheets 快取**：get_sheet() 快取已認證的 spreadsheet 物件 60 秒，避免每次都重新 OAuth
+- **統一裝置狀態快取**：`/api/devices/status` 從 in-memory cache 立即回應；空調控制、5 分鐘背景輪詢與雲端查詢共同更新同一份狀態，避免 Dashboard 等待完整 Sheet 與其他裝置 API
 - **Google Sheets 集中寫入**：新增資料統一走 `append_record()`，多欄位修改統一走 `update_row_fields()` 的 batch update，減少 API 呼叫也避免欄位位置散落在 handler 裡
 - **背景寫入**：save_conversation（對話暫存）在背景 thread 執行
 - **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
@@ -887,6 +888,7 @@ function sendRealtimeNotification() {
 | assistant.py | 自然語言處理核心：`process_message`（Claude 解析 → action 分派 → 組句）與 action 路由表。LINE webhook 與 `/api/assistant`（Siri）共用，避免邏輯複製兩份 |
 | config.py | 環境變數、LINE/Claude 初始化、時區設定 |
 | sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取、append_record / update_row_fields 集中寫入） |
+| device_status.py | Dashboard 共用的統一裝置狀態 in-memory cache、裝置目錄與背景刷新 single-flight 控制 |
 | prompt.py | SYSTEM_PROMPT 與 Claude 提示詞組裝 |
 | conversation.py | 對話暫存管理、Claude API 呼叫、推播訊息生成 |
 | notify.py | 推播端點（/notify 晚間綜合推播、/notify_realtime 即時提醒與排程執行） |
