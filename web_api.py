@@ -6,7 +6,7 @@ Web Dashboard REST API
 
 import threading
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, Field
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -383,9 +383,11 @@ def api_query_sensor(device_name: str = ""):
 # 核准動作在 LINE Bot（main.py）那邊做。PWA 全程不直接打 home-butler、也不離開容器。
 
 @router.post("/auth/device/create")
-def api_device_create():
-    """PWA 取得一組 user_code + device_token。"""
-    return device_auth.create_pairing()
+def api_device_create(payload: dict = Body(default={})):
+    """PWA 取得一組 user_code + device_token。
+    payload.kid=True（兒童入口 ?kid=1）→ 配對標記為 kid，限制權限用。"""
+    role = "kid" if isinstance(payload, dict) and payload.get("kid") else "member"
+    return device_auth.create_pairing(role=role)
 
 
 @router.get("/auth/device/status")

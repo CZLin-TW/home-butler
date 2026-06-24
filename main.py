@@ -350,12 +350,20 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
 
-        # Dashboard 裝置配對登入：使用者輸入「登入 123456」核准一台 PWA 登入。
+        # Dashboard 裝置配對登入：使用者輸入「登入 123456」或「配對兒童 123456」核准一台 PWA。
         # 不經 Claude（早退、零成本）。身分來自 webhook 的 user_id（LINE 認證過）。
         # 容忍空格/分隔（畫面把碼顯示成「123 456」好讀，使用者可能照打）——抽出純數字、
         # 剛好 6 位才當登入碼；否則（如「登入很麻煩」）落到下面正常處理。
+        # 「配對兒童」= 把這台核准成兒童遙控器（requested_role=kid，限制只能用裝置頁）；
+        # 最終角色在 device_auth.approve 用「最嚴格者勝」決定（裝置自報 kid 也算數）。
         _stripped = text.strip()
-        login_code = re.sub(r"\D", "", _stripped[2:]) if _stripped.startswith("登入") else ""
+        if _stripped.startswith("配對兒童"):
+            requested_role, _code_src = "kid", _stripped[len("配對兒童"):]
+        elif _stripped.startswith("登入"):
+            requested_role, _code_src = "member", _stripped[2:]
+        else:
+            requested_role, _code_src = None, ""
+        login_code = re.sub(r"\D", "", _code_src) if requested_role else ""
         if len(login_code) == 6:
             code = login_code
             members = get_sheet("家庭成員").get_all_records()
@@ -374,7 +382,10 @@ def handle_message(event):
                     picture = getattr(profile, "picture_url", "") or ""
                 except Exception as e:
                     print(f"[LOGIN] get_profile failed: {e}")
-                if device_auth.approve(code, user_id, name, picture):
+                final_role = device_auth.approve(code, user_id, name, picture, requested_role=requested_role)
+                if final_role == "kid":
+                    reply = "✅ 已授權這台為兒童遙控器（只能進裝置頁），回到網頁就會自動進入 🧒"
+                elif final_role:
                     reply = f"✅ 已授權登入 Dashboard（以 {name} 的身分），回到網頁就會自動進入 🏠"
                 else:
                     reply = "❌ 驗證碼錯誤或已過期，請回 Dashboard 重新取得一組。"

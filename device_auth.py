@@ -22,8 +22,9 @@ import time
 from sheets import get_or_create_sheet, append_record, update_row_fields
 
 SHEET = "裝置配對"
-HEADERS = ["user_code", "device_token", "status", "line_user_id", "name", "picture", "created", "expires"]
+HEADERS = ["user_code", "device_token", "status", "line_user_id", "name", "picture", "role", "created", "expires"]
 CODE_TTL = 300  # 驗證碼有效 5 分鐘
+VALID_ROLES = ("member", "kid")  # kid = 兒童遙控器，Dashboard middleware 只放行裝置頁
 
 
 def _sheet():
@@ -47,8 +48,11 @@ def _cleanup(ws, records, now):
         print(f"[device_auth] cleanup error: {e}")
 
 
-def create_pairing():
-    """PWA 取得新配對。回 {user_code, device_token, expires_in}。"""
+def create_pairing(role="member"):
+    """PWA 取得新配對。回 {user_code, device_token, expires_in}。
+    role 由裝置在配對「產生」時自報（兒童入口 ?kid=1 → "kid"），隨記錄帶著走；
+    核准時若家長指令更嚴格會再收緊，但這裡先記下裝置自己宣告的角色。"""
+    role = role if role in VALID_ROLES else "member"
     ws = _sheet()
     now = time.time()
     records = ws.get_all_records()
@@ -75,6 +79,7 @@ def create_pairing():
         "line_user_id": "",
         "name": "",
         "picture": "",
+        "role": role,
         "created": now,
         "expires": now + CODE_TTL,
     })
@@ -97,10 +102,12 @@ def get_status(device_token):
         status = str(r.get("status", ""))
         if status == "approved":
             update_row_fields(ws, i + 2, {"status": "consumed"})
+            role = str(r.get("role", "") or "member")
             return {"status": "approved", "user": {
                 "lineUserId": str(r.get("line_user_id", "")),
                 "name": str(r.get("name", "")),
                 "picture": str(r.get("picture", "")),
+                "role": role if role in VALID_ROLES else "member",
             }}
         if status == "pending" and _f(r.get("expires")) < now:
             return {"status": "expired"}
@@ -108,12 +115,14 @@ def get_status(device_token):
     return {"status": "not_found"}
 
 
-def approve(user_code, line_user_id, name, picture=""):
-    """Bot 收到「登入 <code>」時呼叫。找 pending 且未過期的配對標記 approved。
-    回 True=成功核准 / False=碼錯誤或已過期。"""
+def approve(user_code, line_user_id, name, picture="", requested_role=None):
+    """Bot 收到「登入 <code>」或「配對兒童 <code>」時呼叫。找 pending 且未過期的配對標記 approved。
+    最終角色採「最嚴格者勝」：裝置在配對產生時自報的 role 與家長指令 requested_role，
+    任一為 "kid" 就是 "kid"——所以兒童入口產生的配對，就算家長手殘打成「登入」也鎖不開。
+    回最終 role 字串（"member"/"kid"）=成功核准 / None=碼錯誤或已過期。"""
     code = str(user_code or "").strip()
     if not code:
-        return False
+        return None
     ws = _sheet()
     now = time.time()
     records = ws.get_all_records()
@@ -123,12 +132,15 @@ def approve(user_code, line_user_id, name, picture=""):
         if str(r.get("status", "")) != "pending":
             continue
         if _f(r.get("expires")) < now:
-            return False
+            return None
+        device_role = str(r.get("role", "") or "member")
+        final_role = "kid" if "kid" in (device_role, requested_role) else "member"
         update_row_fields(ws, i + 2, {
             "status": "approved",
             "line_user_id": line_user_id,
             "name": name,
             "picture": picture or "",
+            "role": final_role,
         })
-        return True
-    return False
+        return final_role
+    return None
