@@ -35,6 +35,7 @@ from handlers.device import (
 from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
 import device_auth
+import remote_auth
 import switchbot_api
 import panasonic_api
 import lg_api
@@ -394,6 +395,14 @@ def api_device_create(payload: dict = Body(default={})):
 def api_device_status(token: str):
     """PWA 輪詢配對狀態（帶自己保管的 device_token）。"""
     return device_auth.get_status(token)
+
+
+@router.post("/auth/remote/verify")
+def api_remote_verify(payload: dict = Body(default={})):
+    """遙控器模式：驗證「遙控器」分頁的共用密碼，回受限的 kid 身分（含連錯鎖定）。
+    Dashboard 端據此於 PWA 容器內簽發 role=kid 的 session。"""
+    pw = payload.get("password") if isinstance(payload, dict) else ""
+    return remote_auth.verify(pw)
 
 
 # ── 待辦事項 ──
