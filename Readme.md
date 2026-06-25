@@ -490,6 +490,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
 | NOTION_TOKEN | Notion Internal Integration Token | 選配 |
 | RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘 materialize 成當日待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出當日待辦；上線或收手只需改這個變數，不必 revert code | 選配 |
+| DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
 
 ---
 
