@@ -26,6 +26,20 @@
 
 **切換注意**：部署後要去 Google Apps Script 把舊的兩條觸發（`/notify` 日計時器、`/notify_realtime` 15 分計時器）**刪除或停用**，否則跟 thread 雙跑。重疊期短且工作冪等，無害，但別長期掛著。
 
+# 冷氣防黴送風（關機前吹乾蒸發器）
+
+關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥30 分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（5 分後），由 polling thread 的 realtime tick 來收、真正關掉。參數在 device.py 頂：`ANTIMOLD_FAN_MINUTES=5`、`ANTIMOLD_MIN_RUNTIME_MINUTES=30`、`ANTIMOLD_MODES={冷氣,除濕}`。
+
+幾個**非顯而易見、最容易改壞**的點：
+
+- **防遞迴**：收尾關排程的 params 帶 `antimold_final=True`，那次關機跳過防黴判斷直接關。少了它會無限循環（關→送風→排程關→送風…）。
+- **來源欄用「防黴」不是「自動」**：跟 AC 自動關機 timer（來源=自動）區隔開，否則 `maintain_ac_auto_schedule` 會把收尾關當成自動關機排程**誤刪**。
+- **最後開機時間欄**：只在 關→開 transition 記錄（純調整 on→on **不**重置），運轉時長才算得準。欄位由 `main.py` startup `ensure_columns` 自動補；空白（例如實體遙控器開的）就**保守不防黴**。
+- **使用者中途重開**：任何 power=on 指令會 `_cancel_antimold_schedules` 取消待執行的收尾關，避免剛開又被關掉。
+- **自動關機 timer 觸發的關機也會走防黴**（運轉夠久且冷氣/除濕模式）；送風期間刻意不呼叫 `maintain_ac_auto_schedule`，不讓它在送風中又生一筆自動關機。
+- 實際送風 5~10 分（收尾關 trigger=now+5 分，受 thread 5 分粒度影響）。
+- **已知限制**：實體遙控器/Hub 機身鈕直接關（沒經 home-butler）攔不到——接受，不補。
+
 # Git push 環境差異
 
 這個 repo 會被多種 harness 操作（本機 VS Code、claude.ai/code web UI 等）。

@@ -8,7 +8,7 @@ import traceback
 import threading
 
 from config import line_bot_api, webhook_handler, LINE_CHANNEL_ACCESS_TOKEN
-from sheets import RequestContext, get_sheet
+from sheets import RequestContext, get_sheet, ensure_columns
 import device_auth
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
@@ -74,6 +74,13 @@ def _on_startup():
     dehumidifier_history.backfill_from_sheet()
     dehumidifier_auto.load_rules()
     lighting_auto.load_rules()
+
+    # 防黴送風需要的「最後開機時間」欄（記錄 關→開 transition 時間，用來算運轉時長）。
+    # 一次性 ensure：缺就補在表尾，不動既有欄位；失敗不擋啟動（防黴會自動退化成不觸發）。
+    try:
+        ensure_columns(get_sheet("智能居家"), ["最後開機時間"])
+    except Exception as e:
+        print(f"[startup] ensure 最後開機時間 column failed: {e}")
 
     # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
     # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。
