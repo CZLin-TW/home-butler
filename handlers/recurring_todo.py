@@ -118,7 +118,11 @@ def _should_generate_today(rule, today):
         interval = _parse_int(rule.get("間隔天數"))
         if not interval or interval < 1:
             return False
-        anchor = _parse_date(rule.get("起始日期")) or today
+        # 間隔天必須有「起始日期」當錨點；缺了就無法定義「每 N 天」，保守不生。
+        # （若退化成 anchor=today，delta 恆 0 → 天天生成，完全失去間隔語意。）
+        anchor = _parse_date(rule.get("起始日期"))
+        if anchor is None:
+            return False
         delta = (today - anchor).days
         return delta >= 0 and delta % interval == 0
     return False
@@ -184,7 +188,7 @@ def _materialize_one(todo_sheet, rule, today_str, ctx):
 
 
 def materialize_recurring_todos(now, ctx):
-    """每 15 分鐘 tick 呼叫。把今天該出現的週期任務生成成當日待辦。
+    """每 5 分鐘 tick 呼叫。把今天該出現的週期任務生成成當日待辦。
 
     回傳本次生成筆數。整段獨立 try/except，單條壞規則不影響其它規則，也絕不
     把例外冒泡到 notify_realtime 外層（否則會連帶讓提醒 / 排程整批失效）。
@@ -195,10 +199,9 @@ def materialize_recurring_todos(now, ctx):
         today = now.date()
         today_str = today.isoformat()
 
-        # 確保活表 + 封存表都有「規則ID」欄：
-        # - 活表：materialize 寫入需要、Dashboard 讀 /api/todos 顯示 🔁 需要。
-        # - 封存表：完成的本地實例會被 handle_delete_todo 搬進封存表，必須帶著規則ID，
-        #   下面的冪等查重才比對得到（否則當天完成 → 同 tick / 同日重生）。
+        # 活表要有「規則ID」欄：materialize 寫入 + 下面 active 查重 + Dashboard 讀 /api/todos
+        # 顯示 🔁 都需要。封存表也保留此欄（完成的本地實例搬進封存時帶著規則ID，供 Dashboard
+        # 顯示）——但 dedup 已不再掃封存（見下方），這裡只 ensure header、不全讀。
         todo_sheet = ctx.get_worksheet(TODO_SHEET)
         ensure_columns(todo_sheet, [RULE_ID_COLUMN])
         archive_sheet = ctx.get_worksheet(TODO_ARCHIVE)
@@ -207,13 +210,11 @@ def materialize_recurring_todos(now, ctx):
         template_sheet = _template_sheet()
         rules = template_sheet.get_all_records()
 
-        # 冪等查重索引：(規則ID, 日期) 聯集自活表 + 封存表
+        # 冪等查重：只索引「活表」現有實例的 (規則ID, 日期)。封存表（永遠增長）不再每 tick
+        # 全讀——「今天生過、但已完成被搬進封存」這種活表看不到的情況，改用模板自己的
+        # 「最後生成日期」欄擋（見下方迴圈），省掉一個會隨歷史無上限變大的 get_all_records。
         existing = set()
         for r in ctx.get(TODO_SHEET):
-            rid = str(r.get(RULE_ID_COLUMN, "") or "").strip()
-            if rid:
-                existing.add((rid, str(r.get("日期", "")).strip()))
-        for r in archive_sheet.get_all_records():  # 每 tick 一次額外 read（封存表查重不可省）
             rid = str(r.get(RULE_ID_COLUMN, "") or "").strip()
             if rid:
                 existing.add((rid, str(r.get("日期", "")).strip()))
@@ -232,6 +233,11 @@ def materialize_recurring_todos(now, ctx):
                     continue
                 if (rid, today_str) in existing:
                     continue
+                # 活表沒有 → 可能今天生過又被完成（已搬進封存、活表看不到）。用模板的
+                # 「最後生成日期」擋掉，取代每 tick 全讀封存表。代價：極罕見情況（當初生成後
+                # 「最後生成日期」剛好寫入失敗、且實例又在同一天被完成）會重生一筆，可接受。
+                if str(rule.get("最後生成日期", "") or "").strip() == today_str:
+                    continue
                 _materialize_one(todo_sheet, rule, today_str, ctx)
                 existing.add((rid, today_str))
                 generated += 1
@@ -248,6 +254,42 @@ def materialize_recurring_todos(now, ctx):
     except Exception as e:
         print(f"[recur] materialize_recurring_todos fatal: {e}")
         return 0
+
+
+def upcoming_recurring_for_date(target_date):
+    """回傳在 target_date 當天「會生成」的啟用週期規則，給推播預告用（不寫任何東西）。
+
+    存在理由：materialize 只生 today，明天的實例要等明天 tick 才出現；晚間「明日預報」推播
+    若只看「待辦事項」分頁會系統性漏掉所有週期任務。這個函式直接從模板算出那天會冒出來的。
+
+    刻意複用跟真正生成同一組純函式（_within_window / _should_generate_today），邏輯不會漂移。
+    受總開關 recurring_todo_enabled() 控制：關閉時回空（那天本來就不會 materialize，不該預告）。
+    每筆回 dict：事項 / 時間 / 負責人 / 類型 / 規則ID。
+    """
+    if not recurring_todo_enabled():
+        return []
+    out = []
+    try:
+        for rule in _template_sheet().get_all_records():
+            if str(rule.get("狀態", "")).strip() != "啟用":
+                continue
+            rid = str(rule.get(RULE_ID_COLUMN, "") or "").strip()
+            if not rid:
+                continue
+            if not _within_window(rule, target_date):
+                continue
+            if not _should_generate_today(rule, target_date):
+                continue
+            out.append({
+                "事項": rule.get("事項", ""),
+                "時間": str(rule.get("時間", "") or "").strip(),
+                "負責人": rule.get("負責人", ""),
+                "類型": rule.get("類型", "私人") or "私人",
+                RULE_ID_COLUMN: rid,
+            })
+    except Exception as e:
+        print(f"[recur] upcoming_recurring_for_date error: {e}")
+    return out
 
 
 # ── CRUD handler（LINE action + Dashboard REST 共用） ────

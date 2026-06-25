@@ -745,7 +745,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
-| 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦 |
+| 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦（含明日才會生成的週期待辦預告 🔁，直接從模板算，不必等明天 tick） |
 | 即時提醒 | 每 5 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
 | Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對每筆設定的 Hue grouped_light 觸發 breathe；同一區域同一輪多筆待辦只呼吸一次 |
 | Agent 即時通道 | PC agent 常駐 WebSocket | PC agent 每約 25 秒 heartbeat 到 `/api/agent/ws`，後端可用 `/api/agent/status` 確認在線狀態 |
