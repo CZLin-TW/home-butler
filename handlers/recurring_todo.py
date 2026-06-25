@@ -147,8 +147,11 @@ def format_recur_summary(rule):
     if rtype == "每天":
         return f"每天{time_part}"
     if rtype == "每週":
-        names = "".join(WEEKDAY_ZH.get(d, "") for d in sorted(_parse_weekdays(rule.get("星期"))))
-        return f"每週{names}{time_part}"
+        # 用「、」分隔，避免「一三五」連在一起難判讀（一眼看不出是哪幾天）。
+        names = "、".join(WEEKDAY_ZH.get(d, "") for d in sorted(_parse_weekdays(rule.get("星期"))))
+        # names 空 = 這條週規則沒存到星期（多半是早期建立、欄位未捕捉）。明確標出來，
+        # 別默默顯示成「每週」害使用者看不出哪幾天、也看不出是資料有問題。
+        return f"每週{names}{time_part}" if names else f"每週（未設定星期）{time_part}"
     if rtype == "每月":
         md = _parse_int(rule.get("月日"))
         return f"每月{md}號{time_part}" if md else f"每月{time_part}"
