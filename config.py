@@ -51,6 +51,16 @@ def recurring_todo_enabled():
     return os.environ.get("RECURRING_TODO_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# 每日綜合推播的觸發鐘點（24h 制整點）。預設 21 = 晚上 9 點，沿用原本 GAS 日計時器的
+# 晚間時段（9~10 點）。GAS 退場後改由 main.py 的 polling thread 驅動：每 tick 一旦過了
+# 這個鐘點、且當天還沒推過（Sheet marker 判斷），就觸發一次 run_daily_push。
+def daily_push_hour():
+    try:
+        return int(os.environ.get("DAILY_PUSH_HOUR", "21"))
+    except (ValueError, TypeError):
+        return 21
+
+
 # LLM 自己從日期推算「星期幾」很不可靠（常算錯），所以一律用 Python 算好再餵給它。
 _WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]  # Python weekday(): Mon=0..Sun=6
 

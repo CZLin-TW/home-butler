@@ -302,3 +302,29 @@ def update_row_fields(sheet, row_number, updates):
     if requests:
         sheet.batch_update(requests, raw=False)
     return len(requests)
+
+
+# ── 系統狀態 KV（跨重啟的小狀態，例如每日推播 marker） ──
+# 刻意用一個獨立的 2 欄小分頁（鍵/值），而非塞進現有資料表，避免污染業務資料的 schema。
+SYSTEM_STATE_SHEET = "系統狀態"
+_SYSTEM_STATE_HEADERS = ["鍵", "值"]
+
+
+def state_get(key, default=""):
+    """讀系統狀態 KV 分頁裡某個鍵的值（分頁不存在會自動建立）。找不到回 default。"""
+    sheet = get_or_create_sheet(SYSTEM_STATE_SHEET, _SYSTEM_STATE_HEADERS)
+    for r in sheet.get_all_records():
+        if _norm(r.get("鍵")) == _norm(key):
+            return str(r.get("值", "") or "")
+    return default
+
+
+def state_set(key, value):
+    """upsert 系統狀態 KV 的一個鍵值：存在就更新該列、否則 append 一筆。"""
+    sheet = get_or_create_sheet(SYSTEM_STATE_SHEET, _SYSTEM_STATE_HEADERS)
+    records = sheet.get_all_records()
+    for i, r in enumerate(records):
+        if _norm(r.get("鍵")) == _norm(key):
+            update_row_fields(sheet, i + 2, {"值": str(value)})
+            return
+    append_record(sheet, {"鍵": key, "值": str(value)})

@@ -10,6 +10,22 @@
 
 本專案不使用 git tag / GitHub Releases；版本以 Dashboard `package.json` 為準，git history 自己就是版本軌跡。
 
+# 排程 / 推播架構（in-process scheduler；GAS 已退場）
+
+時間驅動的工作**全部跑在 `main.py` 的 polling thread**（每 5 分一 tick），不再用 Google Apps Script cron。
+
+- **realtime tick**：`notify.run_realtime_tick(ctx)`——行事曆同步 / 週期待辦生成 / 待辦提醒 / 設備排程執行 / 封存。每 5 分一次（原 GAS 15 分，現在更即時）。每步驟各自 try/except 隔離，一步壞不擋其餘。
+- **每日綜合推播**：`notify.run_daily_push_if_due(ctx)`——每天過了 `DAILY_PUSH_HOUR`（env，預設 21 點）後第一個 tick 觸發一次。去重 marker 存在 Sheet「系統狀態」分頁的 `最後每日推播日期`（跨 Render 重啟存活，不重發不漏發；睡整晚跨午夜才醒則當天不補）。
+- `/notify`、`/notify_realtime` 端點**保留**但只當手動觸發（debug / 補發）；不再有外部 cron 打它們。手動 `/notify` 不檢查也不更新每日 marker。
+
+**為什麼能拿掉 GAS**：這些工作全是 Sheet-anchored / 冪等（觸發時間、狀態、marker 都在 Sheet），重啟後 thread 讀同一份 Sheet 就能補上，不依賴外部時鐘的精準或存活（code 本就容忍漂移：`is_near_hour` ±5 分、排程 2h 過期窗）。GAS 當年的唯一價值是「喚醒睡著的 Render ＋幹活綁同一個 HTTP beat」，但 thread 要能跑的前提（實例醒著）本來就由 UptimeRobot 扛——GAS 的保溫只是跟它**重複**。
+
+**UptimeRobot 是 load-bearing 保溫，不是普通監控**：每 5 分 ping `/` 防止 Render idle-sleep（Readme 標「防冷啟動」）。拿掉 GAS 後，「保持實例醒著、讓 polling thread 不被凍住」這件事**完全靠它**。所以**別把 UptimeRobot 當可有可無的監控隨手關掉**——關了它，排程與推播會跟著 Render 一起睡死。
+
+唯二的記憶體計時（除濕機去抖 `above_since`/`below_since`、照明 `window_active` 邊緣）本來就在這條 thread 上、且自我修正，重啟最多晚一個去抖窗，無資料損失。
+
+**切換注意**：部署後要去 Google Apps Script 把舊的兩條觸發（`/notify` 日計時器、`/notify_realtime` 15 分計時器）**刪除或停用**，否則跟 thread 雙跑。重疊期短且工作冪等，無害，但別長期掛著。
+
 # Git push 環境差異
 
 這個 repo 會被多種 harness 操作（本機 VS Code、claude.ai/code web UI 等）。

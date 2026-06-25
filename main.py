@@ -63,6 +63,7 @@ def _on_startup():
     import dehumidifier_driver
     import device_status
     import lighting_auto
+    import notify
     from sheets import RequestContext
     import switchbot_api
     from handlers.device import apply_sensor_compensation
@@ -166,6 +167,20 @@ def _on_startup():
                 lighting_auto.tick()
             except Exception as e:
                 print(f"[light-auto] tick error: {e}")
+            # GAS 退場後，原本掛在 GAS cron 的工作改由這條 thread 驅動：
+            #   realtime tick（行事曆同步 / 週期待辦生成 / 待辦提醒 / 設備排程執行 / 封存）
+            #     每 5 分跑一次——比原本 GAS 的 15 分更即時。
+            #   每日綜合推播由 Sheet marker 閘成一天一次（過 DAILY_PUSH_HOUR 後第一個 tick）。
+            # 用各自獨立的 fresh ctx：notify 工作會寫 Sheet（materialize / 排程狀態），需要與
+            # 自身寫入保持一致，且與上面 sensor/dehum 用的 ctx 解耦（那個此刻已稍舊）。
+            # 整段獨立 try——notify 工作出錯不該影響下一輪 sensor/dehum/夜燈。
+            try:
+                ctx_notify = RequestContext()
+                ctx_notify.load()
+                notify.run_realtime_tick(ctx_notify)
+                notify.run_daily_push_if_due(ctx_notify)
+            except Exception as e:
+                print(f"[notify-tick] error: {e}")
             _time.sleep(300)
 
     threading.Thread(target=_polling_loop, daemon=True).start()
