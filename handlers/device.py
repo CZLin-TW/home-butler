@@ -288,8 +288,13 @@ def _minutes_since_power_on(device_row, now):
 
 
 def _should_antimold(device_row, now):
-    """關 AC 前是否該先送風防黴：上次是冷氣/除濕模式，且從最後一次開機算起已運轉 ≥ 門檻分鐘。
-    無法判斷開機時間（欄位空白／實體遙控器開的）就保守不防黴。"""
+    """關 AC 前是否該先送風防黴：上次是「開著」的冷氣/除濕模式，且從最後一次開機算起已運轉
+    ≥ 門檻分鐘。無法判斷開機時間（欄位空白／實體遙控器開的）就保守不防黴。
+
+    必須先確認「最後電源==on」：否則對一台已經關著的 AC 再按一次關（最後模式/開機時間還是
+    上次運轉留下的舊值），會誤判成要防黴 → 反而把它吹成送風（開機），結果完全相反。"""
+    if str(device_row.get("最後電源", "") or "").strip() != "on":
+        return False
     mode = str(device_row.get("最後模式", "") or "").strip()
     if mode not in ANTIMOLD_MODES:
         return False
