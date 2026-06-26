@@ -810,9 +810,13 @@ def api_get_members():
 
 @router.get("/devices/options")
 def api_get_device_options():
+    # 「自動」(mode 1) 不提供：本系統的 IR 空調遙控器都沒有自動模式，列出來只會送了失敗。
     ac_modes = {}
     for k, v in switchbot_api.AC_MODE_MAP.items():
-        if v not in ac_modes: ac_modes[v] = k
+        if v == 1:  # 自動
+            continue
+        if v not in ac_modes:
+            ac_modes[v] = k
     ac_fans = {}
     for k, v in switchbot_api.AC_FAN_MAP.items():
         if v not in ac_fans: ac_fans[v] = k
