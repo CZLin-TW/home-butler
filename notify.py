@@ -9,7 +9,9 @@ from sheets import RequestContext, build_row, state_get, state_set
 from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
-from handlers.device import handle_control_ac, handle_control_ir, handle_control_dehumidifier
+from handlers.device import (
+    handle_control_ac, handle_control_ir, handle_control_dehumidifier, ANTIMOLD_SOURCE,
+)
 from handlers.recurring_todo import (
     materialize_recurring_todos,
     upcoming_recurring_for_date,
@@ -311,7 +313,8 @@ def _process_todo_reminders(now, today, is_near_hour, ctx):
 def _execute_pending_schedules(now, ctx):
     """執行到時間的排程，回傳被處理過的設備名稱集合。
 
-    超時 2 小時以上的排程標為「已過期」不執行（避免使用者離線太久回來突然冷氣全開）。
+    超時 2 小時以上的排程標為「已過期」不執行（避免使用者離線太久回來突然冷氣全開）；
+    防黴收尾關例外——晚關也該關，不然冷氣會一直送風下去。
     is_auto 標記用來避免「auto 排程觸發 → 又觸發 auto 重算 → 無限循環」。
     """
     schedule_records = ctx.get("排程指令")
@@ -341,7 +344,10 @@ def _execute_pending_schedules(now, ctx):
         processed_devices.add(device_name)
         hours_late = (now - trigger_dt).total_seconds() / 3600
 
-        if hours_late > 2:
+        # 防黴收尾關「不過期」：它就是把還在送風的冷氣關掉，晚關也該關——否則 polling thread
+        # 曾停過 >2h（例如實例睡著），那台冷氣會一直送風下去關不掉。其餘排程維持 2h 過期保險
+        #（避免使用者離線太久、回來冷氣突然全開之類）。
+        if hours_late > 2 and r.get("來源") != ANTIMOLD_SOURCE:
             schedule_sheet.update_cell(i + 2, status_col, "已過期")
             print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
             continue
