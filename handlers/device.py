@@ -386,7 +386,8 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
     if power == "off":
         # 防黴送風：冷氣/除濕運轉 ≥30 分後關機，先切送風吹乾蒸發器再排程關閉。
         # antimold_final 是防黴收尾排程自己觸發的那次關機 → 不再攔截，直接關（防遞迴）。
-        if not data.get("antimold_final") and _should_antimold(prior_row, now_taipei()):
+        _now = now_taipei()
+        if not data.get("antimold_final") and _should_antimold(prior_row, _now):
             temp_keep = _parse_int_safe(prior_row.get("最後溫度")) or 27
             fan_result = switchbot_api.ac_set_all(device_id, temp_keep, 4, 1, "on")  # mode 4=送風, fan 1=自動
             if fan_result.get("success"):
@@ -396,6 +397,13 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
                 # 刻意不呼叫 maintain_ac_auto_schedule：送風期間不要再生自動關機排程
                 return f"✅ {device_name} 已運轉一陣子，先送風 {ANTIMOLD_FAN_MINUTES} 分鐘防黴，之後自動關閉 🌬️"
             print(f"[ANTIMOLD] {device_name} 送風失敗，改直接關機：{fan_result.get('error')}")
+        elif not data.get("antimold_final"):
+            # 沒進防黴 → 印出原因，方便從 Render log 診斷。最常見：開機時間空白（這次開機發生在
+            # 部署防黴之前、或實體遙控器開的）→ 運轉時長算不出來、保守不送風直接關。
+            print(f"[ANTIMOLD] {device_name} 不送風直接關："
+                  f"電源={prior_row.get('最後電源', '')!r} 模式={prior_row.get('最後模式', '')!r} "
+                  f"開機時間={prior_row.get('最後開機時間', '')!r} "
+                  f"運轉={_minutes_since_power_on(prior_row, _now)} 分（門檻 {ANTIMOLD_MIN_RUNTIME_MINUTES}）")
         result = switchbot_api.ac_turn_off(device_id)
     else:
         mode_str = data.get("mode", "cool")
