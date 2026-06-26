@@ -28,13 +28,13 @@
 
 # 冷氣防黴送風（關機前吹乾蒸發器）
 
-關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥30 分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（5 分後），由 polling thread 的 realtime tick 來收、真正關掉。參數在 device.py 頂：`ANTIMOLD_FAN_MINUTES=5`、`ANTIMOLD_MIN_RUNTIME_MINUTES=30`、`ANTIMOLD_MODES={冷氣,除濕}`。
+關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥ 門檻分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（送風分後），由 polling thread 的 realtime tick 來收、真正關掉。**門檻（預設 30）與送風時長（預設 5）可在「智能居家」分頁逐台覆寫**：欄位 `防黴運轉門檻分鐘`、`防黴送風分鐘`（空白用預設；門檻 0 = 每次關都送風）。模式 `ANTIMOLD_MODES={冷氣,除濕}` 仍寫死在 device.py 頂。
 
 幾個**非顯而易見、最容易改壞**的點：
 
 - **防遞迴**：收尾關排程的 params 帶 `antimold_final=True`，那次關機跳過防黴判斷直接關。少了它會無限循環（關→送風→排程關→送風…）。
 - **來源欄用「防黴」不是「自動」**：跟 AC 自動關機 timer（來源=自動）區隔開，否則 `maintain_ac_auto_schedule` 會把收尾關當成自動關機排程**誤刪**。
-- **最後開機時間欄**：只在 關→開 transition 記錄（純調整 on→on **不**重置），運轉時長才算得準。欄位由 `main.py` startup `ensure_columns` 自動補；空白（例如實體遙控器開的）就**保守不防黴**。
+- **最後開機時間欄（錨定運轉起點）**：開機時記、**關機時清空**；下次開機若這欄是空的就重新錨定——不只靠「關→開」transition 偵測，避免快取電源狀態漂移（如上次用實體遙控器關、home-butler 以為還開著）時錨不到 → 防黴永不觸發。純調整 on→on（欄位非空）不重置。欄位由 `main.py` startup `ensure_columns` 自動補；真的算不出開機時間（如實體遙控器開的）就**保守不防黴**。
 - **使用者中途重開**：任何 power=on 指令會 `_cancel_antimold_schedules` 取消待執行的收尾關，避免剛開又被關掉。
 - **自動關機 timer 觸發的關機也會走防黴**（運轉夠久且冷氣/除濕模式）；送風期間刻意不呼叫 `maintain_ac_auto_schedule`，不讓它在送風中又生一筆自動關機。
 - 實際送風 5~10 分（收尾關 trigger=now+5 分，受 thread 5 分粒度影響）。

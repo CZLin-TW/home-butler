@@ -75,12 +75,13 @@ def _on_startup():
     dehumidifier_auto.load_rules()
     lighting_auto.load_rules()
 
-    # 防黴送風需要的「最後開機時間」欄（記錄 關→開 transition 時間，用來算運轉時長）。
+    # 防黴送風用的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
     # 一次性 ensure：缺就補在表尾，不動既有欄位；失敗不擋啟動（防黴會自動退化成不觸發）。
     try:
-        ensure_columns(get_sheet("智能居家"), ["最後開機時間"])
+        ensure_columns(get_sheet("智能居家"),
+                       ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘"])
     except Exception as e:
-        print(f"[startup] ensure 最後開機時間 column failed: {e}")
+        print(f"[startup] ensure 防黴欄位 failed: {e}")
 
     # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
     # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。

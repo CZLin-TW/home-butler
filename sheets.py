@@ -33,7 +33,9 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   最後模式            str   "自動" | "冷氣" | "除濕" | "送風" | "暖氣"
   最後風速            str   "自動" | "低" | "中" | "高"
   最後更新時間        str   "YYYY-MM-DD HH:MM"
-  最後開機時間        str   "YYYY-MM-DD HH:MM"（只在 關→開 transition 更新；防黴算運轉時長用）
+  最後開機時間        str   "YYYY-MM-DD HH:MM"（開機時錨定、關機清空；防黴算運轉時長用）
+  防黴運轉門檻分鐘    int   per-device 覆寫防黴運轉門檻（空=預設 30；0=每次關都送風）
+  防黴送風分鐘        int   per-device 覆寫防黴送風時長（空=預設 5）
 
 【食品庫存】（BATCH_SHEETS）
   品名 / 數量 / 單位 / 過期日(YYYY-MM-DD) / 新增日 / 新增者
