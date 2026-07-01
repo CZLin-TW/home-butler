@@ -9,6 +9,17 @@ from prompt import (
 )
 
 
+def _response_text(response):
+    """從 messages.create 回應取純文字回覆。
+
+    開 adaptive thinking 後（Sonnet 5 省略 thinking 參數時的預設），content 陣列
+    最前面會是 thinking block，不能再抓 content[0]；這裡挑出所有 type=='text' 的
+    block 串接。thinking 關閉時行為等同原本的 content[0].text。
+    """
+    parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+    return "".join(parts).strip()
+
+
 def save_conversation(user_id, role, content):
     try:
         sheet = get_sheet("對話暫存")
@@ -67,12 +78,12 @@ def ask_claude(user_id, user_message, user_name, ctx):
     history = get_recent_conversation(user_id, ctx)
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1000,
+        model="claude-sonnet-5",
+        max_tokens=2000,
         system=prompt,
         messages=messages
     )
-    text = response.content[0].text.strip()
+    text = _response_text(response)
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -98,23 +109,23 @@ def ask_claude_semantic(user_text, raw_data, user_name, ctx, action_types):
 
     if action_types & {"query_todo"}:
         system = SEMANTIC_TODO_PROMPT.format(today=today) + style_block
-        max_tokens = 500
+        max_tokens = 1500
     elif action_types & {"query_food"}:
         system = SEMANTIC_FOOD_PROMPT.format(today=today) + style_block
-        max_tokens = 500
+        max_tokens = 1500
     else:
         system = SEMANTIC_DEFAULT_PROMPT + style_block
-        max_tokens = 300
+        max_tokens = 1200
 
     response = claude.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-5",
         max_tokens=max_tokens,
         system=system,
         messages=[
             {"role": "user", "content": f"使用者問：{user_text}\n\n數據：\n{raw_data}"}
         ],
     )
-    return response.content[0].text.strip()
+    return _response_text(response)
 
 
 def generate_notify_message(data_summary, style_instruction=""):
@@ -123,12 +134,12 @@ def generate_notify_message(data_summary, style_instruction=""):
         now_time = now_taipei().strftime("%H:%M")
         notify_style = style_instruction if style_instruction else f"\n{DEFAULT_STYLE}"
         response = claude.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=500,
+            model="claude-sonnet-5",
+            max_tokens=1500,
             system=f"你負責管理家庭的食品庫存、待辦事項和智能居家設備。現在是 {today} {now_time}。請根據以下資料整理成一則推播訊息。主動補充貼心提醒（快過期的催促、今天的待辦提醒注意時間、天氣提醒帶傘或注意溫差等）。不要加開頭問候語如「早安」，直接進入內容。只回傳推播文字，不要 JSON。{notify_style}",
             messages=[{"role": "user", "content": data_summary}]
         )
-        return response.content[0].text.strip()
+        return _response_text(response)
     except Exception as e:
         print(f"[NOTIFY CLAUDE ERROR] {e}")
         return None
