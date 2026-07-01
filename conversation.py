@@ -80,6 +80,10 @@ def ask_claude(user_id, user_message, user_name, ctx):
     response = claude.messages.create(
         model="claude-sonnet-5",
         max_tokens=2000,
+        # 意圖解析必須吐純 JSON 給後端 parse；adaptive thinking 會讓模型改吐
+        # 對使用者的自然語言（甚至空回應）→ JSON parse 失敗、指令不執行。
+        # 這顆一律關思考，釘回直接吐 JSON 的行為。
+        thinking={"type": "disabled"},
         system=prompt,
         messages=messages
     )
