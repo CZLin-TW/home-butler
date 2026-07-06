@@ -35,7 +35,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_recurring_todo：item（必填，找目標；多筆同名時加 recur_type 消歧）, 選填 item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date
 - stop_recurring_todo：永久停止整個週期。item（+ 選填 recur_type 消歧）
 - query_recurring_todo：無參數，列出啟用中的週期提醒
-- control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。未指定溫度時：heat 預設 24 度，其餘預設 27 度
+- control_ac：device_name, 選填 power(on/off), temperature(16-30), mode(cool/heat/dry/fan/auto), fan_speed(auto/low/medium/high)。只說溫度或模式時預設 power=on。未指定溫度時：heat 預設 24 度，其餘預設 27 度。**使用者只說「開空調/打開空調/開冷氣」等沒明講模式時，mode 一律填 cool（冷氣）**；只有使用者明確講「暖氣/除濕/送風/自動」才填對應 heat/dry/fan/auto。本系統多數 IR 空調遙控器沒有自動模式，除非使用者明講「自動」，否則絕不要自己塞 mode=auto
 - query_sensor：device_name
 - control_ir：device_name, button。開關用 button="開"/"關"，其他填實際按鈕名稱（須完全一致）
 - control_dehumidifier：device_name, 選填 power(on/off), mode(連續除濕/防霉抑菌/目標濕度/空氣清淨/AI舒適), humidity(40/45/50/55/60/65/70)。只說模式或濕度時預設 power=on
