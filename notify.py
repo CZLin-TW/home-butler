@@ -229,11 +229,15 @@ async def notify():
 
 
 
-def _push_todo_reminder(person, todo_type, todo_item, data_summary, fallback, ctx, members):
-    """把 todo 提醒推給對應的成員（私人 → 負責人本人；公開 → 全部啟用成員）。
+def _push_todo_reminder(todo_type, person, message, ctx, members):
+    """把一則「已組好文字」的提醒推給對應成員（私人 → 負責人本人；公開 → 全部啟用成員）。
 
-    內含「同一則 todo 不重複提醒」的去重：檢查對話暫存近 6 則，若 assistant
-    已經提過這個 item 就跳過。
+    去重：提醒文字由程式規則產生（不經 Claude 潤飾），所以能精確比對——該則文字只要
+    已出現在該成員最近對話裡就跳過。文字本身內嵌階段/逾時小時數，於是「同一階段 5 分
+    tick 連發」被擋掉（文字相同），「跨小時的逾時提醒」因文字不同而放行（每小時一次）。
+
+    去重看「最近幾則」而非「只看最後一則」：多個待辦同時提醒時，彼此會把對方擠成最後一
+    則，只比最後一則會互相誤判成沒發過而輪流重發。
     """
     if todo_type == "私人":
         targets = [m for m in members if m.get("狀態") == "啟用" and m.get("名稱") == person]
@@ -246,16 +250,13 @@ def _push_todo_reminder(person, todo_type, todo_item, data_summary, fallback, ct
             continue
 
         recent = get_recent_conversation(user_id, ctx)
-        already_notified = any(
-            msg.get("role") == "assistant" and todo_item in msg.get("content", "")
+        already = any(
+            msg.get("role") == "assistant" and msg.get("content", "").strip() == message
             for msg in recent
         )
-        if already_notified:
-            print(f"[SKIP] 已提醒過 {user_id}: {todo_item}")
+        if already:
             continue
 
-        member_style = get_style_instruction(member.get("名稱", ""), ctx)
-        message = generate_notify_message(data_summary, member_style) or fallback
         # per-member 例外隔離：單一成員推播失敗不中斷其他人。
         try:
             line_bot_api.push_message(user_id, TextSendMessage(text=message))
@@ -266,14 +267,20 @@ def _push_todo_reminder(person, todo_type, todo_item, data_summary, fallback, ct
             continue
 
 
-def _process_todo_reminders(now, today, is_near_hour, ctx):
-    """掃過所有待辦，對符合時間條件的觸發推播。
+def _process_todo_reminders(now, today, ctx):
+    """掃過所有待辦，依「距任務時間多久」決定推播；文字全部由程式規則產生（不經 Claude
+    潤飾），好讓去重能用精確比對（見 _push_todo_reminder）。
 
-    兩種觸發條件：
-    1. 即將到期：未來 20 分鐘內（即時提醒）
-    2. 整點前後（55~04 分）且當日已過時間：未完成提醒
+    三個階段，各自去重、各發一次：
+      1. 事前：任務前 20 分鐘內          → 「⏰ 提醒…」
+      2. 剛逾時：過期後 10~60 分         → 「⚠️ 未完成…」
+      3. 持續逾時：過期滿 1 小時起，每小時 → 「⚠️ 已逾時約 N 小時…」
+         N 寫進文字：同一小時內文字相同 → 去重擋住不洗版；跨小時文字變了 → 放行下一次。
+
+    逾時（階段 2、3）只在「任務當天」發，過了當天午夜就自動停，避免跨日還每小時嘮叨。
+    事前（階段 1）不設當天限制（跨午夜的任務提前 20 分提醒才正確）。
+    只處理有設「時間」的待辦；只有日期沒時間的不進這段（會出現在晚間綜合推播）。
     """
-    window_end = now + timedelta(minutes=20)
     todo_records = ctx.get("待辦事項")
     members = ctx.get("家庭成員")
 
@@ -291,23 +298,23 @@ def _process_todo_reminders(now, today, is_near_hour, ctx):
             print(f"[WARN] 無法解析即時提醒時間 {date_str!r} {time_str!r}: {e}")
             continue
 
+        item = r["事項"]
         person = r.get("負責人", "")
         todo_type = r.get("類型", "公開")
+        delta_min = (now - todo_dt).total_seconds() / 60  # 正 = 已逾時
+        same_day = todo_dt.date() == today
 
-        if now <= todo_dt <= window_end:
-            _push_todo_reminder(
-                person, todo_type, r["事項"],
-                f"即時提醒：{r['事項']}，時間 {time_str}",
-                f"⏰ 提醒：{r['事項']}（{time_str}）",
-                ctx, members,
-            )
-        elif is_near_hour and todo_dt.date() == today and todo_dt < now:
-            _push_todo_reminder(
-                person, todo_type, r["事項"],
-                f"未完成提醒：{r['事項']} 原訂 {time_str}，尚未完成",
-                f"⚠️ 未完成：{r['事項']}（原訂 {time_str}）",
-                ctx, members,
-            )
+        message = None
+        if -20 <= delta_min <= 0:
+            message = f"⏰ 提醒：{item}（{time_str}）"
+        elif same_day and delta_min >= 60:
+            hours = int(delta_min // 60)
+            message = f"⚠️ 已逾時約 {hours} 小時：{item}（原訂 {time_str}）"
+        elif same_day and delta_min >= 10:
+            message = f"⚠️ 未完成：{item}（原訂 {time_str}）"
+
+        if message:
+            _push_todo_reminder(todo_type, person, message, ctx, members)
 
 
 def _execute_pending_schedules(now, ctx):
@@ -412,8 +419,8 @@ def run_realtime_tick(ctx, now=None):
     4. 執行到時間的設備排程
     5. 把收尾完的排程封存
 
-    is_near_hour 寬鬆容忍 ±5 分鐘，避免 tick 漂移漏掉整點提醒（5 分一 tick → 任何
-    10 分窗內至少一 tick 落在窗內，整點提醒不會漏；落兩 tick 也有對話去重擋重複）。
+    待辦提醒的時間窗與去重都收在 _process_todo_reminders 內（文字由程式規則產生 →
+    精確比對去重），不再依賴整點判斷。
 
     每個步驟各自 try/except 隔離——這是無人值守跑在背景 thread 的工作，一步壞不該擋掉
     其餘步驟（尤其行事曆同步失敗，不能害到期排程不執行）。
@@ -422,7 +429,6 @@ def run_realtime_tick(ctx, now=None):
     """
     now = now or now_taipei()
     today = now.date()
-    is_near_hour = now.minute <= 4 or now.minute >= 55
 
     try:
         sync_external_events(ctx)
@@ -436,7 +442,7 @@ def run_realtime_tick(ctx, now=None):
         print(f"[realtime] 週期待辦生成失敗：{e}")
 
     try:
-        _process_todo_reminders(now, today, is_near_hour, ctx)
+        _process_todo_reminders(now, today, ctx)
     except Exception as e:
         print(f"[realtime] 待辦提醒失敗：{e}")
 
