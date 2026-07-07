@@ -1,8 +1,23 @@
 import json
+from datetime import datetime
 from config import now_taipei
 from sheets import get_all_devices_by_type, append_record, update_row_fields
 from prompt import _format_schedule_params
 from handlers.device import maintain_ac_auto_schedule
+
+
+def _norm_trigger(s):
+    """觸發時間正規化成標準 'YYYY-MM-DD HH:MM'（補前導零）。
+
+    模型建立與刪除排程時對前導零不一致（時而 9:00 時而 09:00），而刪除/修改是用
+    原始字串比對找目標 → 只差一個零就零命中「找不到」。這裡把兩邊都收斂成同一標準形
+    再比，順便在寫入時正規化讓 Sheet 資料一致。解析失敗（非預期格式）就回原字串，不硬改。
+    """
+    s = str(s or "").strip()
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return s
 
 
 def handle_add_schedule(data, user_name, ctx):
@@ -10,7 +25,7 @@ def handle_add_schedule(data, user_name, ctx):
     device_name = data.get("device_name", "")
     target_action = data.get("target_action", "")
     params = json.dumps(data.get("params", {}), ensure_ascii=False)
-    trigger_time = data.get("trigger_time", "")
+    trigger_time = _norm_trigger(data.get("trigger_time", ""))
     now = now_taipei().strftime("%Y-%m-%d %H:%M")
 
     if not device_name:
@@ -62,7 +77,7 @@ def handle_modify_schedule(data, user_name, ctx):
     sheet = ctx.get_worksheet("排程指令")
     records = ctx.get("排程指令")
     device_name = data.get("device_name", "")
-    trigger_time = data.get("trigger_time", "")
+    trigger_time = _norm_trigger(data.get("trigger_time", ""))
 
     if not device_name or not trigger_time:
         return "❌ 請指定原排程的設備名稱與觸發時間"
@@ -82,7 +97,7 @@ def handle_modify_schedule(data, user_name, ctx):
             continue
         if row.get("設備名稱") != device_name:
             continue
-        if row.get("觸發時間") != trigger_time:
+        if _norm_trigger(row.get("觸發時間")) != trigger_time:
             continue
         target_idx = i
         target_row = row
@@ -104,7 +119,7 @@ def handle_modify_schedule(data, user_name, ctx):
         params_str = json.dumps(new_params, ensure_ascii=False)
         updates["參數"] = params_str
     if new_trigger is not None:
-        updates["觸發時間"] = new_trigger
+        updates["觸發時間"] = _norm_trigger(new_trigger)
     update_row_fields(sheet, sheet_row, updates)
     target_row.update(updates)
 
@@ -129,7 +144,7 @@ def handle_delete_schedule(data, ctx):
     archive = ctx.get_worksheet("排程封存")
     records = ctx.get("排程指令")
     device_name = data.get("device_name", "")
-    trigger_time = data.get("trigger_time", "")
+    trigger_time = _norm_trigger(data.get("trigger_time", ""))
     delete_all = data.get("all", False)
 
     deleted = 0
@@ -140,7 +155,7 @@ def handle_delete_schedule(data, ctx):
             continue
         if row.get("設備名稱") != device_name:
             continue
-        if not delete_all and trigger_time and row.get("觸發時間") != trigger_time:
+        if not delete_all and trigger_time and _norm_trigger(row.get("觸發時間")) != trigger_time:
             continue
         indices_to_delete.append(i)
 
