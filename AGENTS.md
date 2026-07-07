@@ -10,6 +10,25 @@
 
 本專案不使用 git tag / GitHub Releases；版本以 Dashboard `package.json` 為準，git history 自己就是版本軌跡。
 
+# 意圖解析（Claude）：thinking + 強制 JSON schema
+
+`conversation.ask_claude`（LINE / Siri 共用的意圖解析）跑 Sonnet 5 + **adaptive thinking**，
+輸出正確性不靠模型自律，靠 **structured outputs**（`output_config.format` constrained
+decoding）：曾發生 thinking 開著時模型改吐自然語言取代 JSON（甚至空回應）→ 指令沒執行
+卻「講得像做了」。強制 schema 後這個失敗模式在 API 層就不可能發生。
+
+**維護鐵則**：`prompt.py:ACTION_SCHEMA` 是 SYSTEM_PROMPT「action 定義」的機器可讀雙生版。
+structured outputs 要求所有 object 都 `additionalProperties=False`——**沒列在 schema 的
+參數，模型永遠發不出來**。在 SYSTEM_PROMPT 新增 action 或參數時必須同步改 ACTION_SCHEMA，
+否則新功能靜默失效（模型想帶參數被 schema 擋掉，不會有任何錯誤訊息）。
+
+刻意的寬鬆點（別「修正」）：參數全 optional 只有 `action` 必填（handler 都是 `.get()`
+容錯風格）；`mode` 不設 enum（AC 英文模式與除濕機中文模式共用同一個 key）。
+
+另外兩顆 Claude 呼叫（`ask_claude_semantic`、`generate_notify_message`）輸出是給人看的
+自然語言，維持 adaptive thinking、不上 schema。`requirements.txt` 的 `anthropic==0.107.1`
+已支援 `output_config.format`／adaptive（升級 SDK 前先確認仍支援）。
+
 # 排程 / 推播架構（in-process scheduler；GAS 已退場）
 
 時間驅動的工作**全部跑在 `main.py` 的 polling thread**（每 5 分一 tick），不再用 Google Apps Script cron。

@@ -92,6 +92,129 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 {{"actions": [], "reply": "了解，有需要再跟我說 😊"}}
 """
 
+# ════════════════════════════════════════════
+# 意圖解析的強制輸出 schema（structured outputs）
+#
+# 上面 SYSTEM_PROMPT「action 定義」的機器可讀雙生版，由 conversation.ask_claude 透過
+# output_config.format 送給 API 做 constrained decoding：模型「發不出」不合 schema 的
+# 輸出，於是 thinking 開著也不會吐人話/空回應取代 JSON（2026-07 Sonnet 5 踩過的雷）。
+#
+# ⚠️ 維護鐵則：structured outputs 要求所有 object 都 additionalProperties=False，
+# 「沒列在這裡的參數，模型就永遠發不出來」——在 SYSTEM_PROMPT 新增 action 或參數時，
+# 必須同步加進這份 schema，否則新功能會靜默失效（模型想帶參數卻被 schema 擋掉）。
+#
+# 刻意的寬鬆點（別「修正」它們）：
+# - 全部參數 optional、只有 action 必填：handler 都是 .get() 容錯風格，per-action
+#   嚴格化只會增加 schema 分支數，擋不到更多真實錯誤。
+# - mode 不設 enum：control_ac 用英文（cool/heat/...）、control_dehumidifier 用中文
+#   （連續除濕/防霉抑菌/...），兩者共用這個 key。
+# ════════════════════════════════════════════
+
+# add_schedule.params / modify_schedule.params_new 的形狀：
+# 「被排程的那個 control_* action」的參數集合（不含 device_name，那在排程列本身）。
+_SCHEDULE_PARAMS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "power": {"type": "string", "enum": ["on", "off"]},
+        "temperature": {"type": "integer"},
+        "mode": {"type": "string"},
+        "fan_speed": {"type": "string"},
+        "button": {"type": "string"},
+        "humidity": {"type": "integer"},
+    },
+    "additionalProperties": False,
+}
+
+ACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "add_food", "delete_food", "modify_food", "query_food",
+                            "add_todo", "modify_todo", "delete_todo", "query_todo",
+                            "add_recurring_todo", "modify_recurring_todo",
+                            "stop_recurring_todo", "query_recurring_todo",
+                            "control_ac", "control_ir", "query_sensor",
+                            "control_dehumidifier", "query_dehumidifier",
+                            "set_dehumidifier_auto", "query_devices", "query_weather",
+                            "add_schedule", "modify_schedule", "delete_schedule",
+                            "query_schedule", "set_style", "unclear",
+                        ],
+                    },
+                    # 食品
+                    "name": {"type": "string"},
+                    "name_new": {"type": "string"},
+                    "quantity": {"type": "number"},
+                    "unit": {"type": "string"},
+                    "expiry": {"type": "string"},
+                    # 待辦（單次＋週期共用）
+                    "item": {"type": "string"},
+                    "item_new": {"type": "string"},
+                    "date": {"type": "string"},
+                    "time": {"type": "string"},
+                    "person": {"type": "string"},
+                    "type": {"type": "string"},
+                    "light_notify": {"type": "boolean"},
+                    "light_area": {"type": "string"},
+                    # 週期待辦
+                    "recur_type": {"type": "string"},
+                    "recur_type_new": {"type": "string"},
+                    "weekdays": {"type": "array", "items": {"type": "integer"}},
+                    "month_day": {"type": "integer"},
+                    "interval_days": {"type": "integer"},
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                    # 設備控制
+                    "device_name": {"type": "string"},
+                    "power": {"type": "string", "enum": ["on", "off"]},
+                    "temperature": {"type": "integer"},
+                    "mode": {"type": "string"},
+                    "fan_speed": {"type": "string"},
+                    "button": {"type": "string"},
+                    "humidity": {"type": "integer"},
+                    # 除濕機自動模式
+                    "auto_mode": {"type": "string"},
+                    "threshold": {"type": "integer"},
+                    "scope": {"type": "string", "enum": ["single", "all"]},
+                    "sensor_name": {"type": "string"},
+                    "duration_min": {"type": "number"},
+                    # 天氣
+                    "location": {"type": "string"},
+                    # 排程
+                    "target_action": {
+                        "type": "string",
+                        "enum": ["control_ac", "control_ir", "control_dehumidifier"],
+                    },
+                    "params": _SCHEDULE_PARAMS_SCHEMA,
+                    "trigger_time": {"type": "string"},
+                    "device_name_new": {"type": "string"},
+                    "target_action_new": {
+                        "type": "string",
+                        "enum": ["control_ac", "control_ir", "control_dehumidifier"],
+                    },
+                    "params_new": _SCHEDULE_PARAMS_SCHEMA,
+                    "trigger_time_new": {"type": "string"},
+                    "all": {"type": "boolean"},
+                    # 風格 / 澄清
+                    "style": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+        "reply": {"type": "string"},
+    },
+    "required": ["actions", "reply"],
+    "additionalProperties": False,
+}
+
 # 預設風格（用戶未自訂時使用）
 DEFAULT_STYLE = "語氣有禮簡潔，帶管家從容感，適度用 emoji（🥛📋🌡️❄️ 等）但不過度。"
 

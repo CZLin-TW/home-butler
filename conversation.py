@@ -2,7 +2,7 @@ import threading
 from config import claude, now_taipei, get_app_version, weekday_zh
 from sheets import get_sheet
 from prompt import (
-    SYSTEM_PROMPT, DEFAULT_STYLE,
+    SYSTEM_PROMPT, DEFAULT_STYLE, ACTION_SCHEMA,
     SEMANTIC_TODO_PROMPT, SEMANTIC_FOOD_PROMPT, SEMANTIC_DEFAULT_PROMPT,
     get_family_members_info, get_current_food, get_current_todo,
     get_device_info, get_lighting_area_info, get_schedule_info, get_style_instruction,
@@ -79,11 +79,16 @@ def ask_claude(user_id, user_message, user_name, ctx):
     messages = history + [{"role": "user", "content": user_message}]
     response = claude.messages.create(
         model="claude-sonnet-5",
-        max_tokens=2000,
-        # 意圖解析必須吐純 JSON 給後端 parse；adaptive thinking 會讓模型改吐
-        # 對使用者的自然語言（甚至空回應）→ JSON parse 失敗、指令不執行。
-        # 這顆一律關思考，釘回直接吐 JSON 的行為。
-        thinking={"type": "disabled"},
+        # thinking 跟回覆共用 max_tokens 預算，開 adaptive 後要留思考空間，否則
+        # 複雜指令思考一長就把 JSON 擠掉（stop_reason=max_tokens、回應被截斷）。
+        max_tokens=4000,
+        # 意圖解析開 adaptive thinking（提升複雜指令的解析力），輸出正確性不靠模型
+        # 自律、靠 output_config 的 constrained decoding：曾發生 thinking 開著時模型
+        # 改吐自然語言（甚至空回應）→ JSON parse 失敗、指令不執行；強制 schema 後
+        # 「吐人話取代 JSON」在 API 層就不可能發生。schema 見 prompt.ACTION_SCHEMA，
+        # 新增 action/參數時必須同步維護（additionalProperties=False，漏列=發不出來）。
+        thinking={"type": "adaptive"},
+        output_config={"format": {"type": "json_schema", "schema": ACTION_SCHEMA}},
         system=prompt,
         messages=messages
     )
