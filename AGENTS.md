@@ -17,13 +17,19 @@
 decoding）：曾發生 thinking 開著時模型改吐自然語言取代 JSON（甚至空回應）→ 指令沒執行
 卻「講得像做了」。強制 schema 後這個失敗模式在 API 層就不可能發生。
 
-**維護鐵則**：`prompt.py:ACTION_SCHEMA` 是 SYSTEM_PROMPT「action 定義」的機器可讀雙生版。
-structured outputs 要求所有 object 都 `additionalProperties=False`——**沒列在 schema 的
-參數，模型永遠發不出來**。在 SYSTEM_PROMPT 新增 action 或參數時必須同步改 ACTION_SCHEMA，
-否則新功能靜默失效（模型想帶參數被 schema 擋掉，不會有任何錯誤訊息）。
+**schema 是 key/value 陣列文法，不是自然的扁平物件**：structured outputs 有 grammar
+編譯限制（**全 schema optional 參數 ≤24、union 型別 ≤16**），本系統 40+ 參數的扁平
+schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 action 帶
+`args: [{key, value}]`（key 走 enum、value 一律字串），所有欄位 required → 0 optional、
+0 union，參數再多也不撞牆。字串 value 由 `assistant.py:_coerce_arg` 依
+`prompt.py:ARG_KEY_TYPES` 還原型別；add/modify_schedule 平鋪的指令參數由
+`_flatten_action` 收回 params / params_new。
 
-刻意的寬鬆點（別「修正」）：參數全 optional 只有 `action` 必填（handler 都是 `.get()`
-容錯風格）；`mode` 不設 enum（AC 英文模式與除濕機中文模式共用同一個 key）。
+**維護鐵則**（additionalProperties=False → 沒列的東西模型永遠發不出來、且靜默失效）：
+- 新增參數：`ARG_KEY_TYPES` 加一筆（schema 的 key enum 自動跟著長）＋ SYSTEM_PROMPT 描述
+- 新增 action：`ACTION_NAMES` ＋ `assistant.ACTION_HANDLERS` ＋ SYSTEM_PROMPT
+- schema 若再被 API 拒（400）：ask_claude 自動降級成「無 schema + 關思考」，bot 不斷線
+  但失去強制 JSON 保證——log 看到「structured outputs 被 API 拒絕」就要回頭修 schema
 
 另外兩顆 Claude 呼叫（`ask_claude_semantic`、`generate_notify_message`）輸出是給人看的
 自然語言，維持 adaptive thinking、不上 schema。`requirements.txt` 的 `anthropic==0.107.1`

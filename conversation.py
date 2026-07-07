@@ -1,4 +1,5 @@
 import threading
+import anthropic
 from config import claude, now_taipei, get_app_version, weekday_zh
 from sheets import get_sheet
 from prompt import (
@@ -77,21 +78,34 @@ def ask_claude(user_id, user_message, user_name, ctx):
     )
     history = get_recent_conversation(user_id, ctx)
     messages = history + [{"role": "user", "content": user_message}]
-    response = claude.messages.create(
-        model="claude-sonnet-5",
-        # thinking 跟回覆共用 max_tokens 預算，開 adaptive 後要留思考空間，否則
-        # 複雜指令思考一長就把 JSON 擠掉（stop_reason=max_tokens、回應被截斷）。
-        max_tokens=4000,
-        # 意圖解析開 adaptive thinking（提升複雜指令的解析力），輸出正確性不靠模型
-        # 自律、靠 output_config 的 constrained decoding：曾發生 thinking 開著時模型
-        # 改吐自然語言（甚至空回應）→ JSON parse 失敗、指令不執行；強制 schema 後
-        # 「吐人話取代 JSON」在 API 層就不可能發生。schema 見 prompt.ACTION_SCHEMA，
-        # 新增 action/參數時必須同步維護（additionalProperties=False，漏列=發不出來）。
-        thinking={"type": "adaptive"},
-        output_config={"format": {"type": "json_schema", "schema": ACTION_SCHEMA}},
-        system=prompt,
-        messages=messages
-    )
+    try:
+        response = claude.messages.create(
+            model="claude-sonnet-5",
+            # thinking 跟回覆共用 max_tokens 預算，開 adaptive 後要留思考空間，否則
+            # 複雜指令思考一長就把 JSON 擠掉（stop_reason=max_tokens、回應被截斷）。
+            max_tokens=4000,
+            # 意圖解析開 adaptive thinking（提升複雜指令的解析力），輸出正確性不靠模型
+            # 自律、靠 output_config 的 constrained decoding：曾發生 thinking 開著時模型
+            # 改吐自然語言（甚至空回應）→ JSON parse 失敗、指令不執行；強制 schema 後
+            # 「吐人話取代 JSON」在 API 層就不可能發生。schema 見 prompt.ACTION_SCHEMA，
+            # 新增 action/參數時必須同步維護（additionalProperties=False，漏列=發不出來）。
+            thinking={"type": "adaptive"},
+            output_config={"format": {"type": "json_schema", "schema": ACTION_SCHEMA}},
+            system=prompt,
+            messages=messages
+        )
+    except anthropic.BadRequestError as e:
+        # 保底：schema 若被 API 的 grammar 限制拒絕（限制值可能隨版本變動，曾實測
+        # optional >24 直接 400 → bot 全掛），退回「無 schema + 關思考」的已知可用
+        # 組合——降級（少了強制 JSON 保證）但不斷線。看到這行 log 就要回頭修 schema。
+        print(f"[ask_claude] structured outputs 被 API 拒絕，降級為無 schema 模式：{e}")
+        response = claude.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=2000,
+            thinking={"type": "disabled"},
+            system=prompt,
+            messages=messages
+        )
     text = _response_text(response)
     if text.startswith("```"):
         text = text.split("```")[1]

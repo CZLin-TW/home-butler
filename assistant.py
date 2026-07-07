@@ -11,6 +11,7 @@ import re
 import traceback
 
 from conversation import ask_claude, ask_claude_semantic
+from prompt import ARG_KEY_TYPES, SCHEDULE_CMD_KEYS
 from handlers.food import handle_add, handle_delete, handle_modify, handle_query
 from handlers.todo import handle_add_todo, handle_modify_todo, handle_delete_todo, handle_query_todo
 from handlers.recurring_todo import (
@@ -66,6 +67,62 @@ SEMANTIC_ACTIONS = {"query_weather", "query_sensor", "query_food", "query_todo"}
 REALTIME_ACTIONS = {"query_devices", "query_dehumidifier", "set_dehumidifier_auto", "query_schedule", "query_recurring_todo"}
 
 
+def _coerce_arg(key, value):
+    """把 structured outputs 的字串 value 還原成 handler 期待的型別。
+
+    schema 為了避開 grammar 編譯限制（optional ≤24 / union ≤16），args 的 value
+    一律是字串（見 prompt.py ACTION_SCHEMA 說明）；型別表 ARG_KEY_TYPES 是唯一
+    事實來源。轉不動時保留原字串，讓 handler 層的容錯去接。
+    """
+    kind = ARG_KEY_TYPES.get(key, "str")
+    if not isinstance(value, str):
+        return value  # 舊扁平格式（降級模式）帶原生型別時直接沿用
+    try:
+        if kind == "int":
+            return int(float(value))
+        if kind == "num":
+            f = float(value)
+            return int(f) if f.is_integer() else f
+        if kind == "bool":
+            return value.strip().lower() in ("true", "1", "yes", "是")
+        if kind == "intlist":
+            return [int(x) for x in re.split(r"[^0-9]+", value) if x]
+    except ValueError:
+        return value
+    return value
+
+
+def _flatten_action(entry):
+    """{"action": ..., "args": [{key, value}...]} → handler 期待的扁平 dict。
+
+    - 空字串 value 視同沒帶（避免 int("") 之類炸在 handler 的預設值邏輯上）
+    - add_schedule / modify_schedule：平鋪的指令參數（SCHEDULE_CMD_KEYS）收攏回
+      params / params_new；modify 帶了任一指令參數才算要整組取代
+    - 沒有 args 的舊扁平格式（schema 降級模式的輸出）原樣通過
+    """
+    if not isinstance(entry, dict):
+        return entry
+    args = entry.get("args")
+    if not isinstance(args, list):
+        return entry
+    data = {k: v for k, v in entry.items() if k != "args"}
+    for kv in args:
+        if not isinstance(kv, dict):
+            continue
+        key = kv.get("key")
+        value = kv.get("value", "")
+        if not key or (isinstance(value, str) and not value.strip()):
+            continue
+        data[key] = _coerce_arg(key, value)
+    if data.get("action") == "add_schedule":
+        data["params"] = {k: data.pop(k) for k in SCHEDULE_CMD_KEYS if k in data}
+    elif data.get("action") == "modify_schedule":
+        params = {k: data.pop(k) for k in SCHEDULE_CMD_KEYS if k in data}
+        if params:
+            data["params_new"] = params
+    return data
+
+
 def process_message(user_id, text, user_name, ctx):
     """一句話 → Claude 解析 → 分派 actions → 組出使用者可見的回覆字串。
 
@@ -105,6 +162,7 @@ def process_message(user_id, text, user_name, ctx):
         actions = parsed.get("actions", [])
         claude_reply = parsed.get("reply", "")
 
+    actions = [_flatten_action(a) for a in actions]
     print(f"[5] actions={actions}, claude_reply={claude_reply}")
 
     results = []
