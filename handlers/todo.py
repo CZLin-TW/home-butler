@@ -113,7 +113,11 @@ def handle_modify_todo(data, user_name, ctx):
                     light_notify_next,
                     existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
                 ).get("id", "")
-            update_count = update_row_fields(sheet, i + 2, updates)
+            # 寫入前即時定位列號，不信任快取的 i+2（背景同步搬動外部列會讓本地列位移）。
+            row_number, _ = _locate_todo_row(sheet.get_all_values(), item_name, date_orig, time_orig)
+            if row_number is None:
+                return f"❌ 找不到「{item_name}」"
+            update_count = update_row_fields(sheet, row_number, updates)
             row.update(updates)
             new_person = data.get("person")
             if new_person and new_person != old_person and new_person != user_name:

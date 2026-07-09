@@ -20,6 +20,31 @@ def _norm_trigger(s):
         return s
 
 
+def _locate_schedule_rows(values, device_name, trigger_time, match_all):
+    """在即時 Sheet 值矩陣裡定位待執行排程列，回 [(row_number_1based, row_dict), ...]。
+
+    純函式好測；row_number 直接是 Sheet 列號（含 header）。寫入/刪除前用它取代 request
+    快取的 i+2：背景 tick（排程執行封存、防黴、自動關機）會增刪排程列，快取位置會過時 →
+    用舊 index 會打到別列。trigger_time 須已正規化；match_all=True 時忽略 trigger、
+    抓該設備所有待執行。
+    """
+    if not values or len(values) < 2:
+        return []
+    headers = values[0]
+    hidx = {h: c for c, h in enumerate(headers)}
+    out = []
+    for r, rv in enumerate(values[1:], start=2):
+        row = {h: (rv[c] if c < len(rv) else "") for h, c in hidx.items()}
+        if row.get("狀態") != "待執行":
+            continue
+        if row.get("設備名稱") != device_name:
+            continue
+        if not match_all and trigger_time and _norm_trigger(row.get("觸發時間")) != trigger_time:
+            continue
+        out.append((r, row))
+    return out
+
+
 def handle_add_schedule(data, user_name, ctx):
     sheet = ctx.get_worksheet("排程指令")
     device_name = data.get("device_name", "")
@@ -108,7 +133,11 @@ def handle_modify_schedule(data, user_name, ctx):
 
     old_action = target_row.get("動作", "")
 
-    sheet_row = target_idx + 2  # +1 是 header、+1 是 1-based
+    # 寫入前即時定位列號，不信任快取的 target_idx+2（背景 tick 增刪排程列會位移）。
+    live = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, False)
+    if not live:
+        return "❌ 找不到符合條件的排程"
+    sheet_row = live[0][0]
 
     updates = {}
     if new_device is not None:
@@ -147,35 +176,32 @@ def handle_delete_schedule(data, ctx):
     trigger_time = _norm_trigger(data.get("trigger_time", ""))
     delete_all = data.get("all", False)
 
-    deleted = 0
-    indices_to_delete = []
-
-    for i, row in enumerate(records):
-        if row.get("狀態") != "待執行":
-            continue
-        if row.get("設備名稱") != device_name:
-            continue
-        if not delete_all and trigger_time and _norm_trigger(row.get("觸發時間")) != trigger_time:
-            continue
-        indices_to_delete.append(i)
+    # 即時定位待刪列，不信任快取 i+2（背景 tick 會增刪排程列造成位移 → 刪錯列）。
+    matches = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, delete_all)
+    if not matches:
+        return "❌ 找不到符合條件的排程"
 
     any_user_ac_deleted = False
-    for i in sorted(indices_to_delete, reverse=True):
-        row = records[i]
+    # 倒序刪，避免刪一列後其餘列號位移。封存內容直接用即時讀到的 row。
+    for row_number, row in sorted(matches, key=lambda x: x[0], reverse=True):
         # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
         if row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
             any_user_ac_deleted = True
         append_record(archive, {**row, "狀態": "已取消"})
-        sheet.delete_rows(i + 2)
-        records.pop(i)
-        deleted += 1
+        sheet.delete_rows(row_number)
 
-    if deleted:
-        # 只在刪到使用者 AC 排程時重算（避免使用者剛刪掉 auto 又被立刻加回來的困擾）
-        if any_user_ac_deleted:
-            maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False)
-        return f"✅ 已取消 {deleted} 筆排程"
-    return "❌ 找不到符合條件的排程"
+    # 同步 request 快取：用內容比對移除（與剛刪掉的 live 條件一致），非索引。
+    def _cache_match(rec):
+        return (rec.get("狀態") == "待執行"
+                and rec.get("設備名稱") == device_name
+                and (delete_all or not trigger_time
+                     or _norm_trigger(rec.get("觸發時間")) == trigger_time))
+    records[:] = [rec for rec in records if not _cache_match(rec)]
+
+    # 只在刪到使用者 AC 排程時重算（避免使用者剛刪掉 auto 又被立刻加回來的困擾）
+    if any_user_ac_deleted:
+        maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False)
+    return f"✅ 已取消 {len(matches)} 筆排程"
 
 
 def handle_query_schedule(ctx):
