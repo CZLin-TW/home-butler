@@ -138,6 +138,35 @@ def handle_modify_todo(data, user_name, ctx):
     return f"❌ 找不到「{data.get('item')}」"
 
 
+def _locate_todo_row(values, item_name, date_orig, time_orig):
+    """在即時 Sheet 值矩陣裡定位待辦列，回 (row_number_1based, 屬性)；找不到回 (None, None)。
+
+    純函式好測；row_number 直接是 Sheet 列號（含 header）。比對規則與 _matches_todo 一致：
+    事項完全相等、狀態＝待辦，date/time_orig 非空才比對。
+    """
+    if not values or len(values) < 2:
+        return None, None
+    headers = values[0]
+    idx = {h: c for c, h in enumerate(headers)}
+    ci, cs, cd, ct, cp = (idx.get("事項", -1), idx.get("狀態", -1),
+                          idx.get("日期", -1), idx.get("時間", -1), idx.get("屬性", -1))
+
+    def cell(row, c):
+        return row[c] if 0 <= c < len(row) else ""
+
+    for r, row in enumerate(values[1:], start=2):
+        if cell(row, ci) != item_name:
+            continue
+        if cs != -1 and cell(row, cs) != "待辦":
+            continue
+        if date_orig and str(cell(row, cd)) != date_orig:
+            continue
+        if time_orig and str(cell(row, ct)) != time_orig:
+            continue
+        return r, str(cell(row, cp)).strip()
+    return None, None
+
+
 def handle_delete_todo(data, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     archive = ctx.get_worksheet("待辦封存")
@@ -145,19 +174,32 @@ def handle_delete_todo(data, ctx):
     item_name = data.get("item", "")
     date_orig = data.get("date_orig") or ""
     time_orig = data.get("time_orig") or ""
-    for i, row in enumerate(records):
-        if _matches_todo(row, item_name, date_orig, time_orig):
-            prop = str(row.get("屬性", "")).strip()
-            if prop == "唯讀":
-                # 唯讀項目：只改狀態為已完成，不刪除不封存
-                update_row_fields(sheet, i + 2, {"狀態": "已完成"})
+
+    # 寫入前用「即時 Sheet 內容」定位列號，不信任 request 開頭快取的 i+2：背景 realtime
+    # tick 的 sync_external_events 每次都把所有外部（Notion）列砍掉重建到表尾，若發生在
+    # 解析→寫入的空窗，那筆待辦就換了列 → 用舊 index 會寫到別列（實測：唯讀任務標完成
+    # 沒生效卻回報成功）。改成即時定位，順帶讓「真的找不到」正確回 ❌ 而非假成功。
+    row_number, prop = _locate_todo_row(sheet.get_all_values(), item_name, date_orig, time_orig)
+    if row_number is None:
+        return f"❌ 找不到「{item_name}」"
+
+    if prop == "唯讀":
+        # 唯讀項目：只改狀態為已完成，不刪除不封存
+        update_row_fields(sheet, row_number, {"狀態": "已完成"})
+        for row in records:  # 同步 request 快取，讓同一輪後續動作看到
+            if _matches_todo(row, item_name, date_orig, time_orig):
                 row["狀態"] = "已完成"
-                return f"✅ 已標記「{data.get('item')}」為已完成（下次同步後不再顯示）"
-            append_record(archive, {**row, "狀態": "已完成"})
-            sheet.delete_rows(i + 2)
-            records.pop(i)
-            return f"✅ 已標記「{data.get('item')}」為已完成"
-    return f"❌ 找不到「{data.get('item')}」"
+                break
+        return f"✅ 已標記「{item_name}」為已完成（下次同步後不再顯示）"
+
+    # 本地項目：封存 + 刪列。封存內容從快取取（找不到就用手上的最小資訊），
+    # 但刪除一定用即時列號，避免砍錯列。
+    cache_row = next((r for r in records if _matches_todo(r, item_name, date_orig, time_orig)), None)
+    append_record(archive, {**(cache_row or {"事項": item_name, "日期": date_orig, "時間": time_orig}), "狀態": "已完成"})
+    sheet.delete_rows(row_number)
+    if cache_row is not None and cache_row in records:
+        records.remove(cache_row)
+    return f"✅ 已標記「{item_name}」為已完成"
 
 
 def handle_query_todo(user_name, ctx):
