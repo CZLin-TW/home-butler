@@ -45,7 +45,9 @@ TODO_SHEET = "待辦事項"
 TODO_ARCHIVE = "待辦封存"
 RULE_ID_COLUMN = "規則ID"
 
-RECUR_TYPES = ("每天", "每週", "每月", "間隔天")
+RECUR_TYPES = ("每天", "每週", "每月", "每季", "半年", "每年", "間隔天")
+# 每 N 個月一次的「月倍數」型：以起始日期當錨（月＋日），每 period 個月同一天（月底 clamp）。
+_MONTHLY_MULTIPLE = {"每季": 3, "半年": 6, "每年": 12}
 WEEKDAY_ZH = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日"}
 
 TEMPLATE_HEADERS = [
@@ -120,6 +122,18 @@ def _should_generate_today(rule, today):
         # 月底 clamp：每月 31 號在 2 月 → 落在當月最後一天（28/29），不跳過。
         last_day = calendar.monthrange(today.year, today.month)[1]
         return today.day == min(md, last_day)
+    if rtype in _MONTHLY_MULTIPLE:
+        # 每季/半年/每年：以起始日期當錨（月＋日）。today 是發生日 ⟺ 與錨點的月數差是
+        # period 的整數倍、且日子＝錨點日（月底 clamp）。缺錨點就不生。
+        period = _MONTHLY_MULTIPLE[rtype]
+        anchor = _parse_date(rule.get("起始日期"))
+        if anchor is None or today < anchor:
+            return False
+        month_diff = (today.year - anchor.year) * 12 + (today.month - anchor.month)
+        if month_diff < 0 or month_diff % period != 0:
+            return False
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        return today.day == min(anchor.day, last_day)
     if rtype == "間隔天":
         interval = _parse_int(rule.get("間隔天數"))
         if not interval or interval < 1:
@@ -161,6 +175,12 @@ def format_recur_summary(rule):
     if rtype == "每月":
         md = _parse_int(rule.get("月日"))
         return f"每月{md}號{time_part}" if md else f"每月{time_part}"
+    if rtype in _MONTHLY_MULTIPLE:
+        anchor = _parse_date(rule.get("起始日期"))
+        label = {"每季": "每季", "半年": "每半年", "每年": "每年"}[rtype]
+        if anchor:
+            return f"{label} {anchor.month}/{anchor.day}{time_part}"
+        return f"{label}{time_part}"
     if rtype == "間隔天":
         iv = _parse_int(rule.get("間隔天數"))
         return f"每{iv}天{time_part}" if iv else f"間隔天{time_part}"
@@ -174,8 +194,9 @@ def _next_calendar_date(rule, from_date, inclusive):
     用逐日掃描 + 既有的 _should_generate_today（同一套規律定義，不會漂移）。掃描上限
     366 天避免死迴圈（壞規則如每月無月日會永遠不符 → 回 None）。間隔天不走這裡。
     """
+    # 掃描上限 370 天：每年型的兩次發生相隔最多 366 天（跨閏日），370 留餘裕。
     d = from_date if inclusive else from_date + timedelta(days=1)
-    for _ in range(366):
+    for _ in range(370):
         if _should_generate_today(rule, d):
             return d
         d += timedelta(days=1)
@@ -204,7 +225,7 @@ def _compute_next_occurrence(rule, today):
             occ = max(start, today) if start else today
         else:
             occ = today + timedelta(days=n)
-    elif rtype in ("每天", "每週", "每月"):
+    elif rtype in ("每天", "每週", "每月") or rtype in _MONTHLY_MULTIPLE:
         if last is None:
             base = max(start, today) if start else today
             occ = _next_calendar_date(rule, base, inclusive=True)

@@ -35,7 +35,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type, light_notify(true/false), light_area(照明區域名稱)
 - delete_todo：item
 - query_todo：無參數
-- add_recurring_todo：建立週期性待辦（會自動在對的日子產生當日待辦）。item, recur_type（每天/每週/每月/間隔天），選填 weekdays（每週時把「一三五」正規化成 [1,3,5]，週一=1…週日=7）, month_day（每月時 1~31）, interval_days（間隔天時，>=1）, time(HH:MM), person(留空=發話者), type(私人/公開,預設私人), light_notify(同 add_todo 規則), light_area, start_date(留空=今天), end_date(選填)
+- add_recurring_todo：建立週期性待辦（會自動在對的日子產生當日待辦）。item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填 weekdays（每週時把「一三五」正規化成 [1,3,5]，週一=1…週日=7）, month_day（每月時 1~31）, interval_days（間隔天時，>=1）, time(HH:MM), person(留空=發話者), type(私人/公開,預設私人), light_notify(同 add_todo 規則), light_area, start_date(留空=今天), end_date(選填)。每季/半年/每年以 start_date 當錨點、每 3/6/12 個月重複同一天：使用者講「每年3月15日繳稅」就把 start_date 設成該起始日（2026-03-15）、講「每季/每半年」沒明講日期就用今天當起始日
 - modify_recurring_todo：item（必填，找目標；多筆同名時加 recur_type 消歧）, 選填 item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date
 - stop_recurring_todo：永久停止整個週期。item（+ 選填 recur_type 消歧）
 - query_recurring_todo：無參數，列出啟用中的週期提醒
@@ -62,7 +62,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo 不要用 delete+add 替代
 - modify_schedule 不要用 delete+add 替代（即使跨裝置或跨 action 類型也用單一 modify_schedule）
 - 所有待辦都可用 delete_todo 標記完成。外部行事曆項目無法 modify_todo，系統會自動判斷
-- 週期 vs 單次：使用者說「每天/天天/每週X/每月N號/每隔N天…提醒」用 add_recurring_todo；說「明天/下週一/某個日期」這種單一日期用 add_todo
+- 週期 vs 單次：使用者說「每天/天天/每週X/每月N號/每季/每半年/每年/每隔N天…提醒」用 add_recurring_todo；說「明天/下週一/某個日期」這種單一日期用 add_todo
 - 「完成這次」（如「收衣服好了」「垃圾倒完了」）對週期產生出來的當次待辦，用 delete_todo（只完成當次，週期模板不受影響、下次照常出現）；使用者說「不要再…了/停掉每天的X/取消週期提醒」才用 stop_recurring_todo
 - stop_recurring_todo 是永久停止整個週期、不可逆，執行前務必先用 reply 反問確認（例：要永久停掉「倒垃圾」每週提醒嗎？回「是」我就停掉），等使用者確認後的下一輪才送出 stop_recurring_todo，不要一次就停。這是「no 問句結尾」規則的例外
 - 待辦燈光提醒優先序：使用者明確說「要燈光提醒 / 閃燈提醒 / 呼吸燈提醒」→ light_notify=true；明確說「不用燈光 / 不要閃燈」→ light_notify=false。沒有 time 時不要開燈光提醒
