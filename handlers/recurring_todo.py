@@ -1,17 +1,23 @@
 """週期性待辦（recurring todo）。
 
-設計核心：**模板 / 實例分離**
+設計核心：**模板 / 實例分離 + 永遠掛著「下一次」**
 - 「週期待辦模板」分頁只描述「規律」（每天 / 每週幾 / 每月 N 號 / 間隔 N 天）。
-- 每 15 分鐘由 notify.py 的 /notify_realtime tick 呼叫 materialize_recurring_todos，
-  把「今天該出現的」生成成一筆**普通的一次性待辦**寫進「待辦事項」分頁。
+- 每 5 分鐘由 notify.py 的 realtime tick 呼叫 materialize_recurring_todos，確保**每條啟用
+  規則在「待辦事項」分頁裡永遠有且只有一筆 active（待辦）實例**——「下一次要做的」。
 - 生成出來的就是普通待辦 → 完成、燈光提醒、首頁卡、提醒全部沿用既有邏輯，零修改。
-  完成一筆 = 刪那筆實例（模板不動，下個週期日 tick 再生）；停整個週期 = 模板狀態改「停用」。
+  完成 / 刪除那筆 → 該規則暫時沒有 active 實例 → 完成當下 inline（或下個 tick）補上下一筆。
+  停整個週期 = 模板狀態改「停用」。
 
-冪等（抗 Render 隨時重啟 + cron 重打 / 漂移）：
-- 唯一真相是 Sheet 上的 (規則ID, 日期)，沒有任何記憶體 flag。
-- 查重必須同時掃「待辦事項」(活表) + 「待辦封存」(封存表)——因為當天完成的本地待辦
-  會被搬進封存表、從活表消失，只看活表會在同一天重生。
-- 只生 today、不回填昨天漏掉的（Render 睡整天就漏，符合待辦語意）。
+「下一次」怎麼算（_compute_next_occurrence）：
+- **每天 / 每週 / 每月 = 固定日曆**：下一格 = 嚴格晚於「最後生成日期」(= 上一筆實例的發生日)
+  的下一個符合日；**不 clamp 到今天**，所以漏掉沒清的過去格子會一筆一筆補上來（走 backlog，
+  完成一個才前進下一個）。完成的時機不影響格子在哪。
+- **間隔天 = 完成後 + N 天**：下一筆 =（完成後第一個 tick 的今天）+ N。完成越晚、下一筆越晚。
+- 首次（最後生成日期空）：calendar 型取 >= max(起始, 今天) 的第一格；間隔天取 max(起始, 今天)。
+- 超過「結束日期」就不再生。
+
+冪等（抗重啟 / tick 漂移）：唯一真相是 Sheet——「有沒有 active 實例」+「最後生成日期」，
+無記憶體 flag。同一條規則只要還有 active 實例就不補，天生不重生。
 
 總開關：config.recurring_todo_enabled()（預設關）。關閉時 materialize 直接 no-op，
 模板 CRUD 仍可用（可先把規則建好），對現有使用者零影響。
@@ -19,7 +25,7 @@
 
 import calendar
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import now_taipei, recurring_todo_enabled
 from sheets import get_or_create_sheet, append_record, update_row_fields, ensure_columns
@@ -161,18 +167,73 @@ def format_recur_summary(rule):
     return rtype or "週期"
 
 
-# ── 生成引擎（掛在 notify.py 的 /notify_realtime tick） ──
+def _next_calendar_date(rule, from_date, inclusive):
+    """calendar 型（每天/每週/每月）：回傳 >= from_date（inclusive=True）或
+    > from_date（inclusive=False）的下一個符合此規律的日期。
+
+    用逐日掃描 + 既有的 _should_generate_today（同一套規律定義，不會漂移）。掃描上限
+    366 天避免死迴圈（壞規則如每月無月日會永遠不符 → 回 None）。間隔天不走這裡。
+    """
+    d = from_date if inclusive else from_date + timedelta(days=1)
+    for _ in range(366):
+        if _should_generate_today(rule, d):
+            return d
+        d += timedelta(days=1)
+    return None
+
+
+def _compute_next_occurrence(rule, today):
+    """回傳這條規則「接下來該顯示」的發生日（date），或 None（超過結束日 / 算不出）。
+
+    呼叫前提：這條規則目前沒有 active 實例（該補一筆了）。
+    - calendar 型（每天/每週/每月）：嚴格晚於「最後生成日期」的下一格，不 clamp 今天
+      （過去格子照補 → backlog）；首次取 >= max(起始, 今天) 的第一格。
+    - 間隔天：完成後 + N（今天 ≈ 完成日，因為完成後第一個 tick 才 regen）；首次取
+      max(起始, 今天)。
+    """
+    rtype = str(rule.get("重複類型", "")).strip()
+    last = _parse_date(rule.get("最後生成日期"))
+    start = _parse_date(rule.get("起始日期"))
+    end = _parse_date(rule.get("結束日期"))
+
+    if rtype == "間隔天":
+        n = _parse_int(rule.get("間隔天數"))
+        if not n or n < 1:
+            return None
+        if last is None:
+            occ = max(start, today) if start else today
+        else:
+            occ = today + timedelta(days=n)
+    elif rtype in ("每天", "每週", "每月"):
+        if last is None:
+            base = max(start, today) if start else today
+            occ = _next_calendar_date(rule, base, inclusive=True)
+        else:
+            occ = _next_calendar_date(rule, last, inclusive=False)
+    else:
+        return None
+
+    if occ is None:
+        return None
+    if end and occ > end:
+        return None
+    if start and occ < start:  # 雙保險：起始日之前不生
+        return None
+    return occ
+
+
+# ── 生成引擎（掛在 notify.py 每 5 分的 realtime tick） ──
 
 def _template_sheet():
     return get_or_create_sheet(TEMPLATE_SHEET, TEMPLATE_HEADERS)
 
 
-def _materialize_one(todo_sheet, rule, today_str, ctx):
-    """把一條模板生成成一筆當日普通待辦，並同步 ctx 快取
-    （讓同一個 tick 後段的提醒 / 排程步驟看得到這筆新實例）。"""
+def _materialize_one(todo_sheet, rule, date_str, ctx):
+    """把一條模板生成成一筆普通待辦（日期＝算好的發生日，可能是未來或過去 backlog），
+    並同步 ctx 快取（讓同一個 tick 後段的提醒 / 排程步驟看得到這筆新實例）。"""
     record = {
         "事項": rule.get("事項", ""),
-        "日期": today_str,
+        "日期": date_str,
         "時間": str(rule.get("時間", "") or "").strip(),
         "負責人": rule.get("負責人", ""),
         "狀態": "待辦",
@@ -191,20 +252,20 @@ def _materialize_one(todo_sheet, rule, today_str, ctx):
 
 
 def materialize_recurring_todos(now, ctx):
-    """每 5 分鐘 tick 呼叫。把今天該出現的週期任務生成成當日待辦。
+    """每 5 分鐘 tick 呼叫。確保每條啟用規則在活表裡「有且只有一筆 active（待辦）實例」；
+    沒有的（新規則、或剛被完成/刪除）就補上算好的下一筆（見 _compute_next_occurrence）。
 
-    回傳本次生成筆數。整段獨立 try/except，單條壞規則不影響其它規則，也絕不
-    把例外冒泡到 notify_realtime 外層（否則會連帶讓提醒 / 排程整批失效）。
+    回傳本次生成筆數。整段獨立 try/except，單條壞規則不影響其它規則，也絕不把例外冒泡到
+    tick 外層（否則會連帶讓提醒 / 排程整批失效）。
     """
     if not recurring_todo_enabled():
         return 0
     try:
         today = now.date()
-        today_str = today.isoformat()
 
         # 活表要有「規則ID」欄：materialize 寫入 + 下面 active 查重 + Dashboard 讀 /api/todos
         # 顯示 🔁 都需要。封存表也保留此欄（完成的本地實例搬進封存時帶著規則ID，供 Dashboard
-        # 顯示）——但 dedup 已不再掃封存（見下方），這裡只 ensure header、不全讀。
+        # 顯示）。
         todo_sheet = ctx.get_worksheet(TODO_SHEET)
         ensure_columns(todo_sheet, [RULE_ID_COLUMN])
         archive_sheet = ctx.get_worksheet(TODO_ARCHIVE)
@@ -213,14 +274,15 @@ def materialize_recurring_todos(now, ctx):
         template_sheet = _template_sheet()
         rules = template_sheet.get_all_records()
 
-        # 冪等查重：只索引「活表」現有實例的 (規則ID, 日期)。封存表（永遠增長）不再每 tick
-        # 全讀——「今天生過、但已完成被搬進封存」這種活表看不到的情況，改用模板自己的
-        # 「最後生成日期」欄擋（見下方迴圈），省掉一個會隨歷史無上限變大的 get_all_records。
-        existing = set()
+        # 「已經有 active（待辦）實例」的規則ID——有就不補（永遠只掛一筆）。完成/刪除會把
+        # 實例移出活表 → 這裡看不到 → 補下一筆。這就是唯一的冪等依據（無記憶體 flag）。
+        active_rids = set()
         for r in ctx.get(TODO_SHEET):
+            if str(r.get("狀態", "")).strip() != "待辦":
+                continue
             rid = str(r.get(RULE_ID_COLUMN, "") or "").strip()
             if rid:
-                existing.add((rid, str(r.get("日期", "")).strip()))
+                active_rids.add(rid)
 
         generated = 0
         for idx, rule in enumerate(rules):
@@ -230,69 +292,28 @@ def materialize_recurring_todos(now, ctx):
                 rid = str(rule.get(RULE_ID_COLUMN, "") or "").strip()
                 if not rid:
                     continue
-                if not _within_window(rule, today):
-                    continue
-                if not _should_generate_today(rule, today):
-                    continue
-                if (rid, today_str) in existing:
-                    continue
-                # 活表沒有 → 可能今天生過又被完成（已搬進封存、活表看不到）。用模板的
-                # 「最後生成日期」擋掉，取代每 tick 全讀封存表。代價：極罕見情況（當初生成後
-                # 「最後生成日期」剛好寫入失敗、且實例又在同一天被完成）會重生一筆，可接受。
-                if str(rule.get("最後生成日期", "") or "").strip() == today_str:
-                    continue
-                _materialize_one(todo_sheet, rule, today_str, ctx)
-                existing.add((rid, today_str))
+                if rid in active_rids:
+                    continue  # 已有一筆掛著，不補
+                occ = _compute_next_occurrence(rule, today)
+                if occ is None:
+                    continue  # 超過結束日 / 算不出
+                occ_str = occ.isoformat()
+                _materialize_one(todo_sheet, rule, occ_str, ctx)
+                active_rids.add(rid)  # 同 tick 內不再補這條
                 generated += 1
                 try:
-                    update_row_fields(template_sheet, idx + 2, {"最後生成日期": today_str})
+                    update_row_fields(template_sheet, idx + 2, {"最後生成日期": occ_str})
                 except Exception as e:
                     print(f"[recur] update 最後生成日期 failed ({rid}): {e}")
             except Exception as e:
                 print(f"[recur] rule {rule.get(RULE_ID_COLUMN)} materialize error: {e}")
 
         if generated:
-            print(f"[recur] materialized {generated} todo(s) for {today_str}")
+            print(f"[recur] materialized {generated} todo(s)")
         return generated
     except Exception as e:
         print(f"[recur] materialize_recurring_todos fatal: {e}")
         return 0
-
-
-def upcoming_recurring_for_date(target_date):
-    """回傳在 target_date 當天「會生成」的啟用週期規則，給推播預告用（不寫任何東西）。
-
-    存在理由：materialize 只生 today，明天的實例要等明天 tick 才出現；晚間「明日預報」推播
-    若只看「待辦事項」分頁會系統性漏掉所有週期任務。這個函式直接從模板算出那天會冒出來的。
-
-    刻意複用跟真正生成同一組純函式（_within_window / _should_generate_today），邏輯不會漂移。
-    受總開關 recurring_todo_enabled() 控制：關閉時回空（那天本來就不會 materialize，不該預告）。
-    每筆回 dict：事項 / 時間 / 負責人 / 類型 / 規則ID。
-    """
-    if not recurring_todo_enabled():
-        return []
-    out = []
-    try:
-        for rule in _template_sheet().get_all_records():
-            if str(rule.get("狀態", "")).strip() != "啟用":
-                continue
-            rid = str(rule.get(RULE_ID_COLUMN, "") or "").strip()
-            if not rid:
-                continue
-            if not _within_window(rule, target_date):
-                continue
-            if not _should_generate_today(rule, target_date):
-                continue
-            out.append({
-                "事項": rule.get("事項", ""),
-                "時間": str(rule.get("時間", "") or "").strip(),
-                "負責人": rule.get("負責人", ""),
-                "類型": rule.get("類型", "私人") or "私人",
-                RULE_ID_COLUMN: rid,
-            })
-    except Exception as e:
-        print(f"[recur] upcoming_recurring_for_date error: {e}")
-    return out
 
 
 # ── CRUD handler（LINE action + Dashboard REST 共用） ────

@@ -12,11 +12,7 @@ from calendar_sync import sync_external_events
 from handlers.device import (
     handle_control_ac, handle_control_ir, handle_control_dehumidifier, ANTIMOLD_SOURCE,
 )
-from handlers.recurring_todo import (
-    materialize_recurring_todos,
-    upcoming_recurring_for_date,
-    RULE_ID_COLUMN,
-)
+from handlers.recurring_todo import materialize_recurring_todos
 from auth import verify_api_key
 import weather_api
 
@@ -110,26 +106,8 @@ def run_daily_push(ctx):
             else:
                 todo_public.append(label)
 
-    # 明天的週期待辦預告：明天的實例要等明天 tick 才 materialize，此刻不在「待辦事項」裡，
-    # 否則晚間「明日預報」會系統性漏掉所有週期任務。直接從模板算出明天會出現的，併進預報。
-    try:
-        tomorrow_str = tomorrow.isoformat()
-        existing_recur = {
-            (str(r.get(RULE_ID_COLUMN, "") or "").strip(), str(r.get("日期", "")).strip())
-            for r in ctx.get("待辦事項")
-        }
-        for item in upcoming_recurring_for_date(tomorrow):
-            rid = item.get(RULE_ID_COLUMN, "")
-            if rid and (rid, tomorrow_str) in existing_recur:
-                continue  # 明天的實例已存在（罕見）→ 上面的待辦迴圈已列，別重複
-            time_part = f" {item['時間']}" if item.get("時間") else ""
-            label = f"🔁 {item['事項']}（{date_with_weekday(tomorrow_str)}{time_part}）"
-            if item.get("類型") == "私人":
-                todo_private.setdefault(item.get("負責人", ""), []).append(label)
-            else:
-                todo_public.append(label)
-    except Exception as e:
-        print(f"[NOTIFY] 週期待辦預告組裝失敗：{e}")
+    # 註：週期待辦已改「提前 materialize 下一筆」，明天該出現的實例此刻多半已是真實待辦，
+    # 由上面的待辦迴圈自然納入 → 不再需要從模板現算的「明日預報」（那會與實例重複）。
 
     # 待執行排程
     schedule_pending = []

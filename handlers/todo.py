@@ -1,10 +1,11 @@
 import threading
 from linebot.models import TextSendMessage
-from config import line_bot_api, date_with_weekday
+from config import line_bot_api, date_with_weekday, now_taipei
 from conversation import save_conversation, cleanup_conversation
 from calendar_sync import sync_external_events
 from sheets import append_record, ensure_columns, update_row_fields
 from hue_area_settings import DEFAULT_LIGHT_AREA_NAME
+from handlers.recurring_todo import materialize_recurring_todos, RULE_ID_COLUMN
 # 燈光提醒 / 布林解析等共用工具搬到 todo_helpers，讓 recurring_todo 也能複用。
 # 用 as 別名保留原本的私有命名，下方 handler body 完全不動。
 from handlers.todo_helpers import (
@@ -203,6 +204,13 @@ def handle_delete_todo(data, ctx):
     sheet.delete_rows(row_number)
     if cache_row is not None and cache_row in records:
         records.remove(cache_row)
+    # 若刪的是週期實例，完成當下就補下一筆（否則要等下個 5 分 tick 才出現，感覺像沒反應）。
+    # 該實例已移出活表 → materialize 看不到 active 實例 → 補下一筆；idempotent，補完不會再補。
+    if str((cache_row or {}).get(RULE_ID_COLUMN, "") or "").strip():
+        try:
+            materialize_recurring_todos(now_taipei(), ctx)
+        except Exception as e:
+            print(f"[recur] inline regen after complete failed: {e}")
     return f"✅ 已標記「{item_name}」為已完成"
 
 
