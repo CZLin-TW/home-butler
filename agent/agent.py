@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 
 import httpx
 import psutil
@@ -102,6 +103,30 @@ log.addHandler(_file_handler)
 _stream_handler = logging.StreamHandler(sys.stdout)
 _stream_handler.setFormatter(logging.Formatter("%(message)s"))  # terminal 不重複秀時間
 log.addHandler(_stream_handler)
+
+
+# ── 全域例外攔截：把「無聲崩潰」變成有 traceback 的 log ──────────
+# 主迴圈的 per-tick try 只包 push/reminders；迴圈外（update-check、各 thread 內）的
+# 未捕捉例外會讓 process 直接死、traceback 只進 stderr（不進 file log）→ log 突然停住、
+# 查不到死因（2026-07-19 兩台就這樣無聲躺了 3 天）。裝這兩個 hook 後，任何未捕捉例外
+# 都會「先寫進 log file 才死」，下次再發生就有據可查。
+# 注意：這只補得到 Python 層的未捕捉例外；硬殺（OOM／斷電／防毒/系統結束 process）
+# 沒機會執行任何 code，攔不到——那類就只能靠外部（如排程重複觸發）救。
+def _log_uncaught(exc_type, exc_value, exc_tb, source="main-thread"):
+    try:
+        tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log.error(f"[fatal] uncaught exception in {source}:\n{tb}")
+    except Exception:
+        pass  # log 本身若失敗就算了，別在 excepthook 裡再炸一次
+
+
+def _thread_excepthook(args):
+    _log_uncaught(args.exc_type, args.exc_value, args.exc_traceback,
+                  source=f"thread:{getattr(args.thread, 'name', '?')}")
+
+
+sys.excepthook = lambda et, ev, tb: _log_uncaught(et, ev, tb, "main-thread")
+threading.excepthook = _thread_excepthook
 
 
 # ── Watchdog ─────────────────────────────────────────
@@ -1445,7 +1470,14 @@ def main():
         # 讓 Task Scheduler 重啟 process 拉新 code
         tick_count += 1
         if tick_count % UPDATE_CHECK_TICKS == 0:
-            if check_for_updates():
+            # update-check 每 5 分跑一次、且在 per-tick try 之外——它若 crash 會讓整個
+            # 迴圈無聲死（正符合「push ok 後突然沒 log」）。包起來：crash 就記下來 + 繼續。
+            try:
+                has_update = check_for_updates()
+            except Exception as e:
+                log.info(f"[update] check failed: {e}")
+                has_update = False
+            if has_update:  # _restart_self 刻意留在 try 外——它會退出 process，不能被吞掉
                 _restart_self("auto-update pulled new code")
         elapsed = time.monotonic() - t0
         time.sleep(max(1.0, TICK_SECONDS - elapsed))
