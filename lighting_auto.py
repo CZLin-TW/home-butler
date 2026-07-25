@@ -10,12 +10,16 @@
   （關燈一次）、以及 webhook 漏接的兜底。
 
 時段內邏輯：
-  lightLevel <= threshold 且燈是關的 → recall 場景 + 設定開燈亮度
-  lightLevel >  threshold 且燈是開的 → 關燈
-時段結束：關燈一次，之後不再理會（window_active in-memory 旗標）。
+  lightLevel <= threshold 且燈是關的 → recall 場景 + 設定開燈亮度（記 auto_on=True）
+  lightLevel >  threshold 且「auto 自己開的」燈 → 關燈
+    ↑ 只關 auto 開的：使用者手動開的燈（auto_on=False）跳過不關。避免感應器讀值過時
+      （Hub 2 小幅變化不重測、changeReport 夾帶的是上次測到的舊值）時，把使用者剛手動
+      開的燈誤關、接著又跳夜燈。觀察到燈是關的就放掉 ownership（auto_on=False）。
+時段結束：只關 auto 自己開的燈一次，之後不再理會（window_active in-memory 旗標）。
 
-已知且刻意不處理：開燈後環境變亮可能跨過門檻造成開關循環（閃爍）。
-由使用者自行調整門檻與開燈亮度迴避。
+已知且刻意不處理：開燈後環境變亮可能跨過門檻造成開關循環（閃爍），由使用者調整門檻/亮度
+迴避。另外「拿過時亮值誤動作」目前只擋了關燈方向（靠 auto_on）；完整解需判斷讀值新鮮度
+（只有『值變了』才是新鮮測量），後續視情況再加。
 
 Rule 設定持久化在 Sheet「照明自動規則」分頁；runtime state（window_active /
 last_light_level）只放 in-memory，重啟歸零，由下個 tick 重建。
@@ -66,6 +70,10 @@ def _new_runtime():
         "last_light_at": 0.0,
         "last_eval_at": 0.0,
         "last_eval_level": None,
+        # 這區域現在亮著的燈是不是 auto 自己開的（ownership）。只有 True 時 auto 才會
+        # 去關它——使用者手動開的燈不碰。重啟歸零＝重啟後把所有亮著的燈都當使用者的，
+        # 保守不關（下次 auto 自己開燈時會重新取得 ownership）。
+        "auto_on": False,
     }
 
 
@@ -185,9 +193,17 @@ def _evaluate_rule(area_id, rule, light_level, source):
 
     threshold = rule.get("threshold", 5)
     label = rule.get("area_name") or area_id
+
+    # 觀察到燈是關的 → auto 不再擁有它（下次亮起若不是 auto 開的，就是使用者開的）。
+    if not is_on:
+        with _lock:
+            _runtime.setdefault(area_id, _new_runtime())["auto_on"] = False
+
     if light_level <= threshold and not is_on:
         try:
             _fire_scene_on(area_id, rule)
+            with _lock:
+                _runtime.setdefault(area_id, _new_runtime())["auto_on"] = True
             print(f"[light-auto] ON {label}: lightLevel={light_level} <= {threshold} "
                   f"scene={rule.get('scene_name') or rule.get('scene_id')} "
                   f"bri={rule.get('brightness')} ({source})")
@@ -195,8 +211,18 @@ def _evaluate_rule(area_id, rule, light_level, source):
         except Exception as e:
             print(f"[light-auto] {label} 開燈失敗: {e}")
     elif light_level > threshold and is_on:
+        with _lock:
+            owned = _runtime.setdefault(area_id, _new_runtime()).get("auto_on", False)
+        if not owned:
+            # 使用者手動開的燈：不關。（感應器讀值可能是過時的舊亮值，誤關會把使用者
+            # 剛選的情境蓋掉、接著又跳夜燈——正是要避免的情境。）
+            print(f"[light-auto] SKIP off {label}: 非 auto 開啟的燈，不自動關 "
+                  f"(lightLevel={light_level} > {threshold}, {source})")
+            return
         try:
             _fire_off(area_id)
+            with _lock:
+                _runtime.setdefault(area_id, _new_runtime())["auto_on"] = False
             print(f"[light-auto] OFF {label}: lightLevel={light_level} > {threshold} ({source})")
             _write_event(area_id, "triggered_off")
         except Exception as e:
@@ -249,10 +275,18 @@ def tick():
 
             if not in_win:
                 if was_active:
-                    # 時段結束：關燈一次。失敗不清旗標，下個 tick 重試。
-                    _fire_off(area_id)
-                    print(f"[light-auto] WINDOW END off {label}")
-                    _write_event(area_id, "window_end_off")
+                    # 時段結束：只關「auto 自己開的」燈（同 _evaluate_rule 的 ownership
+                    # 規則，別把使用者手動開的燈關掉）。失敗不清 window_active，下個 tick 重試。
+                    with _lock:
+                        owned = _runtime.setdefault(area_id, _new_runtime()).get("auto_on", False)
+                    if owned:
+                        _fire_off(area_id)
+                        print(f"[light-auto] WINDOW END off {label}")
+                        _write_event(area_id, "window_end_off")
+                        with _lock:
+                            _runtime[area_id]["auto_on"] = False
+                    else:
+                        print(f"[light-auto] WINDOW END skip {label}: 非 auto 開啟的燈，不自動關")
                     with _lock:
                         _runtime[area_id]["window_active"] = False
                 continue
