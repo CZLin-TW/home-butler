@@ -489,7 +489,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | PANASONIC_PASSWORD | Panasonic Smart App 密碼 | 選配 |
 | CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
 | NOTION_TOKEN | Notion Internal Integration Token | 選配 |
-| RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘 materialize 成當日待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出當日待辦；上線或收手只需改這個變數，不必 revert code | 選配 |
+| RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘維持一筆『下一次要做的』待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出待辦實例；上線或收手只需改這個變數，不必 revert code | 選配 |
 | DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
 
 ---
@@ -883,7 +883,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | calendar_sync.py | 外部行事曆同步（Notion → 待辦 Sheet） |
 | handlers/food.py | 食品庫存 handler（新增、刪除、修改、查詢） |
 | handlers/todo.py | 待辦事項 handler（新增、刪除、修改、查詢） |
-| handlers/recurring_todo.py | 週期性待辦：模板/實例分離，每 5 分鐘 materialize 當日待辦（冪等查重含活表+封存表）+ add/modify/stop/query 的 CRUD handler，受 RECURRING_TODO_ENABLED 控制生成 |
+| handlers/recurring_todo.py | 週期性待辦：模板/實例分離，每 5 分鐘確保每條啟用規則都掛著一筆「下一次」待辦（冪等依據＝活表有無該規則的待辦實例，完成/刪除才補下一筆）+ add/modify/stop/query 的 CRUD handler，受 RECURRING_TODO_ENABLED 控制生成 |
 | handlers/todo_helpers.py | 待辦 / 週期待辦共用工具（燈光提醒自動判斷、布林解析、照明區域解析），從 todo.py 抽出供兩邊複用 |
 | handlers/device.py | 智能居家 handler（空調、IR、感應器、除濕機、天氣） |
 | handlers/schedule.py | 排程指令 handler（新增、刪除、查詢） |
