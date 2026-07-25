@@ -1,8 +1,12 @@
 """WebSocket control channel for local PC agents.
 
-Agents connect outbound from the home LAN to Render. The server keeps only
-in-memory connection state for now; command delivery will be layered on top of
-this registry after the connection path is proven stable.
+Agents connect outbound from the home LAN to Render. Connection state is kept
+in memory only (registry rebuilds itself as agents reconnect after a restart).
+
+Command delivery is implemented and load-bearing: send_agent_command() dispatches
+to a connected agent and awaits its reply — it is how Hue (lighting_auto,
+lighting_api) and the theater relay reach LAN-only devices that Render cannot
+otherwise talk to.
 """
 
 import asyncio

@@ -310,7 +310,7 @@ agent startup log 第一行會印 `sha=xxxxxxx`：
 Get-Content "$env:USERPROFILE\butler-agent.log" -Head 1
 ```
 
-或所有 PC 一起看（home-butler Dashboard 上目前還沒 expose，要的話 agent payload 加一個 sha 欄位即可）。
+或所有 PC 一起看：每台 agent 的 sha 已經隨 WebSocket hello / heartbeat 上報（`agent_sha` 欄位），後端 `GET /api/agent/status`（X-API-Key 保護）就查得到，不需要再加欄位。
 
 ### 單一實例鎖（防重複 agent）
 
@@ -333,6 +333,7 @@ agent 啟動時先對 `<butler-agent>/agent.lock`（在 repo 外，例如 `C:\bu
 | `[ws] disabled: missing dependency 'websockets'` | agent 已拉到 WebSocket 版程式碼，但本機 python 還沒安裝新套件 | 在 `C:\butler-agent\repo\agent` 跑 `python -m pip install -r requirements.txt`，再重啟 ButlerAgent |
 | Task Scheduler `/ru SYSTEM` 跑失敗 | SYSTEM 帳號讀不到 user-scoped 套件（pynvml、psutil 等） | 一律用本機使用者帳號 `/ru "$env:USERNAME"`，**不要用 SYSTEM** |
 | 改了 `agent_config.py` 後 `schtasks /end + /run`，log 只多一行 `[lock] another agent instance is already running`、新設定沒生效 | 跑著的 agent 是 auto-update self-restart 後的孤兒 process，Task Scheduler 的 `/end` 殺不到它；`/run` 啟動的新實例被單一實例鎖擋退（鎖運作正常，但本尊還抱著舊 config） | 用 `Get-CimInstance Win32_Process -Filter "Name like 'python%'"` 列出 CommandLine 含 `butler-agent` 的 process（**別誤殺 `theater_agent.py`**），`Stop-Process -Id <PID> -Force` 後 `schtasks /run` |
+| **PC 一直開著、`Get-ScheduledTask` 顯示 `State: Ready`，但 log 停在某行正常的 `[push] ok` 之後就完全沒再長，agent 死了且好幾天都不會自己活**（2026-07-19 兩台同時中，躺了 3 天） | self-restart spawn 出的 detached orphan process 自己 hard-crash：watchdog 跟著那個 process 一起死，而 Task Scheduler 早就看到「原本那個 task」乾淨 exit(0) 完成、回到 Ready 等下次觸發——**沒有任何機制會重新拉起它**，只能等下次重開機。這是目前 self-restart 設計的已知結構性缺口（見 `agent.py` self-restart 段註解的 trade-off） | 先確認：`Get-CimInstance Win32_Process ... butler-agent` 查不到 process = 真的死了。用 `Start-ScheduledTask -TaskName ButlerAgent` 踢起來（process 已死，鎖是放開的，通常一次就活）。**長期解法（尚未實作，刻意 deferred）**：幫 `ButlerAgent` Task 加一條每 10~15 分的 repeating trigger 當保險——單一實例鎖讓重複觸發是安全的（活著就乾淨退出、死了就被拉起）。另：新版起未捕捉例外會先寫 `[fatal] uncaught exception ...` + traceback 進 log 才死，下次再發生就查得到死因（但**不會**自動救回） |
 
 ---
 

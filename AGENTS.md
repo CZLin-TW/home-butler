@@ -120,6 +120,12 @@ AUTO_UPDATE=False 可在 `agent_config.py` 關掉，push 壞 code 想暫停推�
 
 **單一實例鎖（防重複）**：agent 啟動會對 `C:\butler-agent\agent.lock` 取 OS 獨佔鎖，已有實例在跑就乾淨退出 → 每台只會有一隻；self-restart 時短暫重試讓後繼接手。修掉了「self-restart 孤兒＋手動 `schtasks /run` → 多隻同 hostname 連 `/api/agent/ws` 互踢 (close 1012) → Hue 指令時好時壞」這個雷。
 
+**已知殘留風險：孤兒 crash 沒人救（2026-07-19 兩台都中，躺 3 天）**。self-restart spawn 出的 detached orphan 若自己 hard-crash，watchdog 跟著死，但 Task Scheduler 早就看到原本的 task 乾淨 exit(0)、回到 `Ready`——**不會重新觸發，PC 開著也不會自己活過來**，直到手動介入或重開機。症狀是 log 停在一行正常的 `[push] ok` 之後完全沒再長、而 `State: Ready`（跟「task 根本沒啟動」那類 `Last Result: 3 / 9009` 完全不同，別搞混）。
+
+已做的緩解：`agent.py` 裝了 `sys.excepthook` / `threading.excepthook`，未捕捉例外會先寫 `[fatal] uncaught exception ...` + 完整 traceback 進 log file 才死（以前只進 stderr → log 無聲斷尾、死因查不到，正是 7/19 難查的原因）；主迴圈的 auto-update check 也包了 try/except（`[update] check failed` 後繼續跑）。**但這只讓下次可診斷，不解決「沒人重新觸發」本身**——硬殺（OOM／斷電／防毒結束 process）連 hook 都跑不到。
+
+**已知修法（尚未實作，刻意 deferred）**：幫 `ButlerAgent` Task 加一條每 10~15 分的 repeating trigger 當保險。單一實例鎖讓這樣做是安全的：活著時新實例撞鎖乾淨退出、死了就被自動拉起。注意這是**本機 Task Scheduler 設定、不在 repo 裡**，所以 git push 不會散佈，要逐台設。
+
 ## 標準診斷三連發（agent 失聯時）
 
 在那台 PC PowerShell 跑：
@@ -129,7 +135,16 @@ cd C:\butler-agent\repo
 git rev-parse --short HEAD
 
 # B. Task 狀態
-schtasks /query /tn "ButlerAgent" /v /fo list | findstr /i "Status Last"
+# 註：別用 `schtasks ... | findstr /i "Status Last"`——中文版 Windows 的 schtasks
+# 輸出是中文欄位名，英文關鍵字一行都抓不到（會得到空白，誤以為 task 不存在）。
+# 用語言無關的 PowerShell cmdlet：
+Get-ScheduledTask     -TaskName ButlerAgent | Select-Object TaskName, State
+Get-ScheduledTaskInfo -TaskName ButlerAgent | Select-Object LastRunTime, LastTaskResult, NextRunTime
+
+# B2. agent process 到底在不在（比 Task 狀態更可靠：State=Ready 不代表 agent 活著）
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Where-Object { $_.CommandLine -like '*butler-agent*agent.py*' } |
+  Select-Object ProcessId, CreationDate
 
 # C. log 最後幾行
 Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
@@ -140,6 +155,7 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 | 症狀 | 原因 | 處理 |
 |---|---|---|
 | log 停在 `[update] X → Y, restarting`、無後續 `agent start:` 行 | 舊 broken `os._exit(1)` 路徑死亡，Task Scheduler 沒接住 | 該台 `schtasks /end + /run` 手動 kick；disk 上 code 已是新版的話一次就活 |
+| **PC 開著、`State: Ready`，但 log 停在正常的 `[push] ok` 之後完全沒再長，數天不會自己活** | self-restart 的 detached orphan hard-crash，watchdog 陪葬、Task Scheduler 早已 exit(0) 不再觸發（見上方「已知殘留風險」） | 先用 B2 確認 process 真的不在 → `Start-ScheduledTask -TaskName ButlerAgent` 踢起來。新版會留 `[fatal] ... traceback` 可查死因 |
 | Task `Status: Ready` + `Last Result: 3` 或 `9009` | bat 找不到 python.exe，啟動瞬間死 | 對照「各台差異」表修 bat 的 python 路徑 |
 | 前景手動 `python agent.py` OK、Task Scheduler 死 | bat 路徑問題（最常見）或 Task Scheduler 環境變數差異 | 同上，看 bat 內容 |
 | log 持續 `[push] ok` 但 dashboard 顯示失聯 | server 端／網路問題，非 agent | 看 home-butler render log、確認 `/api/computers/status` 回什麼 |

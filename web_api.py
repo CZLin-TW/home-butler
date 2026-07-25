@@ -551,8 +551,9 @@ def api_delete_todo(req: TodoDeleteRequest):
 
 
 # ── 週期性待辦（recurring todo）──
-# 模板 CRUD 純 proxy 到 handlers/recurring_todo.py。實際「生成」由 notify.py 的
-# /notify_realtime tick 跑，受 config.recurring_todo_enabled() 總開關控制。
+# 模板 CRUD 純 proxy 到 handlers/recurring_todo.py。實際「生成」由 main.py polling
+# thread 每 5 分呼叫的 notify.run_realtime_tick 跑（/notify_realtime 端點現在只是
+# 手動 debug 觸發，不是正常驅動來源），受 config.recurring_todo_enabled() 總開關控制。
 
 @router.get("/recurring-todos")
 def api_get_recurring_todos():

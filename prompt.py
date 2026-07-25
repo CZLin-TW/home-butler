@@ -35,7 +35,7 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type, light_notify(true/false), light_area(照明區域名稱)
 - delete_todo：item
 - query_todo：無參數
-- add_recurring_todo：建立週期性待辦（會自動在對的日子產生當日待辦）。item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填 weekdays（每週時把「一三五」正規化成 [1,3,5]，週一=1…週日=7）, month_day（每月時 1~31）, interval_days（間隔天時，>=1）, time(HH:MM), person(留空=發話者), type(私人/公開,預設私人), light_notify(同 add_todo 規則), light_area, start_date(留空=今天), end_date(選填)。每季/半年/每年以 start_date 當錨點、每 3/6/12 個月重複同一天：使用者講「每年3月15日繳稅」就把 start_date 設成該起始日（2026-03-15）、講「每季/每半年」沒明講日期就用今天當起始日
+- add_recurring_todo：建立週期性待辦（系統會自動維持一筆「下一次要做的」待辦，完成後才出現再下一次）。item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填 weekdays（每週時把「一三五」正規化成 [1,3,5]，週一=1…週日=7）, month_day（每月時 1~31）, interval_days（間隔天時，>=1）, time(HH:MM), person(留空=發話者), type(私人/公開,預設私人), light_notify(同 add_todo 規則), light_area, start_date(留空=今天), end_date(選填)。每季/半年/每年以 start_date 當錨點、每 3/6/12 個月重複同一天：使用者講「每年3月15日繳稅」就把 start_date 設成該起始日（2026-03-15）、講「每季/每半年」沒明講日期就用今天當起始日
 - modify_recurring_todo：item（必填，找目標；多筆同名時加 recur_type 消歧）, 選填 item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date
 - stop_recurring_todo：永久停止整個週期。item（+ 選填 recur_type 消歧）
 - query_recurring_todo：無參數，列出啟用中的週期提醒

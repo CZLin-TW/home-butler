@@ -22,7 +22,7 @@
 |------|------|
 | 食品庫存管理 | 新增、查詢、消耗、修改（品名/數量/單位/過期日），到期前自動提醒 |
 | 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
-| 週期性待辦 | 每天 / 每週幾 / 每月 N 號 / 間隔 N 天的重複提醒，模板與實例分離，每 5 分鐘自動把當天該出現的生成成普通待辦（完成單次不影響週期、停止整個週期可再啟用），LINE 與 Dashboard 共用。受環境變數 RECURRING_TODO_ENABLED 控制生成（預設關） |
+| 週期性待辦 | 每天 / 每週幾 / 每月 N 號 / 每季 / 半年 / 每年（後三者以起始日期錨定、每 3/6/12 個月同一天，月底 clamp）/ 間隔 N 天的重複提醒，模板與實例分離。每條啟用規則**永遠只掛一筆「下一次要做的」普通待辦**（日期可能在未來）；完成或刪除那筆之後才補下一筆，漏掉沒清的過去格子會逐筆補上（間隔天則從完成當下起算 +N 天）。停止整個週期可再啟用，LINE 與 Dashboard 共用。受環境變數 RECURRING_TODO_ENABLED 控制生成（預設關） |
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
 | 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
 | 除濕機控制 | 開關、模式、目標濕度。支援 Panasonic（Smart App API）與 LG（ThinQ Connect API），多台並存，依「智能居家」品牌欄分流 |
@@ -39,7 +39,7 @@
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 | PC agent | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖；同一支 agent 也建立 WebSocket 即時通道，供 Hue 等區網設備控制使用。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
 | 劇院 agent 轉送 | 劇院 PC 的 agent 設了 `THEATER_AGENT_URL` 會宣告 theater capability，把 `theater.summary` / `theater.set_flags` 指令轉送到同機 [theater-agent](https://github.com/CZLin-TW/theater-agent)（純內網 :8080，Render 連不到，靠 WebSocket 中繼）。`theater_api.py` 對 Dashboard 提供 `/api/theater/summary`（功能開關 + 設備狀態 + log 尾端）與 `/api/theater/flags`（開關寫入） |
-| 自動夜燈 | 依 SwitchBot Hub 2 亮度（lightLevel 1~20）條件式控制 Hue 區域：啟用時段內亮度 ≤ 門檻且燈關著 → 套用指定場景＋亮度；亮度 > 門檻 → 關燈；時段結束關燈一次後不再理會。主路徑走 SwitchBot Webhook 推播（秒級），5 分鐘輪詢兜底時段邊界與漏接。每個 Hue 區域一條規則，Dashboard 照明卡片設定，持久化在 Sheet「照明自動規則」（詳見「自動夜燈機制」章節） |
+| 自動夜燈 | 依 SwitchBot Hub 2 亮度（lightLevel 1~20）條件式控制 Hue 區域：啟用時段內亮度 ≤ 門檻且燈關著 → 套用指定場景＋亮度；亮度 > 門檻且燈是 auto 自己開的 → 關燈（使用者手動開的燈不碰）；時段結束關燈一次後不再理會。主路徑走 SwitchBot Webhook 推播（秒級），5 分鐘輪詢兜底時段邊界與漏接。每個 Hue 區域一條規則，Dashboard 照明卡片設定，持久化在 Sheet「照明自動規則」（詳見「自動夜燈機制」章節） |
 | Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
 
 ---
@@ -81,7 +81,7 @@
 ---
 ## 系統架構
 - **介面**：Line Bot（Messaging API）、Siri 語音（iOS 捷徑 → `/api/assistant`）
-- **大腦**：Claude API（claude-sonnet-4-6）
+- **大腦**：Claude API（claude-sonnet-5，adaptive thinking + structured outputs 強制 JSON）
 - **資料庫**：Google Sheets
 - **Server**：Render.com（Python + FastAPI）
 - **排程**：in-process polling thread（`main.py`，每 5 分一 tick：行事曆同步 / 週期待辦 / 提醒 / 設備排程 / 封存 / 每日推播）。GAS 已退場
@@ -549,7 +549,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/weather | GET | 查詢天氣（date, location） |
 | /api/members | GET | 列出所有啟用的家庭成員 |
 | /api/recurring-todos | GET | 列出啟用中的週期待辦模板（每筆附後端算好的人類可讀「摘要」字串給前端直接顯示） |
-| /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/start_date/end_date） |
+| /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/每季/半年/每年/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/start_date/end_date；每季/半年/每年用 start_date 當錨點） |
 | /api/recurring-todos | PATCH | 修改週期待辦模板（Dashboard 走 rule_id 精準定位，或用 item + recur_type 消歧） |
 | /api/recurring-todos | DELETE | 停整個週期（模板狀態 → 停用，不刪除；可帶 rule_id 或 item + recur_type） |
 | /api/auth/device/create | POST | Dashboard 裝置配對登入：發一組 6 位 user_code + device_token（device_token 由 PWA 保管）給前端顯示與輪詢用 |
@@ -645,7 +645,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify, light_area |
 | delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
-| add_recurring_todo | 新增週期提醒（自動在對的日子產生當日待辦） | item, recur_type（每天/每週/每月/間隔天），選填：weekdays（每週，[1,3,5]，一=1…日=7）, month_day（每月，1~31）, interval_days（間隔天，>=1）, time, person, type, light_notify, light_area, start_date, end_date |
+| add_recurring_todo | 新增週期提醒（系統維持一筆「下一次要做的」待辦，完成後才出現再下一次） | item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填：weekdays（每週，[1,3,5]，一=1…日=7）, month_day（每月，1~31）, interval_days（間隔天，>=1）, time, person, type, light_notify, light_area, start_date（每季/半年/每年的錨點）, end_date |
 | modify_recurring_todo | 修改週期提醒（多筆同名加 recur_type 消歧） | item，選填：item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date |
 | stop_recurring_todo | 永久停止整個週期（模板改停用，可再啟用；執行前先反問確認） | item，選填：recur_type |
 | query_recurring_todo | 列出啟用中的週期提醒 | 無 |
@@ -745,12 +745,14 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
-| 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦（含明日才會生成的週期待辦預告 🔁，直接從模板算，不必等明天 tick） |
-| 即時提醒 | 每 5 分鐘 | 未來 20 分鐘內有時間的待辦 + 整點檢查過時未完成任務 + 排程指令執行 |
+| 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦（週期待辦因為「下一筆」平常就已生成為普通待辦，會自然被這裡納入，不需另外從模板預告） |
+| 即時提醒 | 每 5 分鐘 | 三階段，各發一次：任務前 20 分內事前提醒／逾時 10~60 分「未完成」／逾時滿 1 小時起每小時「已逾時約 N 小時」（逾時提醒只在任務當天發，過午夜自停）+ 排程指令執行 |
 | Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對每筆設定的 Hue grouped_light 觸發 breathe；同一區域同一輪多筆待辦只呼吸一次 |
 | Agent 即時通道 | PC agent 常駐 WebSocket | PC agent 每約 25 秒 heartbeat 到 `/api/agent/ws`，後端可用 `/api/agent/status` 確認在線狀態 |
 
-推播訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。
+**晚間綜合推播**的訊息由 Claude 組成自然語氣文字，包含貼心提醒（快過期催促、天氣變化提醒等）。原本分為早上每日推播與晚間天氣兩次推播，現已合併為單一晚間綜合推播，減少 LINE 推播額度消耗。
+
+**即時提醒**則相反：文字**由程式規則產生的固定字串**（不經 Claude 潤飾）。因為去重是用「這則文字有沒有出現在最近對話裡」精確比對，Claude 每次改寫措辭會讓比對失效 → 每個 tick 重發洗版（實際發生過）。文字內嵌逾時小時數，於是同一小時內相同（被去重擋掉）、跨小時才不同（放行下一次）。
 
 ---
 
@@ -764,7 +766,8 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 |------|------|
 | 亮度 ≤ 門檻 且 該區燈是關的 | recall 場景 → 設定開燈亮度 |
 | 亮度 ≤ 門檻 且 燈已開著 | 不動作（不覆蓋使用者手動設定） |
-| 亮度 > 門檻 且 燈開著 | 關燈 |
+| 亮度 > 門檻 且 燈開著 且 是 auto 自己開的 | 關燈 |
+| 亮度 > 門檻 且 燈開著 但 是使用者手動開的 | 不動作（ownership：auto 只關自己開的燈，避免感應器讀值過時誤關手動開的燈） |
 
 時段結束時關燈一次，之後到下個時段前不再理會。
 

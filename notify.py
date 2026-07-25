@@ -392,7 +392,7 @@ def _archive_processed_schedules(processed_devices, ctx):
 def run_realtime_tick(ctx, now=None):
     """即時 tick，每 5 分鐘由 main.py 的 polling thread 呼叫一次（原 GAS 每 15 分鐘）：
     1. 同步外部行事曆
-    2. 生成今天該出現的週期性待辦（materialize；總開關關閉時 no-op）
+    2. 補齊週期性待辦的「下一筆」實例（materialize；總開關關閉時 no-op）
     3. 推播即將到期/未完成的待辦提醒
     4. 執行到時間的設備排程
     5. 把收尾完的排程封存

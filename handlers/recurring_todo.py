@@ -410,7 +410,7 @@ def handle_add_recurring_todo(data, user_name, ctx):
     }
     append_record(_template_sheet(), rule)
 
-    # 立刻把「今天該出現的」生成出來，避免設了卻整天沒動靜（flag 關閉時 no-op）
+    # 立刻把「下一筆」生成出來，避免設了卻要等下個 tick 才看得到（flag 關閉時 no-op）
     try:
         materialize_recurring_todos(now_taipei(), ctx)
     except Exception as e:

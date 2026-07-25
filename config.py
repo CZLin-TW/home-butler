@@ -43,8 +43,8 @@ def now_taipei():
 
 
 # 週期性待辦功能總開關（kill-switch）。預設「關閉」。
-# 設為 1/true/yes/on 才會啟用「週期待辦模板 → 每 15 分鐘 materialize 成當日待辦」
-# 的生成邏輯（materialize_recurring_todos）。
+# 設為 1/true/yes/on 才會啟用「週期待辦模板 → 每 5 分鐘 materialize 出下一筆待辦」
+# 的生成邏輯（materialize_recurring_todos：每條啟用規則永遠維持一筆待辦中的實例）。
 # 關閉時：模板 CRUD 仍可正常使用（可先把規則建好），但生成邏輯整段 no-op，
 # 對現有使用者零影響。要上線/收手只需在 Render 後台改這個環境變數，不必 revert code。
 def recurring_todo_enabled():
