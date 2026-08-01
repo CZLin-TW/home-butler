@@ -342,6 +342,10 @@ class DehumAutoRuleRequest(BaseModel):
     duration_min: Optional[int] = Field(default=None, ge=0)
     threshold: Optional[int] = None        # = UI 目標濕度 segment 當下值
     on_mode: Optional[str] = None          # = UI 模式 segment 當下值
+    # "自訂" = 改用感應器的分時曲線（智能居家分頁「濕度控制規則」欄），此時 threshold
+    # 只當曲線讀不到時的 fallback。空字串/None = 固定值。注意：UI 若只送 threshold
+    # 而不送這欄，set_rule 會把來源歸位成「固定」——那正是使用者選了具體數字的語意。
+    threshold_source: Optional[str] = None
 
 
 @router.get("/dehumidifier/auto-rule")
@@ -366,6 +370,7 @@ def api_set_dehum_auto_rule(req: DehumAutoRuleRequest):
         duration_min=req.duration_min,
         threshold=req.threshold,
         on_mode=req.on_mode,
+        threshold_source=req.threshold_source,
     )
     return result["rule"]
 

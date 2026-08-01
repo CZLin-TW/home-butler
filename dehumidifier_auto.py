@@ -18,11 +18,23 @@ Sensor 連續失聯：
 - 6 ticks（30min）→ phase=sensor_lost_warning（LINE bot 可知）
 - 12 ticks（60min）→ 自動解除 auto_mode + 關除濕機（如果開著）
 
+目標濕度有兩種來源（規則的 threshold_source 欄）：
+- 固定（預設，空值也是）：直接用 threshold 欄那個數字。
+- 自訂：改依「感應器」身上的分時曲線。曲線寫在「智能居家」分頁該感應器那列的
+  `濕度控制規則` 欄，格式 `7=55, 23=60`（小時=目標濕度，整點）。語意是循環的
+  ——最後一段跨午夜延伸到第一段之前，所以不必重複寫午夜值：上例＝
+  07:00~23:00 用 55%、23:00~隔天 07:00 用 60%。
+  掛在感應器而非除濕機上，是因為曲線描述的是「這個空間一天的舒適度」；同一顆
+  感應器配多台除濕機時只有一份設定，不會兩台打架。
+  **解析失敗一律 fallback 到固定 threshold 並 log 說明，絕不猜**（這格是人手改的
+  自由文字，猜錯比報錯難查）。
+
 Rule 設定值持久化在 Sheet「除濕機自動規則」分頁；in-memory 只放 runtime
 state machine（above_since / below_since / sensor_missing_ticks），重啟
 從零累積。每 5min 寫 phase / countdown 給 LINE bot 讀。
 """
 
+import re
 import threading
 import time
 from datetime import datetime
@@ -33,7 +45,8 @@ import gspread
 import dehumidifier_history
 import device_status
 import dehumidifier_driver
-from sheets import _get_spreadsheet
+from config import now_taipei
+from sheets import _get_spreadsheet, ensure_columns
 
 RULES_SHEET = "除濕機自動規則"
 HYSTERESIS_ABOVE = 2               # H_on  = threshold + 2
@@ -50,7 +63,15 @@ HEADERS = [
     "device_name", "auto_mode", "sensor_name", "duration_min",
     "threshold", "on_mode",
     "auto_phase", "countdown_min", "last_event", "last_event_at",
+    "threshold_source",
 ]
+
+# 目標濕度來源：空值/其他 = 固定（用 threshold 欄）；"自訂" = 讀感應器的分時曲線。
+THRESHOLD_SOURCE_CUSTOM = "自訂"
+# 感應器分時曲線欄位（在「智能居家」分頁該感應器那列），格式 "7=55, 23=60"。
+HUMIDITY_SCHEDULE_COLUMN = "濕度控制規則"
+# 目標濕度合法區間（與 handle_set_dehumidifier_auto 的驗證一致）。
+THRESHOLD_MIN, THRESHOLD_MAX = 30, 80
 
 # auto_phase 值：
 #   disabled              — auto_mode=OFF
@@ -67,7 +88,10 @@ _cached_ws = None
 
 
 def _new_runtime():
-    return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0, "expected": None}
+    return {"above_since": None, "below_since": None, "sensor_missing_ticks": 0, "expected": None,
+            # 上個 tick 實際採用的目標濕度。自訂曲線跨段時用它偵測「門檻變了」，
+            # 以便重置累積計時 + 把新目標推到機器。None = 還沒跑過任何 tick。
+            "applied_threshold": None}
 
 
 def _ensure_sheet():
@@ -77,6 +101,8 @@ def _ensure_sheet():
     ss = _get_spreadsheet()
     try:
         ws = ss.worksheet(RULES_SHEET)
+        # 舊表補上後加的欄位（如 threshold_source），避免 _write_sheet 的定位寫歪。
+        ensure_columns(ws, HEADERS)
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=RULES_SHEET, rows=20, cols=len(HEADERS))
         ws.append_row(HEADERS, value_input_option="USER_ENTERED")
@@ -87,6 +113,67 @@ def _ensure_sheet():
 
 def _bool(v):
     return str(v).strip().upper() in ("TRUE", "1", "YES")
+
+
+# ── 分時目標濕度曲線（純函式，好單元測試） ──────────────
+
+def parse_humidity_schedule(text):
+    """解析感應器的「濕度控制規則」欄：`7=55, 23=60` → [(7,55),(23,60)]（依小時排序）。
+
+    回 (segments, error)：成功 error 為空字串；失敗回 (None, 原因)。
+    刻意嚴格——這格是人手改的自由文字，寧可整條退回固定門檻並報錯，也不要猜出
+    一條似是而非的曲線（錯誤的濕度目標會安靜地跑好幾週沒人發現）。
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None, "未設定"
+    segments, seen = [], set()
+    for part in re.split(r"[,，]", raw):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d{1,2})\s*=\s*(\d{1,3})", part)
+        if not m:
+            return None, f"片段格式錯誤「{part}」（應為「小時=濕度」，例如 7=55）"
+        hour, value = int(m.group(1)), int(m.group(2))
+        if not 0 <= hour <= 23:
+            return None, f"小時超出範圍：{hour}（需 0~23）"
+        if not THRESHOLD_MIN <= value <= THRESHOLD_MAX:
+            return None, f"濕度超出範圍：{value}（需 {THRESHOLD_MIN}~{THRESHOLD_MAX}）"
+        if hour in seen:
+            return None, f"小時重複：{hour}"
+        seen.add(hour)
+        segments.append((hour, value))
+    if not segments:
+        return None, "未設定"
+    segments.sort()
+    return segments, ""
+
+
+def threshold_at_hour(segments, hour):
+    """取 hour 當下生效的目標濕度。循環語意：落在第一段之前 → 用最後一段
+    （跨午夜延伸），所以曲線不必重複寫午夜那個值。"""
+    chosen = segments[-1][1]
+    for h, value in segments:
+        if h > hour:
+            break
+        chosen = value
+    return chosen
+
+
+def _effective_threshold(rule, curves, hour):
+    """算這條規則此刻該用的目標濕度，回 (threshold, warning)。
+
+    warning 非空＝自訂曲線不可用、已退回固定值，呼叫端負責 log 出來讓使用者看得見。
+    """
+    fixed = rule.get("threshold", 50)
+    if str(rule.get("threshold_source", "")).strip() != THRESHOLD_SOURCE_CUSTOM:
+        return fixed, ""
+    sensor_name = rule.get("sensor_name", "")
+    segments, error = curves.get(sensor_name, (None, f"找不到感應器「{sensor_name}」那列"))
+    if not segments:
+        return fixed, f"自訂濕度曲線無效（{error}），暫用固定 {fixed}%"
+    return threshold_at_hour(segments, hour), ""
 
 
 # ── Public API ──────────────────────────────────────────
@@ -110,6 +197,7 @@ def load_rules():
                     ),
                     "threshold": int(r.get("threshold") or 50),
                     "on_mode": r.get("on_mode", "目標濕度"),
+                    "threshold_source": str(r.get("threshold_source", "") or "").strip(),
                 }
                 _state.setdefault(name, _new_runtime())
         print(f"[dehum-auto] loaded {len(_rules)} rules from Sheet")
@@ -125,12 +213,20 @@ def is_locked(device_name: str) -> bool:
 
 
 def _public_rule(rule: dict, runtime: dict) -> dict:
-    """Attach effective humidity thresholds for API clients."""
-    threshold = rule.get("threshold", 50)
+    """Attach effective humidity thresholds for API clients.
+
+    自訂曲線下 threshold 欄只是 fallback 值，實際生效的是上個 tick 算出來的
+    applied_threshold——遲滯上下限一律用「有效門檻」算，否則 UI 顯示的控制帶
+    會跟機器實際行為對不起來。
+    """
+    effective = runtime.get("applied_threshold")
+    if effective is None:
+        effective = rule.get("threshold", 50)
     return {
         **rule,
-        "humidity_on_threshold": threshold + HYSTERESIS_ABOVE,
-        "humidity_off_threshold": threshold - HYSTERESIS_BELOW,
+        "effective_threshold": effective,
+        "humidity_on_threshold": effective + HYSTERESIS_ABOVE,
+        "humidity_off_threshold": effective - HYSTERESIS_BELOW,
         "runtime": dict(runtime),
     }
 
@@ -146,7 +242,7 @@ def get_all_rules() -> dict:
 
 def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
              threshold=None, on_mode=None, sensor_humidity=None,
-             power_now=None, driver=None):
+             power_now=None, driver=None, threshold_source=None):
     """Dashboard 設定/更新規則。
 
     Toggle 從 OFF→ON 且 sensor_humidity + power_now + driver 都備齊時，
@@ -157,7 +253,16 @@ def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
     with _lock:
         existing = _rules.get(device_name, {})
         old_auto = existing.get("auto_mode", False)
+        # 明確指定了一個數字門檻＝使用者要的就是那個固定值 → 自動切回「固定」，
+        # 除非同一次呼叫也明確帶了 threshold_source（例如就是要選自訂）。
+        if threshold_source is not None:
+            source = str(threshold_source).strip()
+        elif threshold is not None:
+            source = ""
+        else:
+            source = existing.get("threshold_source", "")
         rule = {
+            "threshold_source": source,
             "auto_mode": auto_mode,
             "sensor_name": sensor_name if sensor_name is not None else existing.get("sensor_name", ""),
             "duration_min": duration_min if duration_min is not None else existing.get("duration_min", 30),
@@ -193,19 +298,35 @@ def evaluate_all(ctx, sensor_snapshot):
         return
 
     devices_by_name = {}
+    curves = {}   # sensor_name → (segments, error)：自訂目標濕度曲線
     for d in ctx.get("智能居家"):
+        name = d.get("名稱", "")
+        if not name:
+            continue
+        dtype = d.get("類型")
+        if dtype == "感應器":
+            # 感應器不套「狀態=啟用」過濾：曲線只是設定值，讀不到才該退回固定門檻，
+            # 不該因為感應器列被停用就靜靜換了目標濕度。
+            curves[name] = parse_humidity_schedule(d.get(HUMIDITY_SCHEDULE_COLUMN, ""))
+            continue
         if d.get("狀態") != "啟用":
             continue
-        name = d.get("名稱", "")
-        if d.get("類型") == "除濕機" and name:
+        if dtype == "除濕機":
             devices_by_name[name] = d
 
     now = time.time()
+    hour = now_taipei().hour
     for device_name, rule in active:
         d = devices_by_name.get(device_name)
         if not d:
             print(f"[dehum-auto] {device_name} 不在「智能居家」啟用列表，skip")
             continue
+        # 把「此刻有效的目標濕度」直接塞進 rule["threshold"]，下游（遲滯判斷、
+        # align_continuous、expected_on_state）全部沿用既有邏輯，不必個別改。
+        effective, warning = _effective_threshold(rule, curves, hour)
+        if warning:
+            print(f"[dehum-auto] {device_name} {warning}")
+        rule = {**rule, "threshold": effective}
         # per-device 例外隔離：單台殘留逃逸路徑（如 update_cell quota 例外）不影響
         # 其它台這個 tick 的評估與 countdown。
         try:
@@ -258,6 +379,32 @@ def _evaluate_one_device(device_name, rule, d, sensor_snapshot, now):
         print(f"[dehum-auto] {device_name} 偵測到手動變更：expected={expected} actual={actual}")
         _disable_due_to_manual(device_name, rule, now)
         return
+
+    # 有效門檻變了（自訂曲線跨過時段邊界）：
+    #   1. 重置累積計時——above_since/below_since 是對「舊門檻」累積的，沿用會讓
+    #      舊進度去觸發新門檻的判斷。
+    #   2. 機器開著就把新目標推下去，並同步更新 expected：LG driver 會把目標濕度
+    #      寫進機器且納入 expected 比對，不更新的話下個 tick 會被 state_diverged
+    #      誤判成「使用者手動介入」→ 直接解除自動模式。
+    with _lock:
+        applied = _state.setdefault(device_name, _new_runtime()).get("applied_threshold")
+    if applied is not None and applied != rule["threshold"]:
+        with _lock:
+            st = _state.setdefault(device_name, _new_runtime())
+            st["above_since"] = None
+            st["below_since"] = None
+        if power_now:
+            try:
+                driver.align_continuous(rule["threshold"])
+                with _lock:
+                    _state.setdefault(device_name, _new_runtime())["expected"] = (
+                        driver.expected_on_state(rule["threshold"])
+                    )
+            except Exception as e:
+                print(f"[dehum-auto] {device_name} 門檻切換 align error: {e}")
+        print(f"[dehum-auto] {device_name} 目標濕度 {applied}% → {rule['threshold']}%（重置累積計時）")
+    with _lock:
+        _state.setdefault(device_name, _new_runtime())["applied_threshold"] = rule["threshold"]
 
     sensor = sensor_snapshot.get(rule["sensor_name"], {})
     humidity = None
@@ -511,6 +658,7 @@ def _write_sheet(device_name, rule, phase, countdown_min,
             countdown_min if countdown_min is not None else "",
             event_str,
             event_at_str,
+            rule.get("threshold_source", ""),
         ]
 
         if target_row:

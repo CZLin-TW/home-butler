@@ -78,8 +78,10 @@ def _on_startup():
     # 防黴送風用的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
     # 一次性 ensure：缺就補在表尾，不動既有欄位；失敗不擋啟動（防黴會自動退化成不觸發）。
     try:
+        # 「濕度控制規則」在感應器那列，給除濕機自動模式的自訂分時目標濕度用
+        # （格式 7=55, 23=60；見 dehumidifier_auto 模組 docstring）。
         ensure_columns(get_sheet("智能居家"),
-                       ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘"])
+                       ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘", "濕度控制規則"])
     except Exception as e:
         print(f"[startup] ensure 防黴欄位 failed: {e}")
 

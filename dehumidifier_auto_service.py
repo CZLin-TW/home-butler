@@ -140,7 +140,8 @@ def _sensor_choice(sensor_row, sensor_snapshot):
 
 
 def set_auto_rule(ctx, device_name, auto_mode, sensor_name=None,
-                  duration_min=None, threshold=None, on_mode=None, snapshot=None):
+                  duration_min=None, threshold=None, on_mode=None, snapshot=None,
+                  threshold_source=None):
     """Set one dehumidifier auto rule and preserve Dashboard API behavior."""
     sensor_humidity = None
     power_now = None
@@ -178,6 +179,7 @@ def set_auto_rule(ctx, device_name, auto_mode, sensor_name=None,
         sensor_humidity=sensor_humidity,
         power_now=power_now,
         driver=driver,
+        threshold_source=threshold_source,
     )
     return {
         "rule": rule,
