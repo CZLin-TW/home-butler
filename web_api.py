@@ -350,8 +350,14 @@ class DehumAutoRuleRequest(BaseModel):
 
 @router.get("/dehumidifier/auto-rule")
 def api_get_dehum_auto_rules():
-    """回傳所有除濕機的自動規則 + runtime state（含 above_since 等）。"""
-    return dehumidifier_auto.get_all_rules()
+    """回傳所有除濕機的自動規則 + runtime state（含 above_since 等）。
+
+    帶 ctx 進去讓回應多附感應器的分時目標濕度曲線 + 解析錯誤，Dashboard 用來畫
+    24h 目標濕度圖；使用者手改 Sheet 後下次輪詢就看得到結果（含格式錯誤原因）。
+    """
+    ctx = RequestContext()
+    ctx.load()
+    return dehumidifier_auto.get_all_rules(ctx)
 
 
 @router.post("/dehumidifier/auto-rule")

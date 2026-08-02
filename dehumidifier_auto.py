@@ -231,13 +231,35 @@ def _public_rule(rule: dict, runtime: dict) -> dict:
     }
 
 
-def get_all_rules() -> dict:
-    """For API + LINE bot 讀。"""
+def get_all_rules(ctx=None) -> dict:
+    """For API + LINE bot 讀。
+
+    帶 ctx 時額外附上該規則所綁感應器的分時曲線（humidity_curve）與解析錯誤
+    （humidity_curve_error），讓 Dashboard 能畫 24h 目標濕度圖、並在格式打錯時
+    直接顯示原因。解析一律走後端這份唯一實作，前端不重算，避免兩邊規則漂移。
+    不帶 ctx 就維持純記憶體查詢（LINE bot / service 內部呼叫不必多讀 Sheet）。
+    """
+    curves = {}
+    if ctx is not None:
+        for d in ctx.get("智能居家"):
+            name = d.get("名稱", "")
+            if d.get("類型") == "感應器" and name:
+                curves[name] = parse_humidity_schedule(d.get(HUMIDITY_SCHEDULE_COLUMN, ""))
     with _lock:
-        return {
-            n: _public_rule(r, _state.get(n, _new_runtime()))
-            for n, r in _rules.items()
-        }
+        out = {}
+        for n, r in _rules.items():
+            public = _public_rule(r, _state.get(n, _new_runtime()))
+            if ctx is not None:
+                sensor_name = r.get("sensor_name", "")
+                segments, error = curves.get(
+                    sensor_name, (None, f"找不到感應器「{sensor_name}」那列")
+                )
+                public["humidity_curve"] = [
+                    {"hour": h, "threshold": v} for h, v in (segments or [])
+                ]
+                public["humidity_curve_error"] = "" if segments else error
+            out[n] = public
+        return out
 
 
 def set_rule(device_name, auto_mode, sensor_name=None, duration_min=None,
