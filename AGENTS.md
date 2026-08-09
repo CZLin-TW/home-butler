@@ -89,8 +89,10 @@ unavailable` / `429`（實際發生過：Dashboard 打 `/api/dehumidifier/auto-r
 2s 翻倍到 128s，一個 LINE webhook 可能被卡好幾分鐘。
 
 其他相關行為：
-- `RequestContext.load()` 的逐頁 fallback **刻意不再重試**（batch 已經重試過 3 次；
-  再對 6 個分頁各重試 3 次會讓單一請求卡 15s+ 超時）。但**六個分頁全讀不到時會拋錯**，
+- `RequestContext.load()` 的逐頁 fallback 用 `sheets.no_retry()`（thread-local context
+  manager）**明確關掉重試**——因為重試裝在 HTTP 層，不關的話這裡會被乘一輪
+  （3 + 6 分頁 × 2 個 GET × 3 次），單一請求卡到 30s+ 超時。batch 已經重試過 3 次了，
+  Google 真的掛掉時再試也是白試。但**六個分頁全讀不到時會拋錯**，
   不再靜靜回一堆空 list——那會讓 bot 回「沒有待辦事項」、Dashboard 顯示 0 台設備，
   比報錯更誤導人。
 - 撐過重試仍失敗 → `main.py` 的 `GSpreadException` handler 回 **503**（不是 500 +

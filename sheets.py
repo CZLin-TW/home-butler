@@ -85,6 +85,7 @@ from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 import json
 import random
+import threading as _threading
 import time
 import unicodedata
 import requests.exceptions as _req_exc
@@ -139,9 +140,31 @@ def is_transient_error(e):
     return _is_transient(e)
 
 
+_retry_off = _threading.local()
+
+
+class no_retry:
+    """暫時關掉「這條 thread」的重試。
+
+    給「已經重試過、不想再乘一輪」的路徑用（見 RequestContext.load 的逐頁 fallback）。
+    用 thread-local 而非全域旗標：polling thread、每個 heartbeat thread、FastAPI 的
+    threadpool worker 是並行的，全域旗標會誤關掉別條 thread 的重試。
+    """
+
+    def __enter__(self):
+        _retry_off.on = True
+        return self
+
+    def __exit__(self, *exc):
+        _retry_off.on = False
+        return False
+
+
 def _with_retry(op, what="sheets"):
     """跑 op()，遇到暫時性 Google 錯誤時短退避重試；非暫時性錯誤原樣拋出。"""
     global _spreadsheet
+    if getattr(_retry_off, "on", False):
+        return op()
     last = None
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
         try:
@@ -292,18 +315,19 @@ class RequestContext:
             ss = _get_spreadsheet()
             last_err = None
             ok = 0
-            for name in self.BATCH_SHEETS:
-                try:
-                    # 這條 fallback 刻意**不再重試**：batch 已經退避重試過 3 次了，
-                    # 若是 Google 端整段抖動，這裡再對 6 個分頁各重試 3 次只會讓一個
-                    # 請求卡到 15s+（LINE webhook 會超時）並加重 Google 的負擔。
-                    # 它要救的是「batch 端點特有的失敗」，一次打完見真章。
-                    self._records[name] = ss.worksheet(name).get_all_records()
-                    ok += 1
-                except Exception as e2:
-                    print(f"[FALLBACK READ ERROR] {name}: {e2}")
-                    self._records[name] = []
-                    last_err = e2
+            # 這條 fallback 明確關掉重試（no_retry）：batch 已經退避重試過 3 次了，
+            # 若是 Google 端整段抖動，這裡 6 個分頁 × 每頁 2 個 GET × 每個再重試 3 次
+            # 會讓單一請求卡到 30s+（LINE webhook / Render 都會超時）並加重 Google 負擔。
+            # 它要救的是「batch 端點特有的失敗」，一次打完見真章。
+            with no_retry():
+                for name in self.BATCH_SHEETS:
+                    try:
+                        self._records[name] = ss.worksheet(name).get_all_records()
+                        ok += 1
+                    except Exception as e2:
+                        print(f"[FALLBACK READ ERROR] {name}: {e2}")
+                        self._records[name] = []
+                        last_err = e2
             if ok == 0 and last_err is not None:
                 # 一個分頁都讀不到＝Sheets 整個不通（Google 掛掉/認證失效），不是
                 # 「資料剛好都空的」。這時**要大聲失敗**：靜靜回一堆空 list 會讓 bot
