@@ -66,6 +66,39 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 - 實際送風 5~10 分（收尾關 trigger=now+5 分，受 thread 5 分粒度影響）。
 - **已知限制**：實體遙控器/Hub 機身鈕直接關（沒經 home-butler）攔不到——接受，不補。
 
+# Google Sheets 暫時性錯誤（503/429）重試
+
+Sheets 是這個系統唯一的資料庫，而 Google 偶爾會回 `503 The service is currently
+unavailable` / `429`（實際發生過：Dashboard 打 `/api/dehumidifier/auto-rule`，503 從
+`open_by_key` 一路冒成 ASGI 500 traceback，看起來像「HomeButler 掛了」，其實 process
+好好的、Google 幾秒後就恢復）。`sheets.py` 因此裝了**有界短重試**（3 次，0.8s→1.6s
+＋jitter，最壞多花約 2.5s）。
+
+**裝的位置很反直覺**：重試包在 `gspread.http_client.HTTPClient.request` 上
+（`sheets.py:_install_gspread_get_retry`，import 時安裝、可重入）。這是 monkeypatch，
+但那是 gspread 全部 API 呼叫的唯一收斂點——包這裡等於 repo 裡 15+ 個模組、60+ 個
+`get_all_records()` / `row_values()` 呼叫點通通有重試，不必逐一改。
+
+**只重試 GET**。非 GET 原樣放行，因為 `append_row` / `add_worksheet` / `update_cell`
+**非冪等**：503 有可能是「其實寫進去了、只是回應掉了」，重試會生出重複待辦、重複排程
+指令。只有 `ensure_columns` / `update_row_fields` 的 `batch_update`（寫死絕對 range +
+絕對值、重寫同值無害）在 `sheets.py` 裡明確包了 `_with_retry`。動這塊前先確認你要包的
+呼叫是不是冪等。
+
+沒用 gspread 內建的 `BackOffHTTPClient`：它不分方法一律重試（append 會重複），退避
+2s 翻倍到 128s，一個 LINE webhook 可能被卡好幾分鐘。
+
+其他相關行為：
+- `RequestContext.load()` 的逐頁 fallback **刻意不再重試**（batch 已經重試過 3 次；
+  再對 6 個分頁各重試 3 次會讓單一請求卡 15s+ 超時）。但**六個分頁全讀不到時會拋錯**，
+  不再靜靜回一堆空 list——那會讓 bot 回「沒有待辦事項」、Dashboard 顯示 0 台設備，
+  比報錯更誤導人。
+- 撐過重試仍失敗 → `main.py` 的 `GSpreadException` handler 回 **503**（不是 500 +
+  traceback）；LINE 端回「資料庫暫時連不上」而不是籠統的「未知錯誤」。分類靠
+  `sheets.is_transient_error`。
+- log 關鍵字：`[SHEETS RETRY]`（吸收掉的抖動）、`[SHEETS ERROR]`（重試用盡）、
+  `[SHEETS UNAVAILABLE]`（回 503 給 client）。前者偶爾出現是正常的。
+
 # Git push 環境差異
 
 這個 repo 會被多種 harness 操作（本機 VS Code、claude.ai/code web UI 等）。

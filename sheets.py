@@ -80,12 +80,14 @@ TODO: 後續可升級成 TypedDict / dataclass 取得 IDE 自動完成 + 拼字�
 """
 
 import gspread
-from gspread.exceptions import WorksheetNotFound
+from gspread.exceptions import APIError, WorksheetNotFound
 from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 import json
+import random
 import time
 import unicodedata
+import requests.exceptions as _req_exc
 from config import SPREADSHEET_ID, GOOGLE_CREDENTIALS
 
 
@@ -95,6 +97,92 @@ def _norm(s):
 _sheets_cache_ttl = 60
 _spreadsheet = None
 _spreadsheet_time = 0
+
+
+# ── 暫時性錯誤自動重試 ──
+# Google Sheets 會偶發回 429 / 5xx（配額瞬時超限、Google 端短暫故障，例如
+# 「503 The service is currently unavailable」）。這類錯誤本質上是**下一秒就好**的
+# 抖動，但沒有重試的話會直接往上冒：Dashboard 收到 500 + 整頁 ASGI traceback、
+# LINE 回「發生未知錯誤」、polling tick 整輪跳過——使用者體感就是「HomeButler 掛了」，
+# 其實 process 好好的、Google 幾秒後就恢復。
+#
+# 重試裝在**兩層**：
+#  1. gspread HTTP client 的 GET（見 _install_gspread_get_retry）——一次覆蓋全 repo
+#     所有讀取（get_all_records / row_values / values_get / worksheet metadata…），
+#     散在 15+ 個模組的呼叫點都不用改。GET 天生冪等，重試零風險。
+#  2. 這個檔案裡少數**冪等寫入**（batch_update：寫死絕對 range + 絕對值）明確包
+#     _with_retry。
+# `append_row` / `add_worksheet` / update_cell 這類非冪等寫入**刻意不重試**——503 有
+# 可能是「其實寫進去了只是回應掉了」，重試會多一筆重複資料（重複待辦、重複排程指令），
+# 比一次失敗更難收拾。
+#
+# 為什麼不用 gspread 內建的 BackOffHTTPClient：它 (a) 不分方法一律重試（append 會重複）、
+# (b) 退避從 2s 翻倍到 128s，一個 LINE webhook 可能被卡好幾分鐘。我們要的是「短、有界、
+# 只吃抖動」。
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_RETRY_ATTEMPTS = 3          # 總嘗試次數（最多 sleep 2 次）
+_RETRY_BASE_SLEEP = 0.8      # 0.8s → 1.6s（＋jitter），最壞多花約 2.5s
+
+
+def _is_transient(e):
+    """這個例外值不值得重試？（Google 端抖動 / 連線層問題才算）"""
+    if isinstance(e, APIError):
+        code = getattr(e, "code", None)
+        if code is None:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+        return code in _RETRY_STATUSES
+    return isinstance(e, (_req_exc.ConnectionError, _req_exc.Timeout, _req_exc.ChunkedEncodingError))
+
+
+def is_transient_error(e):
+    """對外版：給上層（HTTP 例外處理、LINE 回覆文案）判斷「這是 Google 抖動，不是我們的 bug」。"""
+    return _is_transient(e)
+
+
+def _with_retry(op, what="sheets"):
+    """跑 op()，遇到暫時性 Google 錯誤時短退避重試；非暫時性錯誤原樣拋出。"""
+    global _spreadsheet
+    last = None
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            return op()
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            last = e
+            if attempt < _RETRY_ATTEMPTS:
+                delay = _RETRY_BASE_SLEEP * (2 ** (attempt - 1)) + random.uniform(0, 0.3)
+                print(f"[SHEETS RETRY] {what} 第 {attempt} 次失敗（{e}），{delay:.1f}s 後重試")
+                time.sleep(delay)
+    # 重試用盡：丟掉快取的 spreadsheet，下一次請求重新 authorize + open，
+    # 避免壞掉的 session／過期 token 被 60s 快取黏住。
+    _spreadsheet = None
+    print(f"[SHEETS ERROR] {what} 重試 {_RETRY_ATTEMPTS} 次仍失敗：{last}")
+    raise last
+
+
+def _install_gspread_get_retry():
+    """把重試裝進 gspread HTTPClient.request，只對 GET 生效。
+
+    gspread 所有 API 呼叫都收斂到這一個方法，所以在這裡包等於全 repo 的 Sheet 讀取
+    都有重試——不必去 15+ 個模組逐一改 get_all_records() 呼叫點。非 GET 原樣放行，
+    由呼叫端自己決定要不要重試（見上面「非冪等寫入不重試」）。
+    """
+    original = gspread.http_client.HTTPClient.request
+    if getattr(original, "_home_butler_retry", False):
+        return
+
+    def request_with_retry(self, method, endpoint, *args, **kwargs):
+        call = lambda: original(self, method, endpoint, *args, **kwargs)
+        if str(method).lower() != "get":
+            return call()
+        return _with_retry(call, f"GET {str(endpoint).rsplit('/', 1)[-1]}")
+
+    request_with_retry._home_butler_retry = True
+    gspread.http_client.HTTPClient.request = request_with_retry
+
+
+_install_gspread_get_retry()
 
 
 def _get_client():
@@ -109,6 +197,8 @@ def _get_spreadsheet():
     global _spreadsheet, _spreadsheet_time
     now = time.time()
     if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
+        # open_by_key 會實際打一次 metadata API（GET）——正是 Google 503 最常炸的
+        # 地方，重試由 _install_gspread_get_retry 那層吸收。
         _spreadsheet = _get_client()
         _spreadsheet_time = now
     return _spreadsheet
@@ -138,6 +228,7 @@ def get_or_create_sheet(name, headers, rows=100):
     try:
         sheet = ss.worksheet(name)
     except WorksheetNotFound:
+        # add_worksheet 刻意不重試（非冪等，重試可能建出重複分頁）。
         sheet = ss.add_worksheet(title=name, rows=rows, cols=max(len(headers), 1))
         end_cell = rowcol_to_a1(1, len(headers))
         sheet.batch_update([{
@@ -199,13 +290,25 @@ class RequestContext:
         except Exception as e:
             print(f"[BATCH READ ERROR] {e}，改用逐一讀取")
             ss = _get_spreadsheet()
+            last_err = None
+            ok = 0
             for name in self.BATCH_SHEETS:
                 try:
-                    ws = ss.worksheet(name)
-                    self._records[name] = ws.get_all_records()
+                    # 這條 fallback 刻意**不再重試**：batch 已經退避重試過 3 次了，
+                    # 若是 Google 端整段抖動，這裡再對 6 個分頁各重試 3 次只會讓一個
+                    # 請求卡到 15s+（LINE webhook 會超時）並加重 Google 的負擔。
+                    # 它要救的是「batch 端點特有的失敗」，一次打完見真章。
+                    self._records[name] = ss.worksheet(name).get_all_records()
+                    ok += 1
                 except Exception as e2:
                     print(f"[FALLBACK READ ERROR] {name}: {e2}")
                     self._records[name] = []
+                    last_err = e2
+            if ok == 0 and last_err is not None:
+                # 一個分頁都讀不到＝Sheets 整個不通（Google 掛掉/認證失效），不是
+                # 「資料剛好都空的」。這時**要大聲失敗**：靜靜回一堆空 list 會讓 bot
+                # 回「沒有待辦事項」、Dashboard 顯示 0 台設備——比一次錯誤更誤導人。
+                raise last_err
         self._loaded = True
 
     def get(self, sheet_name):
@@ -256,6 +359,8 @@ def build_row(headers, data):
 def append_record(sheet, data):
     """Append a dict as one row using the sheet header order."""
     headers = sheet.row_values(1)
+    # append_row 刻意不重試：非冪等，Google 503 可能是「寫進去了但回應掉了」，
+    # 重試會多出一筆重複資料（例如同一則待辦、同一筆排程指令）。
     sheet.append_row(build_row(headers, data), value_input_option="USER_ENTERED")
 
 
@@ -279,7 +384,8 @@ def ensure_columns(sheet, columns):
             "range": rowcol_to_a1(1, start_col + offset),
             "values": [[column]],
         })
-    sheet.batch_update(requests, raw=False)
+    # batch_update 是冪等的（絕對 range + 絕對值），重試最多重寫同樣的值，安全。
+    _with_retry(lambda: sheet.batch_update(requests, raw=False), "batch_update(headers)")
     return headers + missing
 
 
@@ -304,7 +410,8 @@ def update_row_fields(sheet, row_number, updates):
         })
 
     if requests:
-        sheet.batch_update(requests, raw=False)
+        # 同 ensure_columns：寫死 range + 寫死值，重試安全。
+        _with_retry(lambda: sheet.batch_update(requests, raw=False), "batch_update(fields)")
     return len(requests)
 
 

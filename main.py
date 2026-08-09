@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import JSONResponse
+from gspread.exceptions import GSpreadException
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import asyncio
 import httpx
@@ -8,7 +10,7 @@ import traceback
 import threading
 
 from config import line_bot_api, webhook_handler, LINE_CHANNEL_ACCESS_TOKEN
-from sheets import RequestContext, get_sheet, ensure_columns
+from sheets import RequestContext, get_sheet, ensure_columns, is_transient_error
 import device_auth
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
@@ -38,6 +40,23 @@ app.include_router(lighting_api_router)
 # Theater control via local PC agent (relay to theater-agent on the same PC)
 from theater_api import router as theater_api_router
 app.include_router(theater_api_router)
+
+
+# Google Sheets 撐過重試仍失敗時（Google 端整段掛掉／配額燒完），回 503 而不是讓
+# 例外冒成 500 + 一整頁 ASGI traceback。語意也比較準：資料源暫時不可用、等會兒再來，
+# Dashboard 可以據此顯示「暫時讀不到」並沿用上一份快取，而不是當成程式壞掉。
+@app.exception_handler(GSpreadException)
+async def _sheets_unavailable_handler(request: Request, exc: GSpreadException):
+    transient = is_transient_error(exc)
+    print(f"[SHEETS UNAVAILABLE] {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=503 if transient else 500,
+        content={
+            "error": "sheets_unavailable" if transient else "sheets_error",
+            "detail": ("Google 試算表暫時無法存取（Google 端服務異常），請稍後再試"
+                       if transient else f"Google 試算表存取失敗：{exc}"),
+        },
+    )
 
 
 # 照明自動化的 Hue 指令從 sync thread（polling / webhook 衍生 thread）發出，
@@ -477,7 +496,11 @@ def handle_message(event):
 
     except Exception as e:
         print(f"[ERROR] {traceback.format_exc()}")
-        reply = "抱歉，系統暫時出了點問題，請稍後再試。"
+        # 分清楚「Google 試算表抖了」跟「我們自己壞了」——前者使用者等一下重試就好，
+        # 不必以為 bot 掛了（重試都吃完還失敗才會走到這）。
+        reply = ("⚠️ 資料庫（Google 試算表）暫時連不上，這是 Google 端的短暫異常，"
+                 "請過一兩分鐘再說一次。"
+                 if is_transient_error(e) else "抱歉，系統暫時出了點問題，請稍後再試。")
 
     line_bot_api.reply_message(
         event.reply_token,
