@@ -10,16 +10,28 @@
   （關燈一次）、以及 webhook 漏接的兜底。
 
 時段內邏輯：
-  lightLevel <= threshold 且燈是關的 → recall 場景 + 設定開燈亮度（記 auto_on=True）
-  lightLevel >  threshold 且「auto 自己開的」燈 → 關燈
-    ↑ 只關 auto 開的：使用者手動開的燈（auto_on=False）跳過不關。避免感應器讀值過時
-      （Hub 2 小幅變化不重測、changeReport 夾帶的是上次測到的舊值）時，把使用者剛手動
-      開的燈誤關、接著又跳夜燈。觀察到燈是關的就放掉 ownership（auto_on=False）。
-時段結束：只關 auto 自己開的燈一次，之後不再理會（window_active in-memory 旗標）。
+  lightLevel <= threshold 且燈是關的 → recall 場景 + 設定開燈亮度
+  lightLevel >  threshold 且「現在亮著的是夜燈場景」 → 關燈
+時段結束：同樣只關「現在亮著的是夜燈場景」的燈，一次，之後不再理會
+（window_active in-memory 旗標）。
+
+**「是不是夜燈」用 Hue 場景指紋判斷，不是記「誰開的」**（`_is_night_light`）。
+理由：使用者多半用 Hue 遙控器 / Hue App 開燈，那些操作**完全不會經過 home-butler**，
+所以「記住是不是 auto 自己開的」這條路先天記不全——使用者手動點開的夜燈永遠會被當成
+別人的燈，於是天亮了也沒人關（實際遇到的困擾）。改成問 bridge「這個房間最後被叫起來
+的場景是不是夜燈」，agent recall、遙控器、App 更新的都是同一份 `scene.status`，天生
+一視同仁，而且重啟後照樣讀得到（不像 in-memory ownership 會歸零）。
+
+  取捨：判斷的是「長相」不是「意圖」。你把燈調成夜燈的樣子想讓它整天亮著，它還是會被
+  關；反之你 recall 別的場景，auto 就完全不碰。
+
+`auto_on` ownership **留著當 fallback**：agent 還沒更新到會回傳 scene status 的版本、
+或 bridge 韌體太舊沒有 `status` 區塊時，`_is_night_light` 回 None，行為退回改動前的樣子
+（只關 auto 自己開的），不會因為拿不到新資料就亂關燈。
 
 已知且刻意不處理：開燈後環境變亮可能跨過門檻造成開關循環（閃爍），由使用者調整門檻/亮度
-迴避。另外「拿過時亮值誤動作」目前只擋了關燈方向（靠 auto_on）；完整解需判斷讀值新鮮度
-（只有『值變了』才是新鮮測量），後續視情況再加。
+迴避。另外「拿過時亮值誤動作」場景指紋救不到——過時的『已經變亮』讀值仍可能把還在暗處的
+夜燈關掉、下一輪又開；完整解需判斷讀值新鮮度（只有『值變了』才是新鮮測量），後續視情況再加。
 
 Rule 設定持久化在 Sheet「照明自動規則」分頁；runtime state（window_active /
 last_light_level）只放 in-memory，重啟歸零，由下個 tick 重建。
@@ -33,6 +45,7 @@ import asyncio
 import re
 import threading
 import time
+from datetime import datetime
 from threading import Lock
 
 import switchbot_api
@@ -139,13 +152,94 @@ def _agent_command(command_type, payload) -> dict:
     return result if isinstance(result, dict) else {}
 
 
-def _area_is_on(area_id) -> bool:
+def _fetch_area(area_id) -> dict:
+    """拉這個區域當下的狀態（on/brightness + 該房間所有場景的 status）。"""
     result = _agent_command("hue.list_areas", {})
     areas = result.get("areas") if isinstance(result.get("areas"), list) else []
     for area in areas:
         if str(area.get("id") or "") == area_id:
-            return bool(area.get("on"))
+            return area
     raise RuntimeError(f"hue.list_areas 找不到區域 {area_id}")
+
+
+def _parse_recall(value):
+    """Hue 的 last_recall（UTC ISO8601，如 2026-08-09T16:41:31.799Z）→ epoch 秒。
+    解析不了回 None。只拿來互相比大小，不顯示給人看，所以不轉時區。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def _is_night_light(area, rule):
+    """區域現在亮著的燈，是不是規則設定的那個夜燈場景？
+
+    回 True / False；**資料不足以判斷時回 None**（agent 還沒更新、bridge 韌體沒有
+    status、或規則的場景不屬於這個區域）——呼叫端看到 None 會退回舊的 auto_on ownership，
+    行為跟改動前一致，不會因為 agent 沒跟上就亂關燈。
+
+    兩段判斷：
+      1. 場景 active 非 inactive → 燈此刻就是這個場景，直接算數（最強訊號）。
+      2. 否則比 last_recall：這個房間裡最後一個被叫起來的場景就是夜燈 → 算數。
+         之所以需要第二段：我們自己開燈時會在 recall 後蓋上規則亮度（_fire_scene_on），
+         bridge 判定已偏離場景 → active 掉回 inactive。使用者事後用遙控器微調亮度也一樣。
+         last_recall 不受影響，仍記著「最近一次是誰把燈設成現在這樣」。
+    刻意不要求 last_recall 夠新：使用者用遙控器電源鍵直接開（不 recall 任何場景）時，
+    燈會回到上次的夜燈狀態、而夜燈仍是最後被 recall 的場景——那確實該算夜燈。
+    """
+    scene_id = str(rule.get("scene_id") or "")
+    scenes = area.get("scenes") if isinstance(area.get("scenes"), list) else []
+    if not scene_id or not scenes:
+        return None
+
+    target_found = False
+    target_status: dict = {}
+    have_status = False
+    newest_id, newest_at = "", None
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        sid = str(scene.get("id") or "")
+        status = scene.get("status") if isinstance(scene.get("status"), dict) else {}
+        if status:
+            have_status = True
+        if sid == scene_id:
+            target_found = True
+            target_status = status
+        at = _parse_recall(status.get("last_recall"))
+        if at is not None and (newest_at is None or at > newest_at):
+            newest_id, newest_at = sid, at
+
+    if not target_found or not have_status:
+        return None
+
+    active = str(target_status.get("active") or "").strip().lower()
+    if active and active != "inactive":
+        return True
+    if newest_at is None:
+        return None
+    return newest_id == scene_id
+
+
+def _may_auto_off(area_id, area, rule, label, source) -> bool:
+    """auto 可不可以關這盞燈？場景指紋優先，判斷不出來才退回 auto_on ownership。"""
+    verdict = _is_night_light(area, rule)
+    if verdict is True:
+        return True
+    if verdict is False:
+        print(f"[light-auto] SKIP off {label}: 目前亮著的不是夜燈場景（{source}）")
+        return False
+    with _lock:
+        owned = _runtime.setdefault(area_id, _new_runtime()).get("auto_on", False)
+    if not owned:
+        print(f"[light-auto] SKIP off {label}: 場景狀態不可用，退回 ownership 判斷"
+              f"——非 auto 開啟的燈，不自動關（{source}）")
+    return owned
 
 
 def _fire_scene_on(area_id, rule):
@@ -186,10 +280,11 @@ def _evaluate_rule(area_id, rule, light_level, source):
         rt["last_eval_level"] = light_level
 
     try:
-        is_on = _area_is_on(area_id)
+        area = _fetch_area(area_id)
     except Exception as e:
         print(f"[light-auto] {rule.get('area_name') or area_id} 讀取區域狀態失敗（{source}）: {e}")
         return
+    is_on = bool(area.get("on"))
 
     threshold = rule.get("threshold", 5)
     label = rule.get("area_name") or area_id
@@ -211,13 +306,9 @@ def _evaluate_rule(area_id, rule, light_level, source):
         except Exception as e:
             print(f"[light-auto] {label} 開燈失敗: {e}")
     elif light_level > threshold and is_on:
-        with _lock:
-            owned = _runtime.setdefault(area_id, _new_runtime()).get("auto_on", False)
-        if not owned:
-            # 使用者手動開的燈：不關。（感應器讀值可能是過時的舊亮值，誤關會把使用者
-            # 剛選的情境蓋掉、接著又跳夜燈——正是要避免的情境。）
-            print(f"[light-auto] SKIP off {label}: 非 auto 開啟的燈，不自動關 "
-                  f"(lightLevel={light_level} > {threshold}, {source})")
+        # 只關「長得像夜燈場景」的燈。使用者自己選的其他情境不碰——感應器讀值可能是
+        # 過時的舊亮值，誤關會把使用者剛選的情境蓋掉、接著又跳夜燈，正是要避免的情境。
+        if not _may_auto_off(area_id, area, rule, label, source):
             return
         try:
             _fire_off(area_id)
@@ -275,18 +366,19 @@ def tick():
 
             if not in_win:
                 if was_active:
-                    # 時段結束：只關「auto 自己開的」燈（同 _evaluate_rule 的 ownership
-                    # 規則，別把使用者手動開的燈關掉）。失敗不清 window_active，下個 tick 重試。
-                    with _lock:
-                        owned = _runtime.setdefault(area_id, _new_runtime()).get("auto_on", False)
-                    if owned:
+                    # 時段結束：只關「長得像夜燈場景」的燈（同 _evaluate_rule 的判斷，
+                    # 別把使用者自己選的情境關掉）。這裡要多拉一次區域狀態——一個時段
+                    # 只會走到一次（下面清掉 window_active），不是每 tick 都打。
+                    # 拉不到 / 關燈失敗都不清 window_active，下個 tick 重試。
+                    area = _fetch_area(area_id)
+                    if not bool(area.get("on")):
+                        print(f"[light-auto] WINDOW END skip {label}: 燈本來就是關的")
+                    elif _may_auto_off(area_id, area, rule, label, "window-end"):
                         _fire_off(area_id)
                         print(f"[light-auto] WINDOW END off {label}")
                         _write_event(area_id, "window_end_off")
                         with _lock:
                             _runtime[area_id]["auto_on"] = False
-                    else:
-                        print(f"[light-auto] WINDOW END skip {label}: 非 auto 開啟的燈，不自動關")
                     with _lock:
                         _runtime[area_id]["window_active"] = False
                 continue

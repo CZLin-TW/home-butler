@@ -66,6 +66,43 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 - 實際送風 5~10 分（收尾關 trigger=now+5 分，受 thread 5 分粒度影響）。
 - **已知限制**：實體遙控器/Hub 機身鈕直接關（沒經 home-butler）攔不到——接受，不補。
 
+# 自動夜燈：「這是不是夜燈」用場景指紋，不是記誰開的
+
+`lighting_auto` 判斷可不可以自動關燈時，問的是**「這個房間現在亮著的是不是那個夜燈場景」**
+（`_is_night_light`），不是「這盞燈是不是 auto 開的」。
+
+**為什麼不能用 ownership**：使用者多半用 **Hue 遙控器 / Hue App** 開燈，那些操作
+**完全不經過 home-butler**——我們連知道都不知道。所以「記住是不是自己開的」先天記不全：
+手動點開的夜燈永遠被當成別人的燈，天亮了、時段結束了都沒人關（實際遇到的困擾）。
+in-memory ownership 還會在 Render 重啟後歸零，同樣的洞再開一次。
+
+**指紋來源是 bridge 自己記的 `scene.status`**（Hue API v2，實機確認有；agent 端由
+`_hue_scene_status` 帶出來，掛在 `hue.list_areas` 每個 area 的 `scenes[]` 裡，
+不需要額外 API 呼叫）。agent recall、遙控器、App 更新的是同一份欄位，天生一視同仁。
+
+判斷分兩段，**第二段才是主力**：
+1. `status.active` 非 `inactive` → 燈此刻就是這個場景。
+2. 否則比 `status.last_recall`：這個房間裡最後被叫起來的場景就是夜燈 → 算數。
+
+**為什麼需要第二段**（非顯而易見）：`_fire_scene_on` 會在 recall 之後蓋上規則的
+`brightness`，bridge 判定「已偏離場景」→ `active` 立刻掉回 `inactive`。也就是說
+**auto 自己開的夜燈，`active` 多半是 inactive**，只靠第一段會連自己開的燈都認不出來。
+使用者事後用遙控器微調亮度也一樣。`last_recall` 不受這些影響。
+（想只靠 `active` 的話，得把亮度直接編進場景、拿掉那步覆寫——但那會改變實際亮度，
+沒做。）
+
+刻意不要求 `last_recall` 夠新：使用者按遙控器電源鍵直接開（不 recall 任何場景）時燈會
+回到上次的夜燈狀態，而夜燈仍是最後被 recall 的場景——那確實該算夜燈。
+
+**`auto_on` ownership 留著當 fallback**，沒有刪：agent 還沒更新到會回傳 status 的版本、
+或規則的 `scene_id` 不屬於該區域時，`_is_night_light` 回 `None`，行為退回改動前
+（只關 auto 自己開的）。所以部署後在 agent 自動更新完成前不會有行為變化，也不會因為
+拿不到新資料就亂關燈。
+
+**取捨**：判斷的是「長相」不是「意圖」。把燈調成夜燈的樣子想讓它整天亮著 → 還是會被關；
+recall 別的場景 → auto 完全不碰。另外這個機制**救不到**「拿過時亮值誤動作」——過時的
+『已經變亮』讀值仍可能把還在暗處的夜燈關掉、下一輪又開，那是感應器讀值新鮮度的問題。
+
 # Google Sheets 暫時性錯誤（503/429）重試
 
 Sheets 是這個系統唯一的資料庫，而 Google 偶爾會回 `503 The service is currently

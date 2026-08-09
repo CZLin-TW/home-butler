@@ -662,6 +662,30 @@ def _hue_scene_recall_action(scene: dict) -> str:
     return "active"
 
 
+def _hue_scene_status(scene: dict) -> dict:
+    """場景的啟用狀態（Hue API v2 的 scene.status）。
+
+    home-butler 的自動夜燈用這個判斷「現在亮著的是不是那個夜燈場景」，因此不必去記
+    「是誰開的燈」——bridge 自己會記，而且 agent recall、Hue 遙控器、Hue App 更新的
+    是同一份欄位，天生一視同仁。
+
+    - active: "static" / "dynamic_palette" / "inactive"。非 inactive = 燈目前就是這個場景。
+    - last_recall: 這個場景最後一次被叫起來的時間（UTC ISO8601）。即使事後有人調亮度
+      讓 active 掉回 inactive，這個時間戳仍在，可以比出「最近一次是誰把燈設成現在這樣」。
+
+    舊韌體沒有 status 區塊時回空 dict；home-butler 端看到空的會退回舊的判斷方式。
+    """
+    status = scene.get("status") if isinstance(scene.get("status"), dict) else {}
+    out: dict = {}
+    active = status.get("active")
+    if isinstance(active, str) and active:
+        out["active"] = active
+    last_recall = status.get("last_recall")
+    if isinstance(last_recall, str) and last_recall:
+        out["last_recall"] = last_recall
+    return out
+
+
 def _hue_scene_summary(scene: dict) -> dict:
     group = scene.get("group") if isinstance(scene.get("group"), dict) else {}
     return {
@@ -672,6 +696,7 @@ def _hue_scene_summary(scene: dict) -> dict:
         "dynamic_available": _hue_scene_has_palette(scene),
         "group_id": str(group.get("rid") or ""),
         "group_type": str(group.get("rtype") or ""),
+        "status": _hue_scene_status(scene),
     }
 
 
@@ -685,6 +710,7 @@ def _hue_smart_scene_summary(scene: dict) -> dict:
         "dynamic_available": True,
         "group_id": str(group.get("rid") or ""),
         "group_type": str(group.get("rtype") or ""),
+        "status": _hue_scene_status(scene),
     }
 
 
