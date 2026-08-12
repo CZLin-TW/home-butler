@@ -37,7 +37,7 @@ ACTION_HANDLERS = {
     "query_food":           lambda d, u, c: handle_query(c),
     "add_todo":             lambda d, u, c: handle_add_todo(d, u, c),
     "modify_todo":          lambda d, u, c: handle_modify_todo(d, u, c),
-    "delete_todo":          lambda d, u, c: handle_delete_todo(d, c),
+    "delete_todo":          lambda d, u, c: handle_delete_todo(d, c, u),
     "query_todo":           lambda d, u, c: handle_query_todo(u, c),
     "add_recurring_todo":   lambda d, u, c: handle_add_recurring_todo(d, u, c),
     "modify_recurring_todo": lambda d, u, c: handle_modify_recurring_todo(d, u, c),

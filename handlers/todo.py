@@ -172,7 +172,80 @@ def _locate_todo_row(values, item_name, date_orig, time_orig):
     return None, None
 
 
-def handle_delete_todo(data, ctx):
+# 提醒文字的開頭（notify._process_todo_reminders 產生）。用來在待辦列已經消失時，
+# 從對話記錄回推「這筆確實存在過、只是已經結案了」。
+_REMINDER_PREFIXES = ("⏰ 提醒：", "⚠️ 未完成：", "⚠️ 已逾時約")
+
+
+def _find_completed_row(values, item_name):
+    """找同名但狀態＝已完成的列，回 (日期, 時間)；沒有回 None。
+
+    刻意不比對 date_orig/time_orig：這裡只是要判斷「是不是早就結案了」，
+    使用者口頭給的時間常常跟表上不完全一致，比寬一點才不會又誤報成找不到。
+    """
+    if not values or len(values) < 2:
+        return None
+    headers = values[0]
+    idx = {h: c for c, h in enumerate(headers)}
+    ci, cs, cd, ct = (idx.get("事項", -1), idx.get("狀態", -1),
+                      idx.get("日期", -1), idx.get("時間", -1))
+    if ci == -1 or cs == -1:
+        return None
+
+    def cell(row, c):
+        return row[c] if 0 <= c < len(row) else ""
+
+    for row in values[1:]:
+        if cell(row, ci) == item_name and cell(row, cs) == "已完成":
+            return str(cell(row, cd)), str(cell(row, ct))
+    return None
+
+
+def _reminded_recently(item_name, ctx, user_name=""):
+    """對話暫存裡有沒有這個任務的提醒（⏰/⚠️ 開頭）？
+
+    用來分辨兩件本來共用「❌ 找不到」的事：
+      - Notion 那邊狀態改掉 → sync 把列砍了不再寫回 → 列消失，但今天確實提醒過
+      - 使用者名字講錯 / 根本沒這筆 → 從來沒提醒過
+    知道 user_name 就只看那個成員自己的對話（避免比對到別人的私人待辦）。
+    """
+    user_ids = set()
+    if user_name:
+        for m in ctx.get("家庭成員"):
+            if m.get("名稱") == user_name and m.get("Line User ID"):
+                user_ids.add(str(m.get("Line User ID")))
+
+    for r in ctx.get("對話暫存"):
+        if r.get("角色") != "assistant":
+            continue
+        if user_ids and str(r.get("Line User ID", "")) not in user_ids:
+            continue
+        content = str(r.get("內容", "") or "")
+        if item_name and item_name in content and content.startswith(_REMINDER_PREFIXES):
+            return True
+    return False
+
+
+def _explain_missing_todo(values, item_name, ctx, user_name=""):
+    """定位不到「待辦」列時，講清楚是哪一種情況。
+
+    `_locate_todo_row` 只認狀態＝待辦的列，所以「早就完成了」跟「根本沒這筆」以前都會
+    落到同一句 ❌ 找不到——使用者看到 ❌ 會以為指令沒生效，其實事情早就結案了
+    （實際遇過：Notion 任務逾時提醒了一整個上午，中途 Notion 狀態改掉、列被 sync 移除，
+    使用者回「結束了」卻收到 ❌）。前兩種都回 ✅，因為使用者想要的狀態已經達成。
+    """
+    done = _find_completed_row(values, item_name)
+    if done:
+        when = " ".join(x for x in done if x)
+        suffix = f"（{when}）" if when else ""
+        return f"✅ 「{item_name}」已經是完成狀態了{suffix}，不用再標記一次"
+    if _reminded_recently(item_name, ctx, user_name):
+        return (f"✅ 「{item_name}」已經不在待辦清單上了，不用再標記"
+                f"（外部行事曆項目在 Notion 那邊狀態改變後就會自動移除）")
+    return f"❌ 找不到「{item_name}」"
+
+
+def handle_delete_todo(data, ctx, user_name=""):
     sheet = ctx.get_worksheet("待辦事項")
     archive = ctx.get_worksheet("待辦封存")
     records = ctx.get("待辦事項")
@@ -184,9 +257,10 @@ def handle_delete_todo(data, ctx):
     # tick 的 sync_external_events 每次都把所有外部（Notion）列砍掉重建到表尾，若發生在
     # 解析→寫入的空窗，那筆待辦就換了列 → 用舊 index 會寫到別列（實測：唯讀任務標完成
     # 沒生效卻回報成功）。改成即時定位，順帶讓「真的找不到」正確回 ❌ 而非假成功。
-    row_number, prop = _locate_todo_row(sheet.get_all_values(), item_name, date_orig, time_orig)
+    values = sheet.get_all_values()
+    row_number, prop = _locate_todo_row(values, item_name, date_orig, time_orig)
     if row_number is None:
-        return f"❌ 找不到「{item_name}」"
+        return _explain_missing_todo(values, item_name, ctx, user_name)
 
     if prop == "唯讀":
         # 唯讀項目：只改狀態為已完成，不刪除不封存
