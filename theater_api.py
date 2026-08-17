@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 class TheaterFlagsRequest(BaseModel):
     kef_link: Optional[bool] = None
     tv_screen_auto: Optional[bool] = None
+    tv_avr_sync: Optional[bool] = None
 
 
 def _agent_error(status_code: int, e: Exception) -> HTTPException:
