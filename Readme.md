@@ -38,6 +38,7 @@
 | 自訂風格 | 每位成員可自訂管家回覆風格（語氣、角色扮演等），也可隨時恢復預設 |
 | 指派通知 | 指派待辦給其他家庭成員時，對方即時收到 LINE 通知 |
 | PC agent | 家中 PC 跑 agent push 指標（CPU/RAM/GPU/CPU 溫/GPU 溫 + F@H 狀態），Dashboard 顯示當下值 + 24h 折線圖；同一支 agent 也建立 WebSocket 即時通道，供 Hue 等區網設備控制使用。agent 內建 watchdog、auto-update 自動拉新版、自管 self-restart 不靠 Task Scheduler（詳見 `agent/README.md`） |
+| Agent 失聯告警 | PC agent 超過 15 分鐘沒回報 heartbeat、或劇院 agent 連續無回應時，主動推 LINE 通知（含最後回報時間與復原指令）；恢復時再推一則、附失聯時長。只在狀態翻轉時各推一次，不重複洗版。收件人由「家庭成員」分頁的 `系統告警` 欄決定，沒人勾就發給全部啟用成員 |
 | 劇院 agent 轉送 | 劇院 PC 的 agent 設了 `THEATER_AGENT_URL` 會宣告 theater capability，把 `theater.summary` / `theater.set_flags` 指令轉送到同機 [theater-agent](https://github.com/CZLin-TW/theater-agent)（純內網 :8080，Render 連不到，靠 WebSocket 中繼）。`theater_api.py` 對 Dashboard 提供 `/api/theater/summary`（功能開關 + 設備狀態 + log 尾端）與 `/api/theater/flags`（開關寫入） |
 | 自動夜燈 | 依 SwitchBot Hub 2 亮度（lightLevel 1~20）條件式控制 Hue 區域：啟用時段內亮度 ≤ 門檻且燈關著 → 套用指定場景＋亮度；亮度 > 門檻且燈是 auto 自己開的 → 關燈（使用者手動開的燈不碰）；時段結束關燈一次後不再理會。主路徑走 SwitchBot Webhook 推播（秒級），5 分鐘輪詢兜底時段邊界與漏接。每個 Hue 區域一條規則，Dashboard 照明卡片設定，持久化在 Sheet「照明自動規則」（詳見「自動夜燈機制」章節） |
 | Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
@@ -443,6 +444,7 @@ Notion 整合會將事件同步到待辦事項 Sheet，並依權限設定標記�
 
 - **realtime tick**（`notify.run_realtime_tick`）：同步外部行事曆 + 週期待辦生成 + 待辦提醒 + 設備排程執行 + 封存。每 5 分一次（比舊版 GAS 的 15 分更即時）。
 - **每日綜合推播**（`notify.run_daily_push_if_due`）：每天過了 `DAILY_PUSH_HOUR`（環境變數，預設 `21` = 晚上 9 點）後的第一個 tick 觸發一次；用 Sheet「系統狀態」分頁的 `最後每日推播日期` marker 去重，跨 Render 重啟存活——不重發也不漏發。
+- **Agent 失聯告警**（`health_alert.run_checks`）：掛在 realtime tick 最後一步，純觀察不控制設備。詳見 `AGENTS.md` 的「Agent 失聯告警」。
 
 能這樣做的前提是 **UptimeRobot 每 5 分 ping 保持實例醒著**（見「十三、防冷啟動」）：polling thread 隨行程睡著就停，所以 UptimeRobot 是 load-bearing，**別當成可選監控隨手關掉**。
 
@@ -491,6 +493,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | NOTION_TOKEN | Notion Internal Integration Token | 選配 |
 | RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘維持一筆『下一次要做的』待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出待辦實例；上線或收手只需改這個變數，不必 revert code | 選配 |
 | DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
+| AGENT_OFFLINE_ALERT_SECONDS | PC agent 幾秒沒回報就推失聯告警，預設 `900`（15 分）。刻意比 Dashboard 畫灰點的 5 分鐘寬——agent self-restart／網路抖動／Render 重啟後 backfill 都會造成幾分鐘空窗，門檻太緊會誤報。下限鎖在 300 秒 | 選配 |
 
 ---
 
@@ -881,6 +884,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | conversation.py | 對話暫存管理、Claude API 呼叫、推播訊息生成 |
 | notify.py | 推播端點（/notify 晚間綜合推播、/notify_realtime 即時提醒與排程執行） |
 | calendar_sync.py | 外部行事曆同步（Notion → 待辦 Sheet） |
+| health_alert.py | Agent 失聯告警：PC agent heartbeat 斷線 / 劇院 agent 無回應時推 LINE，狀態翻轉才推、marker 存 Sheet 跨重啟去重。**只觀察不控制任何設備** |
 | handlers/food.py | 食品庫存 handler（新增、刪除、修改、查詢） |
 | handlers/todo.py | 待辦事項 handler（新增、刪除、修改、查詢） |
 | handlers/recurring_todo.py | 週期性待辦：模板/實例分離，每 5 分鐘確保每條啟用規則都掛著一筆「下一次」待辦（冪等依據＝活表有無該規則的待辦實例，完成/刪除才補下一筆）+ add/modify/stop/query 的 CRUD handler，受 RECURRING_TODO_ENABLED 控制生成 |

@@ -229,3 +229,15 @@ async def send_agent_command(
         ) from e
     finally:
         _pending_commands.pop(command_id, None)
+
+
+def snapshot_agents() -> list[dict[str, Any]]:
+    """給背景 thread（health_alert）用的同步快照。
+
+    刻意不取 `_lock`：那是 asyncio.Lock，只能在 event loop 裡 await，而呼叫端是
+    polling thread。`list(_agents.items())` 在 CPython 是原子的淺層讀取，最壞情況
+    是讀到某個 agent 正在重連的那一瞬間——健康檢查本身有十幾分鐘的容忍窗，讀到
+    一瞬間的舊值無害，不值得為它把整條檢查改成 async。
+    """
+    now = time.time()
+    return [_public_agent(agent_id, info, now) for agent_id, info in list(_agents.items())]

@@ -14,6 +14,7 @@ from handlers.device import (
 )
 from handlers.recurring_todo import materialize_recurring_todos
 from auth import verify_api_key
+import health_alert
 import weather_api
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -396,6 +397,7 @@ def run_realtime_tick(ctx, now=None):
     3. 推播即將到期/未完成的待辦提醒
     4. 執行到時間的設備排程
     5. 把收尾完的排程封存
+    6. PC / 劇院 agent 失聯告警（純觀察，見 health_alert）
 
     待辦提醒的時間窗與去重都收在 _process_todo_reminders 內（文字由程式規則產生 →
     精確比對去重），不再依賴整點判斷。
@@ -429,6 +431,13 @@ def run_realtime_tick(ctx, now=None):
         _archive_processed_schedules(processed_devices, ctx)
     except Exception as e:
         print(f"[realtime] 排程執行/封存失敗：{e}")
+
+    # 放在最後：這是唯一「只觀察、不動任何業務資料」的步驟，排在後面才不會因為它出錯
+    # 而延誤真正在幹活的那幾步（health_alert 內部也各自隔離，這裡是第二層保險）。
+    try:
+        health_alert.run_checks(ctx)
+    except Exception as e:
+        print(f"[realtime] agent 健康檢查失敗：{e}")
 
 
 @router.post("/notify_realtime")

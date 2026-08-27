@@ -51,6 +51,52 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 
 **切換注意**：部署後要去 Google Apps Script 把舊的兩條觸發（`/notify` 日計時器、`/notify_realtime` 15 分計時器）**刪除或停用**，否則跟 thread 雙跑。重疊期短且工作冪等，無害，但別長期掛著。
 
+# Agent 失聯告警（`health_alert.py`）
+
+`pc_state` 一直算得出每台 PC 的 `online`，但那個值**只餵給 Dashboard 畫灰點**——
+沒人盯著 Dashboard 的時候等於沒有監控。2026-07-19 兩台 agent 的 self-restart 孤兒
+hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit(0) 回 `Ready`
+不再觸發）。`health_alert` 把那條線接到 LINE，掛在 `notify.run_realtime_tick` 最後一步。
+
+**這個模組只觀察、不控制任何設備**，副作用只有 LINE 推播 + 「系統狀態」KV 的 marker。
+
+兩項檢查，各自 try/except 隔離：
+
+| 檢查 | 判定 | 門檻 |
+|---|---|---|
+| PC agent | `pc_state.snapshot()` 的 `last_heartbeat_at` 有多久沒動 | `AGENT_OFFLINE_ALERT_SECONDS`（env，預設 900 秒；下限鎖 300） |
+| 劇院 agent | 打 `theater.summary`（走 agent WS 中繼）連續失敗 | `THEATER_FAIL_STREAK = 3` 個 tick（約 15 分） |
+
+**最容易改壞的幾點**：
+
+- **只在狀態翻轉時推播**。LINE 免費方案每月 200 則推播額度，tick 是 5 分一次——拿掉
+  去重的話一台機器離線一天就燒掉 288 則，額度當天見底，**待辦提醒會跟著發不出去**。
+- **marker 存 Sheet（`系統狀態` KV），值是 `ok` / `bad:<第一次偵測到的 epoch>`**。存
+  Sheet 是為了跨 Render 重啟；存 epoch 是為了恢復時算得出「失聯多久」（7/19 那次的重點
+  正是「三天」這個數字）。in-memory 的 `_marker_cache` 只是讀取快取，讓穩定狀態下每個
+  tick 完全不打 Sheet。
+- **`_report` 的 `now` 必須跟呼叫端同一顆時鐘**。marker 存的是絕對時間，兩邊時鐘不一致
+  的話恢復訊息的時長會是錯的（開發時實際踩過：`_report` 內部自己讀 `time.time()`、
+  caller 用注入的 `now`，算出來永遠是 0 分鐘）。
+- **告警門檻刻意比 `pc_state.OFFLINE_THRESHOLD_S`（5 分）寬**。Dashboard 畫灰點寧可靈敏，
+  推播寧可遲鈍：agent 的 auto-update self-restart、網路抖動、Render 重啟後 backfill 還沒
+  跑完，都可能造成幾分鐘空窗，5 分鐘門檻會誤報。
+- **marker 寫在推播成功之後**。全數推播失敗時不寫，下個 tick 重試——標記成已通知卻其實
+  沒送出去，就是又製造一次靜默失效。
+- **劇院檢查有兩道前置**：`_loop` 沒就緒（startup 未完成）直接跳過、不算失敗；那台 PC 的
+  butler agent 不在線也跳過——整台失聯時 PC 那條已經報過了，再補一則「劇院沒回應」只是
+  噪音，而且把因果講反。
+- **收件人**：「家庭成員」分頁的 `系統告警` 欄勾 TRUE 的啟用成員（欄位由 `main.py` startup
+  `ensure_columns` 自動補）。**沒人勾就退回全部啟用成員**——這是刻意的 fail-loud，因為這個
+  功能存在的唯一理由就是「不要靜悄悄地沒人知道」，設定沒做就靜音等於把要修的洞原封不動
+  搬進新程式碼。
+- **推播不寫進「對話暫存」**（待辦提醒會寫，是因為它拿對話內容做去重）——維運告警灌進對話
+  會污染 Claude 的上下文。
+- **已知限制**：身分認 IP（與 `pc_state` 的 keying 一致）。DHCP 換 IP 會讓舊 IP 看起來永遠
+  離線、報一次假警。家裡兩台 IP 固定，接受。另外從沒 push 過 heartbeat 的機器不在
+  `pc_state` 裡，這裡也看不到——刻意不維護「應該有哪些機器」的清單，那會是第二處要同步的
+  設定，忘了更新一樣是靜默失效。
+
 # 冷氣防黴送風（關機前吹乾蒸發器）
 
 關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥ 門檻分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（送風分後），由 polling thread 的 realtime tick 來收、真正關掉。**門檻（預設 30）與送風時長（預設 5）可在「智能居家」分頁逐台覆寫**：欄位 `防黴運轉門檻分鐘`、`防黴送風分鐘`（空白用預設；門檻 0 = 每次關都送風）。模式 `ANTIMOLD_MODES={冷氣,除濕}` 仍寫死在 device.py 頂。
@@ -217,6 +263,8 @@ AUTO_UPDATE=False 可在 `agent_config.py` 關掉，push 壞 code 想暫停推�
 **單一實例鎖（防重複）**：agent 啟動會對 `C:\butler-agent\agent.lock` 取 OS 獨佔鎖，已有實例在跑就乾淨退出 → 每台只會有一隻；self-restart 時短暫重試讓後繼接手。修掉了「self-restart 孤兒＋手動 `schtasks /run` → 多隻同 hostname 連 `/api/agent/ws` 互踢 (close 1012) → Hue 指令時好時壞」這個雷。
 
 **已知殘留風險：孤兒 crash 沒人救（2026-07-19 兩台都中，躺 3 天）**。self-restart spawn 出的 detached orphan 若自己 hard-crash，watchdog 跟著死，但 Task Scheduler 早就看到原本的 task 乾淨 exit(0)、回到 `Ready`——**不會重新觸發，PC 開著也不會自己活過來**，直到手動介入或重開機。症狀是 log 停在一行正常的 `[push] ok` 之後完全沒再長、而 `State: Ready`（跟「task 根本沒啟動」那類 `Last Result: 3 / 9009` 完全不同，別搞混）。
+
+**「躺三天沒人知道」這半邊已經修掉了**：`health_alert.py` 會在 heartbeat 斷 15 分鐘後推 LINE 告警（見上方「Agent 失聯告警」）。但它只負責**通知**，agent 仍然不會自己活過來——收到告警還是要人去該台跑 `Start-ScheduledTask -TaskName ButlerAgent`。下面那條 repeating trigger 的修法因此仍然值得做。
 
 已做的緩解：`agent.py` 裝了 `sys.excepthook` / `threading.excepthook`，未捕捉例外會先寫 `[fatal] uncaught exception ...` + 完整 traceback 進 log file 才死（以前只進 stderr → log 無聲斷尾、死因查不到，正是 7/19 難查的原因）；主迴圈的 auto-update check 也包了 try/except（`[update] check failed` 後繼續跑）。**但這只讓下次可診斷，不解決「沒人重新觸發」本身**——硬殺（OOM／斷電／防毒結束 process）連 hook 都跑不到。
 

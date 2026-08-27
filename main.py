@@ -65,7 +65,11 @@ async def _sheets_unavailable_handler(request: Request, exc: GSpreadException):
 @app.on_event("startup")
 async def _capture_event_loop():
     import lighting_auto
-    lighting_auto.set_event_loop(asyncio.get_running_loop())
+    import health_alert
+    loop = asyncio.get_running_loop()
+    lighting_auto.set_event_loop(loop)
+    # health_alert 的劇院存活檢查同樣要從 polling thread 打 agent WS，共用同一顆 loop
+    health_alert.set_event_loop(loop)
 
 
 # 啟動時把 PC 監控歷史 + 感測器歷史 + 空調狀態歷史從 Sheet 撈回 in-memory ring
@@ -103,6 +107,13 @@ def _on_startup():
                        ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘", "濕度控制規則"])
     except Exception as e:
         print(f"[startup] ensure 防黴欄位 failed: {e}")
+
+    # 失聯告警的收件人開關欄（health_alert.ALERT_COLUMN）。沒人勾就發給全部啟用成員，
+    # 所以補不出來也不會讓告警靜音，只是無法縮小收件範圍。
+    try:
+        ensure_columns(get_sheet("家庭成員"), ["系統告警"])
+    except Exception as e:
+        print(f"[startup] ensure 系統告警欄位 failed: {e}")
 
     # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
     # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。
