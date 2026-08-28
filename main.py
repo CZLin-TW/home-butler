@@ -72,8 +72,10 @@ async def _capture_event_loop():
     health_alert.set_event_loop(loop)
 
 
-# 啟動時把 PC 監控歷史 + 感測器歷史 + 空調狀態歷史從 Sheet 撈回 in-memory ring
-# buffer（解 Render free instance 重啟資料遺失）+ spawn polling thread。
+# startup 只負責 spawn polling thread，**不做任何會打 Sheets 的事**——那些全在
+# polling thread 的 _warm_up()（含把歷史從 Sheet 撈回 ring buffer，解 Render free
+# instance 重啟資料遺失）。理由見 _warm_up 的 docstring：startup 沒返回前 uvicorn
+# 不服務任何請求，暖機擺這裡等於每次部署都製造一段全站 5xx 的空窗。
 @app.on_event("startup")
 def _on_startup():
     import threading
@@ -91,29 +93,50 @@ def _on_startup():
     import switchbot_api
     from handlers.device import apply_sensor_compensation
 
-    pc_state.backfill_from_sheet()
-    sensor_state.backfill_from_sheet()
-    ac_history.backfill_from_sheet()
-    dehumidifier_history.backfill_from_sheet()
-    dehumidifier_auto.load_rules()
-    lighting_auto.load_rules()
+    def _warm_up():
+        """所有會打 Google Sheets 的暖機工作，由 polling thread 起跑時在背景執行。
 
-    # 防黴送風用的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
-    # 一次性 ensure：缺就補在表尾，不動既有欄位；失敗不擋啟動（防黴會自動退化成不觸發）。
-    try:
-        # 「濕度控制規則」在感應器那列，給除濕機自動模式的自訂分時目標濕度用
-        # （格式 7=55, 23=60；見 dehumidifier_auto 模組 docstring）。
-        ensure_columns(get_sheet("智能居家"),
-                       ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘", "濕度控制規則"])
-    except Exception as e:
-        print(f"[startup] ensure 防黴欄位 failed: {e}")
+        **刻意不放在 startup handler 裡。** FastAPI 的 sync startup handler 是直接
+        `handler()` 呼叫（不丟 threadpool），而 uvicorn 在 ASGI lifespan startup 完成前
+        不會服務任何請求——四張歷史表整張 get_all_records() 在冷啟動的 free instance 上
+        要好幾秒到數十秒，那整段期間所有請求都回 5xx。
 
-    # 失聯告警的收件人開關欄（health_alert.ALERT_COLUMN）。沒人勾就發給全部啟用成員，
-    # 所以補不出來也不會讓告警靜音，只是無法縮小收件範圍。
-    try:
-        ensure_columns(get_sheet("家庭成員"), ["系統告警"])
-    except Exception as e:
-        print(f"[startup] ensure 系統告警欄位 failed: {e}")
+        實際咬過：一次部署重啟就讓 Dashboard 的裝置配對登入整段失敗——輪詢
+        /api/auth/device/status 拿到 5xx，前端只會空轉；空窗若撐過 CODE_TTL（5 分）
+        那組配對碼還會直接過期。
+
+        搬到這裡之後 startup 幾乎立刻返回、服務馬上可用，暖機在背景補。代價只有部署後
+        前幾秒 Dashboard 的歷史圖是空的——登入、LINE bot、設備控制都不碰這些 ring buffer。
+
+        每一步各自 try/except：暖機失敗不能讓 polling thread 起不來（**原本放在 startup
+        時任一個 backfill 拋例外會讓整個 app 起不來**）。backfill 本來每個 tick 就會重試，
+        load_rules 失敗則下一次 CRUD 會重讀。
+        """
+        steps = (
+            ("pc_state backfill", pc_state.backfill_from_sheet),
+            ("sensor_state backfill", sensor_state.backfill_from_sheet),
+            ("ac_history backfill", ac_history.backfill_from_sheet),
+            ("dehumidifier_history backfill", dehumidifier_history.backfill_from_sheet),
+            ("dehumidifier_auto rules", dehumidifier_auto.load_rules),
+            ("lighting_auto rules", lighting_auto.load_rules),
+            # 防黴送風的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
+            # 「濕度控制規則」在感應器那列，給除濕機自動模式的自訂分時目標濕度用
+            # （格式 7=55, 23=60；見 dehumidifier_auto 模組 docstring）。
+            # 缺就補在表尾，不動既有欄位；失敗不擋（防黴會自動退化成不觸發）。
+            ("ensure 防黴欄位", lambda: ensure_columns(
+                get_sheet("智能居家"),
+                ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘", "濕度控制規則"])),
+            # 失聯告警的收件人開關欄（health_alert.ALERT_COLUMN）。補不出來不會讓告警
+            # 靜音，只是無法縮小收件範圍（沒人勾 → 發給全部啟用成員）。
+            ("ensure 系統告警欄位", lambda: ensure_columns(
+                get_sheet("家庭成員"), ["系統告警"])),
+        )
+        for label, fn in steps:
+            try:
+                fn()
+            except Exception as e:
+                print(f"[warmup] {label} failed: {e}")
+        print("[warmup] done")
 
     # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
     # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。
@@ -136,7 +159,11 @@ def _on_startup():
           （AC 是 IR write-only 不能 readback，只能用 home-butler 自己記的最後狀態）
         - 除濕機（手動模式）：打 API 拉電源狀態進 dehumidifier_history，給感測器圖
           背景斜紋用；自動模式的由下方 evaluate_all 記，這裡跳過避免重複
+
+        第一件事是 _warm_up()（backfill / load_rules / ensure_columns），刻意從 startup
+        搬過來讓服務能立刻開始接請求——見該函式 docstring。
         """
+        _warm_up()
         while True:
             try:
                 # 若 startup backfill 曾失敗（cold start / gspread 5xx / quota），這裡每個

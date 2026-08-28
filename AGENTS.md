@@ -43,6 +43,17 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 - **每日綜合推播**：`notify.run_daily_push_if_due(ctx)`——每天過了 `DAILY_PUSH_HOUR`（env，預設 21 點）後第一個 tick 觸發一次。去重 marker 存在 Sheet「系統狀態」分頁的 `最後每日推播日期`（跨 Render 重啟存活，不重發不漏發；睡整晚跨午夜才醒則當天不補）。
 - `/notify`、`/notify_realtime` 端點**保留**但只當手動觸發（debug / 補發）；不再有外部 cron 打它們。手動 `/notify` 不檢查也不更新每日 marker。
 
+**startup 不做任何 Sheets 工作**：backfill（四張歷史表）／`load_rules`／`ensure_columns`
+全部集中在 `main.py:_warm_up()`，由 polling thread 起跑時在背景跑，**不是** startup handler。
+理由：FastAPI 的 sync startup handler 是直接 `handler()` 呼叫（不丟 threadpool），而 uvicorn
+在 ASGI lifespan startup 完成前不服務任何請求——四張歷史表整張 `get_all_records()` 在冷啟動的
+free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際咬過（2026-08-28）：一次部署重啟
+就讓 Dashboard 的裝置配對登入整段失敗，症狀是「LINE 回授權成功、但網頁一直轉」——前端輪詢
+`/api/auth/device/status` 連續吃到 5xx，而空窗撐過 `CODE_TTL`（5 分）配對碼還會直接過期。
+搬走之後 startup 幾乎立刻返回，代價只有部署後前幾秒 Dashboard 歷史圖是空的（登入 / LINE bot /
+設備控制都不碰那些 ring buffer）。順帶修掉另一個雷：**原本任一個 backfill 拋例外會讓整個 app
+起不來**，現在每步各自 try/except，失敗的下個 tick 自動重試。
+
 **為什麼能拿掉 GAS**：這些工作全是 Sheet-anchored / 冪等（觸發時間、狀態、marker 都在 Sheet），重啟後 thread 讀同一份 Sheet 就能補上，不依賴外部時鐘的精準或存活（code 本就容忍漂移：`is_near_hour` ±5 分、排程 2h 過期窗）。GAS 當年的唯一價值是「喚醒睡著的 Render ＋幹活綁同一個 HTTP beat」，但 thread 要能跑的前提（實例醒著）本來就由 UptimeRobot 扛——GAS 的保溫只是跟它**重複**。
 
 **UptimeRobot 是 load-bearing 保溫，不是普通監控**：每 5 分 ping `/` 防止 Render idle-sleep（Readme 標「防冷啟動」）。拿掉 GAS 後，「保持實例醒著、讓 polling thread 不被凍住」這件事**完全靠它**。所以**別把 UptimeRobot 當可有可無的監控隨手關掉**——關了它，排程與推播會跟著 Render 一起睡死。
