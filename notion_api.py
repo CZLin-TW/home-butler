@@ -3,6 +3,9 @@ Notion API 封裝模組（唯讀）
 - 查詢 Database
 - 支援 Sheet 定義的篩選條件
 - 格式化行事曆事件給 Claude
+
+每筆事件都會帶 PAGE_ID_KEY（Notion page id）：那是這筆任務唯一穩定的識別碼，
+標題、日期、時間改了都不變。calendar_sync 拿它當「完成記號」的主鍵。
 """
 
 import httpx
@@ -11,6 +14,9 @@ from datetime import datetime
 import pytz
 
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
+# 事件 dict 裡放 Notion page id 的 key。刻意用底線開頭，避免撞到使用者
+# Notion 資料庫真實存在的欄位名（同名欄位會被這個值蓋掉）。
+PAGE_ID_KEY = "_page_id"
 NOTION_VERSION = "2022-06-28"
 BASE_URL = "https://api.notion.com/v1"
 TZ = pytz.timezone("Asia/Taipei")
@@ -80,11 +86,12 @@ def _extract_property_value(prop):
 
 
 def _parse_page(page):
-    """將 Notion page 轉為簡單 dict"""
+    """將 Notion page 轉為簡單 dict（額外帶 PAGE_ID_KEY）"""
     properties = page.get("properties", {})
     result = {}
     for key, prop in properties.items():
         result[key] = _extract_property_value(prop)
+    result[PAGE_ID_KEY] = str(page.get("id", "") or "")
     return result
 
 
@@ -127,10 +134,16 @@ def get_upcoming_events(database_id, filters_str=""):
     """
     取得 Notion 行事曆的未來事件。
     filters_str: Sheet 定義的篩選條件，如 "Status:Incoming,person:CZ"
+
+    回傳 list = 查詢成功（空 list 代表「Notion 上真的沒有符合的事件」）；
+    回傳 None = **查不到**（沒 token / API 錯誤 / 網路例外）。
+
+    這兩件事一定要分開：呼叫端會拿「Notion 上沒有了」當作刪除本地資料的依據，
+    把一次 timeout 誤當成空結果，就會把使用者已標完成的記號全部清掉、任務復活。
     """
     if not NOTION_TOKEN or not database_id:
         print(f"[NOTION] Skip: token={'set' if NOTION_TOKEN else 'empty'}, db_id={'set' if database_id else 'empty'}")
-        return []
+        return None
 
     try:
         all_pages = []
@@ -160,7 +173,7 @@ def get_upcoming_events(database_id, filters_str=""):
 
             if "results" not in data:
                 print(f"[NOTION] API error: {data.get('message', 'unknown')}")
-                return []
+                return None
 
             all_pages.extend(data["results"])
             has_more = data.get("has_more", False)
@@ -215,7 +228,7 @@ def get_upcoming_events(database_id, filters_str=""):
 
     except Exception as e:
         print(f"[NOTION] Error: {e}")
-        return []
+        return None
 
 
 def format_events_for_claude(events):

@@ -59,12 +59,22 @@ ACTION_HANDLERS = {
     "unclear":              lambda d, u, c: None,
 }
 
-# 三類 action 對應的後處理路徑：
+# action 對應的後處理路徑：
 # - SEMANTIC：把 raw 結果再丟回 Claude 包裝成自然句子（query_food 排序、query_todo 分組等）
 # - REALTIME：直接回 raw 結果，避免 Claude 重新組句把即時資訊改寫掉
-# 沒列在這兩組的 action 是純寫入，reply 走 Claude 第一輪生成的 claude_reply。
+# - TRUTHFUL：成功時走 claude_reply，**沒成功時強制顯示 handler 原文**（見下方說明）
+# 三組都沒列到的 action 是純寫入，reply 一律走 Claude 第一輪生成的 claude_reply。
 SEMANTIC_ACTIONS = {"query_weather", "query_sensor", "query_food", "query_todo"}
 REALTIME_ACTIONS = {"query_devices", "query_dehumidifier", "set_dehumidifier_auto", "query_schedule", "query_recurring_todo"}
+# 這些 action 的 handler 一旦回了「不是 ✅ 開頭」的結果（找不到、被拒絕、外部項目
+# 不可改…），就把 handler 的原文講出來，不要用 claude_reply 蓋掉。
+#
+# 為什麼需要這條：claude_reply 跟 actions 是同一份 JSON **一次生成**的，也就是
+# Claude 在動手之前就先寫好「已經幫你劃掉了 ✅」。下面的分派只在結果含 ❌ 時才會
+# 顯示真實結果，於是任何「不是 ❌ 的靜默失敗」都會被那句樂觀台詞蓋掉——實際踩過：
+# 唯讀的 Notion 待辦標完成沒生效，使用者連續好幾天看到 ✅、提醒卻每小時照響，
+# 查了很久才發現對話裡根本看不到 handler 說了什麼。
+TRUTHFUL_ACTIONS = {"delete_todo", "modify_todo"}
 
 
 def _coerce_arg(key, value):
@@ -166,6 +176,7 @@ def process_message(user_id, text, user_name, ctx):
     print(f"[5] actions={actions}, claude_reply={claude_reply}")
 
     results = []
+    unexpected = []  # TRUTHFUL_ACTIONS 裡「結果不是單純成功」的那幾則
     for data in actions:
         handler = ACTION_HANDLERS.get(data.get("action"))
         if handler is None:
@@ -173,13 +184,20 @@ def process_message(user_id, text, user_name, ctx):
         action_result = handler(data, user_name, ctx)
         if action_result is not None:
             results.append(action_result)
+            if (data.get("action") in TRUTHFUL_ACTIONS
+                    and not str(action_result).lstrip().startswith("✅")):
+                unexpected.append(action_result)
+
+    # handler 的原始回傳值只在這裡看得到（下面多數情況會改回 claude_reply），
+    # 出事時這行是唯一能還原「到底做了什麼」的線索。
+    print(f"[5b] results={results}")
 
     has_error = any("❌" in r for r in results if r)
     action_types = {d.get("action") for d in actions}
     has_realtime = bool(action_types & REALTIME_ACTIONS)
     has_semantic = bool(action_types & SEMANTIC_ACTIONS)
 
-    if has_error:
+    if has_error or unexpected:
         return "\n".join(results)
     if has_semantic and not has_realtime:
         raw_data = "\n".join(r for r in results if r and "❌" not in r)
