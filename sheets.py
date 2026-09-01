@@ -297,11 +297,25 @@ class RequestContext:
     def __init__(self):
         self._records = {}
         self._worksheets = {}
-        self._loaded = False
+        self._loaded_sheets = set()
 
-    def load(self):
+    def load(self, sheets=None):
+        """讀進 sheets 指定的分頁；None（預設）＝ BATCH_SHEETS 全部六張。
+
+        傳子集進來是給「只用得到一兩張分頁」的端點省流量用的。Dashboard 載入一次
+        首頁原本會觸發 4 次、裝置頁 3 次的完整六分頁讀取（/api/devices 只要
+        「智能居家」、/api/schedules 只要「排程指令」、/api/dehumidifier/auto-rule
+        只要「智能居家」），其中「對話暫存」「待辦事項」「食品庫存」「家庭成員」
+        整張抓回來後直接丟掉。
+
+        ⚠️ 子集 ctx 一樣安全：get() 讀到沒載入的分頁會自己補讀那一張（見 get()），
+        所以傳漏了只會慢一點，不會靜靜拿到空 list。
+        """
+        names = list(sheets) if sheets is not None else list(self.BATCH_SHEETS)
+        if not names:
+            return
         ss = _get_spreadsheet()
-        ranges = [f"'{name}'" for name in self.BATCH_SHEETS]
+        ranges = [f"'{name}'" for name in names]
         try:
             result = ss.values_batch_get(
                 ranges,
@@ -311,7 +325,8 @@ class RequestContext:
                 range_str = vr.get('range', '')
                 sheet_name = range_str.split('!')[0].strip("'")
                 self._records[sheet_name] = _parse_sheet_values(vr.get('values', []))
-            print(f"[BATCH READ] 成功讀取 {len(self._records)} 個分頁")
+                self._loaded_sheets.add(sheet_name)
+            print(f"[BATCH READ] 成功讀取 {len(names)} 個分頁：{'、'.join(names)}")
         except Exception as e:
             print(f"[BATCH READ ERROR] {e}，改用逐一讀取")
             ss = _get_spreadsheet()
@@ -322,9 +337,10 @@ class RequestContext:
             # 會讓單一請求卡到 30s+（LINE webhook / Render 都會超時）並加重 Google 負擔。
             # 它要救的是「batch 端點特有的失敗」，一次打完見真章。
             with no_retry():
-                for name in self.BATCH_SHEETS:
+                for name in names:
                     try:
                         self._records[name] = ss.worksheet(name).get_all_records()
+                        self._loaded_sheets.add(name)
                         ok += 1
                     except Exception as e2:
                         print(f"[FALLBACK READ ERROR] {name}: {e2}")
@@ -335,16 +351,20 @@ class RequestContext:
                 # 「資料剛好都空的」。這時**要大聲失敗**：靜靜回一堆空 list 會讓 bot
                 # 回「沒有待辦事項」、Dashboard 顯示 0 台設備——比一次錯誤更誤導人。
                 raise last_err
-        self._loaded = True
 
     def get(self, sheet_name):
-        if not self._loaded:
-            self.load()
+        if sheet_name not in self._loaded_sheets:
+            # 沒載入過就補讀那一張（未 load 過的 ctx、或 load(subset) 傳漏了都走這裡）。
+            # 刻意不回空 list：回空的話呼叫端會當成「這張表真的沒東西」，於是 bot 回
+            # 「沒有待辦事項」、Dashboard 顯示 0 台設備——靜默失效比慢一次糟得多。
+            self.load([sheet_name])
         return self._records.get(sheet_name, [])
 
     def set(self, sheet_name, records):
         """手動更新快取（例如 sync 後重新讀取）"""
         self._records[sheet_name] = records
+        # 標記成已載入，否則之後 get() 會判定沒讀過而把剛寫進來的內容覆蓋掉。
+        self._loaded_sheets.add(sheet_name)
 
     def get_worksheet(self, name):
         if name not in self._worksheets:

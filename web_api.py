@@ -236,7 +236,9 @@ def _refresh_device_statuses_in_background(devices):
 def api_get_devices():
     """列出所有啟用裝置（Sheet 資料，不含即時狀態）"""
     ctx = RequestContext()
-    ctx.load()
+    # 只讀「智能居家」：這支是 Dashboard 首頁與裝置頁的關鍵路徑（家電控制要等它才
+    # 畫得出卡片），沒必要順帶把對話暫存／待辦／食品／家庭成員整張抓回來丟掉。
+    ctx.load(["智能居家"])
     return [
         {
             "name": d.get("名稱"),
@@ -356,7 +358,8 @@ def api_get_dehum_auto_rules():
     24h 目標濕度圖；使用者手改 Sheet 後下次輪詢就看得到結果（含格式錯誤原因）。
     """
     ctx = RequestContext()
-    ctx.load()
+    # get_all_rules 只從 ctx 讀「智能居家」（拿感應器的「濕度控制規則」欄）。
+    ctx.load(["智能居家"])
     return dehumidifier_auto.get_all_rules(ctx)
 
 
@@ -729,7 +732,7 @@ def api_delete_food(req: FoodDeleteRequest):
 @router.get("/schedules")
 def api_get_schedules():
     ctx = RequestContext()
-    ctx.load()
+    ctx.load(["排程指令"])  # 其餘五張分頁這支用不到
     return [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
 
 

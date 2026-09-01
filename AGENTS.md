@@ -250,7 +250,8 @@ unavailable` / `429`（實際發生過：Dashboard 打 `/api/dehumidifier/auto-r
 - `RequestContext.load()` 的逐頁 fallback 用 `sheets.no_retry()`（thread-local context
   manager）**明確關掉重試**——因為重試裝在 HTTP 層，不關的話這裡會被乘一輪
   （3 + 6 分頁 × 2 個 GET × 3 次），單一請求卡到 30s+ 超時。batch 已經重試過 3 次了，
-  Google 真的掛掉時再試也是白試。但**六個分頁全讀不到時會拋錯**，
+  Google 真的掛掉時再試也是白試。但**這次請求的分頁全讀不到時會拋錯**（子集載入見
+  下一節；不帶參數時就是那六張），
   不再靜靜回一堆空 list——那會讓 bot 回「沒有待辦事項」、Dashboard 顯示 0 台設備，
   比報錯更誤導人。
 - 撐過重試仍失敗 → `main.py` 的 `GSpreadException` handler 回 **503**（不是 500 +
@@ -258,6 +259,35 @@ unavailable` / `429`（實際發生過：Dashboard 打 `/api/dehumidifier/auto-r
   `sheets.is_transient_error`。
 - log 關鍵字：`[SHEETS RETRY]`（吸收掉的抖動）、`[SHEETS ERROR]`（重試用盡）、
   `[SHEETS UNAVAILABLE]`（回 503 給 client）。前者偶爾出現是正常的。
+
+# `RequestContext.load(sheets=...)`：只讀用得到的分頁
+
+`load()` 不帶參數＝原本的六分頁 `values_batch_get`（BATCH_SHEETS），行為沒變。
+帶一個名稱 list 進去就只讀那幾張。
+
+**為什麼加這個**：Dashboard 載入一次首頁會觸發 **4 次**完整六分頁讀取
+（`/api/dashboard`、`/api/devices`、`/api/schedules`、`/api/dehumidifier/auto-rule`）、
+裝置頁 **3 次**，而後三支各自其實只用得到一張表：
+
+| 端點 | 真正用到 |
+|---|---|
+| `/api/devices` | `智能居家` |
+| `/api/schedules` | `排程指令` |
+| `/api/dehumidifier/auto-rule` | `智能居家`（`get_all_rules` 只讀感應器的「濕度控制規則」欄） |
+
+其餘四張（對話暫存 / 待辦事項 / 食品庫存 / 家庭成員）整張抓回來後直接丟掉。
+`/api/devices` 尤其在關鍵路徑上——Dashboard 的家電控制卡片要等它才畫得出來。
+
+**傳漏了不會靜默失效**：`get()` 讀到沒載入的分頁會自己補讀那一張（多一次
+round-trip，但資料正確），刻意不回空 list——回空的話呼叫端會當成「這張表真的沒東西」，
+於是 bot 回「沒有待辦事項」、Dashboard 顯示 0 台設備，比慢一次糟得多。所以**優化這件事
+最壞只會變慢，不會變錯**；也因此新端點大可放心只列自己要的分頁。
+
+**`set()` 會一併標記成已載入**。少了這行，`calendar_sync` sync 完手動塞回 ctx 的內容
+會在下次 `get()` 被判定「沒讀過」而重新抓、把剛寫進去的覆蓋掉。
+
+`_loaded` 布林旗標已換成 `_loaded_sheets` 集合（只在 `sheets.py` 內部使用）。逐頁
+fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固定六張改成「這次請求的那幾張」。
 
 # Git push 環境差異
 
