@@ -289,6 +289,42 @@ round-trip，但資料正確），刻意不回空 list——回空的話呼叫�
 `_loaded` 布林旗標已換成 `_loaded_sheets` 集合（只在 `sheets.py` 內部使用）。逐頁
 fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固定六張改成「這次請求的那幾張」。
 
+# 天氣資料快取（`ttl_cache.py`）
+
+中央氣象署的預報與觀測都走 `ttl_cache.TTLCache`，**只快取成功結果**。
+
+**為什麼需要**：`/api/dashboard`（Dashboard 首頁）每次載入實測會打 **6 次** CWA，
+每次 timeout 10~15 秒，而拿回來的是同一份資料：
+
+| 呼叫 | 來源 |
+|---|---|
+| ×2 | `_resolve_location` 為了確認「竹北市」屬於哪個 `data_id`，先打一次探路 |
+| ×2 | `get_weather_summary` 拿到 `data_id` 後，用**同一組 (data_id, 地名)** 再打一次 |
+| ×2 | `get_observation_for_location`（「明天」的預報其實用不到當下觀測，但 payload 一併附上） |
+
+（今天／明天各一輪，所以每項 ×2。一週預報是同一份 payload，today/tomorrow 只是從
+裡面挑不同天解析。）
+
+快取裝在 `_fetch_forecast`（TTL 30 分）與 `get_observation`（TTL 10 分）兩層。實測
+6 次 → 首次載入 2 次 → TTL 內 0 次。觀測的 TTL 對齊測站約 10 分鐘的更新頻率：再短
+只是重複打同一個值，再長就會讓「當下讀值」名不副實。
+
+**幾個改壞就會靜默失效的點**：
+
+- **失敗絕對不能進快取**。`_fetch_forecast` 失敗回 `{"error": ...}`、`get_observation`
+  失敗回 `None`，兩者都不呼叫 `set()`。快取住失敗會讓「CWA 已經恢復了，但我們還在回
+  錯誤」這種狀況延續整個 TTL——而這正是最難查的那種 bug。
+- **快取命中時回的是同一個 dict 物件**。週預報很大，每次深拷貝會抵銷掉快取的意義。
+  現有呼叫端都只讀不寫；要在 caller 裡改動回傳值請先自己複製一份。
+- **`TTLCache` 的 `max_entries`（預設 32）是防呆不是效能考量**：正常只有一兩個地點，
+  但 `_resolve_location` 對沒見過的鄉鎮會遍歷 22 個縣市，設上限免得意外把 free
+  instance 的記憶體吃光。滿了丟最舊寫入的那筆；更新既有 key 會把它移到尾端，不會被
+  提前淘汰。
+- **有鎖**。polling thread 與 FastAPI threadpool 會並行讀寫同一份快取。
+
+**取捨**：天氣最多落後 30 分鐘、觀測 10 分鐘。對「今明兩天的預報」完全無感，但如果
+之後要拿它做接近即時的判斷（例如依當下降雨自動收衣服），記得這裡有這層延遲。
+
 # Git push 環境差異
 
 這個 repo 會被多種 harness 操作（本機 VS Code、claude.ai/code web UI 等）。

@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta
 import pytz
 from observation_api import get_observation_for_location
+from ttl_cache import TTLCache
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore"
@@ -39,8 +40,28 @@ def _normalize(text):
     return text.replace("台", "臺")
 
 
+# 一週預報一天只更新幾次，但同一份資料在一次 Dashboard 首頁載入裡會被要求好幾遍：
+#   1. _resolve_location 為了確認「竹北市」屬於哪個 data_id，先打一次
+#   2. get_weather_summary 拿到 data_id 後，用**同一組 (data_id, 地名)** 再打一次
+#   3. today 與 tomorrow 是兩次 get_weather_summary，於是整組再來一輪
+# 也就是 /api/dashboard 每次都打 4 次氣象署（每次 timeout 15s），拿回來的是同一份
+# 週預報——today/tomorrow 只是從裡面挑不同天解析而已。快取在 _fetch_forecast 這層
+# 同時吃掉這三種重複，四次變一次。
+#
+# 只快取成功結果：`{"error": ...}` 不進快取，CWA 恢復後下一次就會拿到真資料。
+#
+# ⚠️ 快取命中時回的是**同一個 dict 物件**（週預報很大，每次深拷貝會抵銷掉快取的意義）。
+# 現有呼叫端都只讀不寫；要在 caller 裡改動回傳值的話請先自己複製一份。
+_FORECAST_TTL = 30 * 60
+_forecast_cache = TTLCache(_FORECAST_TTL)
+
+
 def _fetch_forecast(data_id, location_name=None):
-    """從氣象署 API 抓取一週鄉鎮預報原始資料"""
+    """從氣象署 API 抓取一週鄉鎮預報原始資料（成功結果快取 30 分鐘）"""
+    cache_key = (data_id, location_name)
+    cached = _forecast_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         params = {
             "Authorization": CWA_API_KEY,
@@ -81,10 +102,12 @@ def _fetch_forecast(data_id, location_name=None):
         else:
             target_loc = location_array[0]
 
-        return {
+        result = {
             "data": target_loc,
             "city": locations_list[0].get("LocationsName", ""),
         }
+        _forecast_cache.set(cache_key, result)
+        return result
 
     except Exception as e:
         return {"error": str(e)}

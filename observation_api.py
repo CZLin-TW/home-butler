@@ -8,6 +8,7 @@
 
 import httpx
 import os
+from ttl_cache import TTLCache
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0003-001"
@@ -83,8 +84,16 @@ def find_station(location):
     return None
 
 
+# 測站觀測約每 10 分鐘更新一次，而 get_weather_summary 每次都會呼叫它——/api/dashboard
+# 的 today + tomorrow 就是兩次（「明天」的預報其實用不到當下觀測，但 payload 一併附上）。
+# TTL 取 10 分鐘對齊資料本身的更新頻率：再短只是重複打同一個值，再長就會讓「當下讀值」
+# 名不副實。只快取成功結果（None 代表查不到／CWA 失敗，不進快取）。
+_OBSERVATION_TTL = 10 * 60
+_observation_cache = TTLCache(_OBSERVATION_TTL)
+
+
 def get_observation(station_name):
-    """以測站名稱查 CWA 觀測資料。
+    """以測站名稱查 CWA 觀測資料（成功結果快取 10 分鐘）。
 
     成功回傳：{
         "station": 測站名稱,
@@ -96,6 +105,9 @@ def get_observation(station_name):
     """
     if not station_name:
         return None
+    cached = _observation_cache.get(station_name)
+    if cached is not None:
+        return cached
     try:
         # TODO: verify=False 跳過 TLS 驗證。歷史原因待釐清（可能是 CWA 憑證鎖見過問題），
         # 待研究後改為 verify=True。並修訂 weather_api.py 同一安全障隄。
@@ -127,12 +139,14 @@ def get_observation(station_name):
         # observed_at 取 HH:MM（完整字串形如 "2026-04-19T23:40:00+08:00"）
         observed_at = obs_time[11:16] if len(obs_time) >= 16 else obs_time
 
-        return {
+        result = {
             "station": s.get("StationName", station_name),
             "temp": temp,
             "humidity": humidity,
             "observed_at": observed_at,
         }
+        _observation_cache.set(station_name, result)
+        return result
     except Exception as e:
         print(f"[OBSERVATION] {station_name} error: {e}")
         return None
