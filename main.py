@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
 from gspread.exceptions import GSpreadException
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -20,6 +20,7 @@ from auth import verify_api_key
 import switchbot_api
 import panasonic_api
 import lg_api
+import aqara_api
 
 
 app = FastAPI()
@@ -327,6 +328,91 @@ def get_lg_device_profile(device_id: str):
 def get_lg_device_state(device_id: str):
     """Debug: 某 LG 裝置目前狀態（巢狀 property 結構），對照 profile 校準解析。"""
     return lg_api.get_device_state(device_id)
+
+
+# ── Aqara Cloud（Presence Sensor FP2）：授權與探索 ──
+# 授權是一次性人工流程（probe 找機房 → 要授權碼 → 換權杖），之後權杖存在「系統狀態」
+# 分頁、到期自動 refresh。完整步驟見 Readme「Aqara FP2」一節。
+
+@app.get("/aqara/probe", dependencies=[Depends(verify_api_key)])
+def probe_aqara_regions():
+    """Debug: 六個 Aqara 機房各打一次（不帶權杖），找出帳號/App 憑證屬於哪一區。
+    回權杖相關錯誤的那一區就是你的機房，把區碼填進環境變數 AQARA_REGION。
+    刻意不用 getAuthCode 探測——那個會真的寄六封授權信。"""
+    return aqara_api.probe_regions()
+
+
+@app.get("/aqara/token", dependencies=[Depends(verify_api_key)])
+def get_aqara_token_status():
+    """Debug: 目前的授權狀態（權杖遮蔽過，只露頭尾）。"""
+    return aqara_api.token_status()
+
+
+@app.post("/aqara/auth/code", dependencies=[Depends(verify_api_key)])
+def request_aqara_auth_code(account: str = ""):
+    """授權第一步：請 Aqara 寄授權碼到帳號（Email / 簡訊）。
+    account 不帶就用環境變數 AQARA_ACCOUNT。⚠️ 真的會寄信，別當健康檢查亂打。"""
+    return aqara_api.request_auth_code(account or None)
+
+
+@app.post("/aqara/auth/token", dependencies=[Depends(verify_api_key)])
+def exchange_aqara_token(auth_code: str, account: str = ""):
+    """授權第二步：用收到的授權碼換權杖，成功即寫入「系統狀態」分頁（跨重啟存活）。"""
+    return aqara_api.exchange_token(auth_code, account or None)
+
+
+@app.post("/aqara/auth/refresh", dependencies=[Depends(verify_api_key)])
+def refresh_aqara_token():
+    """Debug: 手動換一次權杖。正常情況不用打——到期前 10 分鐘會自動換，
+    真的過期也會在下一次呼叫吃到 code 108 時自動補換。"""
+    return aqara_api.refresh_now()
+
+
+@app.get("/aqara/devices", dependencies=[Depends(verify_api_key)])
+def list_aqara_devices():
+    """Debug: 列出 Aqara 帳號下所有裝置（含 did / model / 名稱）。
+    從這裡抓 FP2 的 did 填進環境變數 AQARA_FP2_DID。"""
+    devices = aqara_api.get_devices()
+    if isinstance(devices, dict):
+        return devices
+    return {"count": len(devices), "devices": devices}
+
+
+@app.get("/aqara/devices/{did}/resources", dependencies=[Depends(verify_api_key)])
+def get_aqara_device_resources(did: str):
+    """Debug: 這台裝置的 model 開放了哪些 resource（id / 名稱 / 說明），不含當下值。"""
+    device = aqara_api.get_device(did)
+    if isinstance(device, dict) and "error" in device:
+        return device
+    model = device.get("model", "")
+    return {"did": did, "model": model, "resources": aqara_api.get_resource_catalog(model)}
+
+
+@app.get("/aqara/devices/{did}/values", dependencies=[Depends(verify_api_key)])
+def get_aqara_device_values(did: str):
+    """Debug: 這台裝置**所有**開放 resource 的當下值（先查清單再照清單讀）。
+    FP2 的「有沒有人」是哪個 resource id，就是看這支的輸出對出來的——確認後填進
+    環境變數 AQARA_FP2_PRESENCE_RESOURCE，語意層就不再靠名稱關鍵字猜。"""
+    return aqara_api.read_device(did)
+
+
+@app.get("/aqara/fp2", dependencies=[Depends(verify_api_key)])
+def get_aqara_fp2_snapshot(did: str = ""):
+    """FP2 當下狀態（presence + 全部原始 resource）。did 不帶就用 AQARA_FP2_DID，
+    再沒有就自己去帳號裡找第一台 FP2。presence 為 null = 這次沒判斷出來，
+    原始資源仍原樣附上。"""
+    return aqara_api.fp2_snapshot(did or None)
+
+
+@app.post("/aqara/raw", dependencies=[Depends(verify_api_key)])
+def call_aqara_raw(payload: dict = Body(...)):
+    """Debug: 直接送任意 intent（{"intent": "...", "data": {...}}），回原始 JSON。
+    給還沒封裝的 API 探路用，例如訊息推送訂閱 config.resource.subscribe——
+    先在這裡試通了再決定要不要寫成正式函式。"""
+    intent = str(payload.get("intent") or "").strip()
+    if not intent:
+        raise HTTPException(status_code=400, detail="需要 intent 欄位")
+    return aqara_api.raw_call(intent, payload.get("data"))
 
 
 @app.get("/panasonic/dehumidifier/{device_name}/full_status", dependencies=[Depends(verify_api_key)])

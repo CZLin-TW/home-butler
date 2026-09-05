@@ -325,6 +325,62 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 **取捨**：天氣最多落後 30 分鐘、觀測 10 分鐘。對「今明兩天的預報」完全無感，但如果
 之後要拿它做接近即時的判斷（例如依當下降雨自動收衣服），記得這裡有這層延遲。
 
+# Aqara Cloud API（FP2）：認證有狀態，權杖必須落地
+
+`aqara_api.py` 是 Aqara Open API v3.0 的封裝，目前**只接到 API 為止**：授權、列裝置、
+把 resource 讀回來，全部走 `main.py` 的 `/aqara/*` debug 端點。**沒有** polling thread、
+沒有寫進「智能居家」分頁、Dashboard 與 LINE bot 都還看不到它。功能另外規劃。
+
+⚠️ 這個模組**沒有對真的 FP2 跑過**（開發環境的 egress proxy 擋掉 aqara.com）。協定形狀
+逐字對齊 Aqara 官方 Home Assistant 整合的 `aiot_cloud.py`（簽名字串、intent 名稱、header
+大小寫），能離線確定的都確定了；連上真機後若有出入，以真機為準。
+
+**跟 SwitchBot 最大的差別是認證有狀態**：SwitchBot 是 token + secret 每次現簽、無狀態，
+Aqara 是 accessToken / refreshToken。以下幾點改壞了都會靜默失效或直接要人重跑授權：
+
+- **簽名整串 `.lower()`，含 AppKey 與 AccessToken**。這是官方 SDK 的行為不是筆誤。
+  少了那一步、或只 lower 一部分，伺服器一律回簽名錯誤，而錯誤訊息**不會**告訴你錯在
+  大小寫。欄位順序（AccessToken → Appid → Keyid → Nonce → Time → AppKey）也是簽名的
+  一部分，不能重排。
+- **refreshToken 每次刷新都會換一把，舊的當場作廢**——所以權杖一定要寫進 Sheet
+  （「系統狀態」KV，跟每日推播 marker 同一張表），純記憶體撐不過 Render 重啟。
+- **寫 Sheet 的順序是 refreshToken 先寫**。中途掛掉時「新 refresh + 舊 access」還能靠
+  code 108 自動補救，「舊 refresh + 新 access」是死局（Sheet 上那把 refresh 已作廢），
+  只能請人重跑一次人工授權。寫失敗會設 `_persist_dirty`，下次呼叫補寫並印警告。
+- **108 重試有防遞迴旗標**（`token_maintenance=False`）。refresh 自己那一發、以及 108
+  之後的那次重試都不可以再觸發權杖維護，否則權杖真的死掉時會無限迴圈。
+- **`_ensure_loaded_locked` 讀 Sheet 失敗時不標記已載入**，下次呼叫再試——一次 Sheets
+  抖動不該讓整個服務退化成「未授權」直到重啟。
+- **權杖不進 log 也不進 API 回應**。`token_status()` / `exchange_token()` 回的是
+  `_mask()` 過的頭尾，別為了 debug 方便把原文印出來。
+- **`write.resource.device` 的 data 是 list 不是 dict**（官方 SDK 的 `list_data=True`），
+  包成 dict 送會被拒。`aqara_api.write_resource` 已經處理，自己組 intent 時要注意。
+- **`probe_regions` 刻意不用 `config.auth.getAuthCode` 探測**——那個會真的寄六封授權信。
+  改用不帶權杖的 `query.device.info`：回權杖相關錯誤＝這一區認得你的 App 憑證。
+
+## 為什麼沒有寫死 resource id
+
+Aqara 的每個欄位是一組 `x.y.z` 數字，官方文件按 model 分開列，網路上找得到的多半對不上
+自己那台的韌體。**寫死一組猜來的 id，錯了是靜默失效**（永遠讀到空值，不會報錯）。
+
+所以 `read_device()` 是「先打 `query.resource.info` 問這個 model 開放哪些 resource，
+再照那份清單讀值」，清單快取 6 小時（只快取成功結果）。這也讓 FP2 以外的 Aqara 裝置
+不用改 code 就讀得到。
+
+「哪個欄位是有沒有人」目前用名稱關鍵字猜（`_PRESENCE_NAME_HINTS`），**猜不到就回
+`None`，不硬挑一個看起來像的**——挑錯會讓上層拿著假值長出自動化，比承認不知道糟得多。
+用 `/aqara/devices/{did}/values` 對照真機（人走進 / 走出各打一次，diff）確認之後，把 id
+填進環境變數 `AQARA_FP2_PRESENCE_RESOURCE` 釘死，關鍵字猜測就完全不參與判斷。
+
+## 之後要接 polling 時
+
+- 這個模組**還沒有熔斷器**（`lg_api` / `panasonic_api` 都有）。單純被人手打 debug 端點
+  時不需要，但一旦掛進每 5 分鐘的 polling thread，Aqara 雲端掛掉就會變成穩定的重打——
+  照 `lg_api._circuit_open` 那套補上再接。
+- 讀值有雲端延遲、也吃 API 配額。要做「人一進門就開燈」這種秒級反應，該走 Aqara 的
+  訊息推送（webhook）而不是輪詢；`/aqara/raw` 就是留給那類還沒封裝的 intent
+  （例如 `config.resource.subscribe`）先探路的逃生口。
+
 # Git push 環境差異
 
 這個 repo 會被多種 harness 操作（本機 VS Code、claude.ai/code web UI 等）。

@@ -32,6 +32,40 @@ LG_CLIENT_ID = os.environ.get("LG_CLIENT_ID", "home-butler-client")
 # 用 /lg/probe 找出帳號對應區域後填入，例如 https://api-kic.lgthinq.com
 LG_API_BASE = os.environ.get("LG_API_BASE", "")
 
+# Aqara Cloud Open API（Presence Sensor FP2 等 Wi-Fi 直連裝置）。
+# 三把 App 憑證在 developer.aqara.com 建立應用後取得，缺一把簽名就過不了。
+AQARA_APP_ID = os.environ.get("AQARA_APP_ID", "")
+AQARA_KEY_ID = os.environ.get("AQARA_KEY_ID", "")
+AQARA_APP_KEY = os.environ.get("AQARA_APP_KEY", "")
+# 帳號註冊在哪個機房：CN / USA / KR / RU / GER / SG。不確定就先留預設，部署後打
+# /aqara/probe 讓它把每一區試一遍（那支不會寄授權信，可以放心重打）。
+AQARA_REGION = os.environ.get("AQARA_REGION", "CN")
+# 完全覆寫 base URL（同 LG_API_BASE 的角色）：probe 出來的機房不在上面清單裡時用，
+# 例如 https://open-sg.aqara.com
+AQARA_API_BASE = os.environ.get("AQARA_API_BASE", "")
+# 授權用的 Aqara 帳號（Email 或手機號）。授權碼會寄到這裡。
+AQARA_ACCOUNT = os.environ.get("AQARA_ACCOUNT", "")
+# accessToken 有效期，跟著 getAuthCode 一起送。"7d" 是官方 SDK 用的值；
+# 到期前 10 分鐘會自動 refresh，所以這個數字只影響「多久換一次」。
+AQARA_TOKEN_VALIDITY = os.environ.get("AQARA_TOKEN_VALIDITY", "7d")
+# FP2 的 did（/aqara/devices 查得到）。填了就省掉每次「先列裝置再挑 FP2」那一趟 API。
+AQARA_FP2_DID = os.environ.get("AQARA_FP2_DID", "")
+# 「有沒有人」對應的 resource id。空白時 aqara_api 用名稱關鍵字猜；用
+# /aqara/devices/{did}/values 對照真機確認之後填進來釘死（猜測就不再參與判斷）。
+AQARA_FP2_PRESENCE_RESOURCE = os.environ.get("AQARA_FP2_PRESENCE_RESOURCE", "")
+
+
+def _aqara_account_type():
+    """getAuthCode / getToken 的 accountType（依官方文件：0 = Aqara 帳號）。
+    填了非數字就退回 0，不要讓一個打錯的環境變數在 import 期就炸掉整個服務。"""
+    try:
+        return int(os.environ.get("AQARA_ACCOUNT_TYPE", "0"))
+    except (ValueError, TypeError):
+        return 0
+
+
+AQARA_ACCOUNT_TYPE = _aqara_account_type()
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)

@@ -494,6 +494,16 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘維持一筆『下一次要做的』待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出待辦實例；上線或收手只需改這個變數，不必 revert code | 選配 |
 | DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
 | AGENT_OFFLINE_ALERT_SECONDS | PC agent 幾秒沒回報就推失聯告警，預設 `900`（15 分）。刻意比 Dashboard 畫灰點的 5 分鐘寬——agent self-restart／網路抖動／Render 重啟後 backfill 都會造成幾分鐘空窗，門檻太緊會誤報。下限鎖在 300 秒 | 選配 |
+| AQARA_APP_ID | Aqara Cloud Open API 的 App ID（developer.aqara.com 建立應用後取得）。有 FP2 等 Aqara Wi-Fi 裝置才需要 | 選配 |
+| AQARA_KEY_ID | Aqara Open API 的 Key ID | 選配 |
+| AQARA_APP_KEY | Aqara Open API 的 App Key（簽名用，等同密鑰） | 選配 |
+| AQARA_REGION | 帳號所屬機房：`CN` / `USA` / `KR` / `RU` / `GER` / `SG`，預設 `CN`。不確定就先留預設，部署後打 `/aqara/probe` 讓它每一區試一遍（那支不會寄授權信） | 選配 |
+| AQARA_API_BASE | 完全覆寫 Aqara base URL（角色同 `LG_API_BASE`），probe 出來的機房不在上面清單裡時用，例如 `https://open-sg.aqara.com` | 選配 |
+| AQARA_ACCOUNT | 授權用的 Aqara 帳號（Email 或手機號），授權碼會寄到這裡 | 選配 |
+| AQARA_ACCOUNT_TYPE | `getAuthCode` / `getToken` 的 accountType，預設 `0`（Aqara 帳號） | 選配 |
+| AQARA_TOKEN_VALIDITY | accessToken 有效期，預設 `7d`。到期前 10 分鐘會自動 refresh，所以這個值只影響「多久換一次」 | 選配 |
+| AQARA_FP2_DID | FP2 的 did（`/aqara/devices` 查得到）。填了就省掉每次「先列裝置再挑 FP2」那一趟 API | 選配 |
+| AQARA_FP2_PRESENCE_RESOURCE | 「有沒有人」對應的 resource id。空白時用名稱關鍵字猜；用 `/aqara/devices/{did}/values` 對照真機確認後填進來釘死 | 選配 |
 
 ---
 
@@ -515,6 +525,16 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /lg/devices | GET | 列出 LG ThinQ 帳號下所有裝置，抓 deviceId 用 |
 | /lg/devices/{device_id}/profile | GET | LG 裝置能力 profile，校準除濕機 property 欄位用 |
 | /lg/devices/{device_id}/state | GET | LG 裝置目前狀態，對照 profile 校準解析 |
+| /aqara/probe | GET | Debug：六個 Aqara 機房各打一次（不帶權杖），找出帳號屬於哪一區 |
+| /aqara/token | GET | Debug：目前授權狀態（權杖遮蔽過，只露頭尾） |
+| /aqara/auth/code | POST | 授權第一步：請 Aqara 寄授權碼到帳號（Email / 簡訊）。⚠️ 真的會寄信 |
+| /aqara/auth/token | POST | 授權第二步：`?auth_code=` 換權杖，成功即寫入「系統狀態」分頁（跨重啟存活） |
+| /aqara/auth/refresh | POST | Debug：手動換一次權杖。正常不用打（到期前自動換、過期也會被動補換） |
+| /aqara/devices | GET | 列出 Aqara 帳號下所有裝置（did / model / 名稱），抓 FP2 的 did 用 |
+| /aqara/devices/{did}/resources | GET | 該裝置 model 開放了哪些 resource（id / 名稱 / 說明），不含當下值 |
+| /aqara/devices/{did}/values | GET | 該裝置**所有**開放 resource 的當下值。FP2 的 resource id 就是靠這支對出來的 |
+| /aqara/fp2 | GET | FP2 當下狀態（presence + 全部原始 resource）。`?did=` 可指定，不帶則用 `AQARA_FP2_DID` |
+| /aqara/raw | POST | Debug：直送任意 intent（`{"intent": "...", "data": {...}}`），給還沒封裝的 API 探路 |
 
 ### Dashboard REST API（/api）
 
@@ -787,6 +807,54 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 ---
 
+## Aqara FP2 人體存在感應器（雲端 API 整合）
+
+目前只做到**把 API 接進來**：能授權、能列裝置、能把 FP2 的所有 resource 讀回來。
+還沒有任何自動化行為——沒有 polling、沒有寫進「智能居家」分頁、Dashboard 與 LINE bot
+也還看不到它。功能要怎麼長（自動夜燈改用人在不在判斷？離家自動關冷氣？）另外規劃。
+
+### 為什麼走雲端 API
+
+FP2 是 Wi-Fi 直連、不掛 Zigbee 網關的裝置，本地只開 HomeKit HAP——要接本地就得在家裡
+多架一個 HomeKit controller。而 home-butler 跑在 Render 上，走官方雲端 Open API 是
+cloud → cloud，跟現有的 SwitchBot 整合同一個形狀，不必動家裡任何東西。
+
+代價是**讀值會有雲端延遲**，且受 Aqara 的 API 配額限制。真要做「人一進門就開燈」這種
+秒級反應，之後得改用 Aqara 的訊息推送（webhook）而不是輪詢——`/aqara/raw` 就是留給
+那種還沒封裝的 intent 先探路用的。
+
+### 一次性設定流程
+
+1. **建應用拿憑證**：到 [developer.aqara.com](https://developer.aqara.com/) 建立應用，
+   取得 App ID / Key ID / App Key，填進 Render 環境變數 `AQARA_APP_ID`、`AQARA_KEY_ID`、
+   `AQARA_APP_KEY`，另外填 `AQARA_ACCOUNT`（你的 Aqara 帳號）。
+2. **找機房**：`GET /aqara/probe`。App 憑證是綁機房的，所以**回權杖相關錯誤的那一區就是
+   你的**（代表它認得你的 AppId、只是還沒授權）；回 appid / sign 錯誤的不是。把區碼填進
+   `AQARA_REGION`（清單外的機房則填 `AQARA_API_BASE`）。
+3. **要授權碼**：`POST /aqara/auth/code` → Aqara 寄一組碼到你的 Email / 手機。
+4. **換權杖**：`POST /aqara/auth/token?auth_code=<剛收到的碼>`。成功後 accessToken /
+   refreshToken 會寫進 Sheet「系統狀態」分頁，**跨 Render 重啟存活**，之後全自動續期
+   （到期前 10 分鐘主動換；真的過期也會在下一次呼叫吃到 code 108 時自動補換）。
+5. **對 resource id**：`GET /aqara/devices` 抓 FP2 的 did → `GET /aqara/devices/{did}/values`
+   把所有欄位連當下值印出來。人走進 / 走出感測範圍各打一次，diff 一下就知道哪個
+   resource id 是「有沒有人」，填進 `AQARA_FP2_PRESENCE_RESOURCE`（順手把 did 填進
+   `AQARA_FP2_DID` 省一趟 API）。
+
+第 5 步之前 `/aqara/fp2` 的 `presence` 是靠**名稱關鍵字猜**的，猜不到就回 `null`——
+不會硬挑一個看起來像的欄位假裝知道。不管猜中沒有，原始資源都原樣附在 `resources` 裡。
+
+### 為什麼沒有寫死 resource id
+
+Aqara 的每個欄位都是一組 `x.y.z` 數字（例如 `3.51.85`），官方文件按 model 分開列，
+網路上找得到的多半是別人抄來抄去、對不上自己那台韌體的版本。**寫死一組猜來的 id，
+錯了會靜默失效**——讀到的永遠是空值，而不是報錯。
+
+所以 `aqara_api.read_device()` 是「先打 `query.resource.info` 問這個 model 開放哪些
+resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝置（FP2 以外的 Aqara 產品）
+不用改任何 code 就能讀，也不會因為韌體改版多了欄位而漏讀。
+
+---
+
 ## 資料封存機制
 
 | 分頁 | 觸發條件 | 封存至 |
@@ -895,6 +963,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | switchbot_api.py | SwitchBot API v1.1 封裝（認證、設備控制、感應器讀取 含 Meter Pro CO2、DIY IR、webhook 註冊管理） |
 | panasonic_api.py | Panasonic Smart App API 封裝（登入、除濕機控制與狀態查詢） |
 | lg_api.py | LG ThinQ Connect API 封裝（PAT 認證、裝置探索、除濕機控制與狀態查詢）。除濕機 property 校準點集中在檔案頂部常數 |
+| aqara_api.py | Aqara Cloud Open API v3.0 封裝（MD5 簽名、accessToken/refreshToken 生命週期與 Sheet 持久化、裝置與 resource 探索、FP2 語意層）。**沒有寫死的 resource id**——先問 `query.resource.info` 再照清單讀值 |
 | weather_api.py | 中央氣象署 API 封裝（一週預報、全台鄉鎮查詢、體感溫度） |
 | observation_api.py | 中央氣象署觀測站即時資料 API（補 weather_api 預報以外的「現在實際多少」） |
 | notion_api.py | Notion API 封裝（唯讀查詢、Sheet 篩選條件解析、事件格式化） |
