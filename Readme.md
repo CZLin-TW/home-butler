@@ -2,6 +2,14 @@
 
 > 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。兩個 repo 一起運作，不分開使用。
 
+## Dashboard 首頁輕量查詢
+
+`GET /api/dashboard?include_weather=false` 只讀取待辦／庫存並回傳 `{todos, food}`，不呼叫天氣服務。省略參數維持舊版完整回應。
+
+`GET /api/sensors/status?include_history=false` 保留目前讀值（含 CO₂）、位置與 online，history 回空陣列且不組裝歷史；可搭配 `name` 選取感測器。省略參數仍回傳完整歷史。首頁在展開圖表後才查歷史，裝置頁可繼續使用舊端點。
+
+離線契約測試：`python -m unittest discover -s tests -v`。測試以假的外部依賴執行實際函式，不啟動正式 SDK，也不呼叫 Sheets 或家電。這些測試已納入 CI；不能代替真實 FastAPI／設備整合測試。部署時先更新本後端，再更新 Dashboard。
+
 ## 這是什麼？
 
 一個用 LINE Bot 操作的家庭智能管家系統。家人只要會用 LINE 就能使用——傳訊息給管家，它就會幫你管理食品庫存、待辦事項、智能家電、天氣查詢，還會每天主動推播提醒。

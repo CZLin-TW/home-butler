@@ -93,13 +93,23 @@ def api_assistant(req: AssistantRequest):
 # ── 首頁彙整 ──
 
 @router.get("/dashboard")
-def api_dashboard():
+def api_dashboard(include_weather: bool = True):
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
     不含頻繁變動的統一裝置狀態——前端另呼叫 /api/devices/status 補齊。
 
     註：ThreadPoolExecutor 內同時跑兩個天氣 future，主緒程並行跑 ctx.load()
     （同步）拉 Sheet。進入 with 區塊後才 .result()，讓這三件事重疊起來。
     """
+    # Homepage life cards must not wait for weather, device metadata or conversation sheets.
+    # Keep the default response for older Dashboard deployments and other callers.
+    if not include_weather:
+        ctx = RequestContext()
+        ctx.load(["待辦事項", "食品庫存"])
+        return {
+            "todos": [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"],
+            "food": [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"],
+        }
+
     results = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
@@ -904,10 +914,10 @@ def api_pc_status():
 # ── 感測器歷史（home-butler 內部 polling SwitchBot API 累積） ──
 
 @router.get("/sensors/status")
-def api_sensors_status():
+def api_sensors_status(include_history: bool = True, name: str = ""):
     """回傳所有 polling 過的感測器當前讀值 + 最近 24h history。
     polling 由 home-butler startup 時 spawn 的 thread 處理（main.py），不靠 PC agent。"""
-    return sensor_state.snapshot()
+    return sensor_state.snapshot(include_history=include_history, name=name)
 
 
 @router.get("/ac/status")

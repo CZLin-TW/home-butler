@@ -68,17 +68,20 @@ def record(device_name: str, location: str, temp, humidity, co2=None) -> None:
     threading.Thread(target=_sheet_append_async, args=(point, device_name, location), daemon=True).start()
 
 
-def snapshot() -> dict:
+def snapshot(include_history: bool = True, name: str = "") -> dict:
     """Return all sensor state for /api/sensors/status (key = device_name)."""
     now = time.time()
     out = {}
     with _lock:
-        for name, s in _sensors.items():
+        for device_name, s in _sensors.items():
+            if name and name != device_name:
+                continue
             online = (now - s["last_polled_at"]) <= OFFLINE_THRESHOLD_S
-            sorted_keys = sorted(s["history_dict"].keys())
-            history = [s["history_dict"][k] for k in sorted_keys]
-            out[name] = {
-                "device_name": name,
+            # Summary reads avoid sorting/assembling history as well as transferring it.
+            history = ([s["history_dict"][k] for k in sorted(s["history_dict"])]
+                       if include_history else [])
+            out[device_name] = {
+                "device_name": device_name,
                 **s["meta"],
                 "current": s["current"],
                 "history": history,

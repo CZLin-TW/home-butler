@@ -18,3 +18,6 @@ jobs:
 
       - name: Check Python syntax
         run: python -m compileall -q .
+
+      - name: Test home payload contracts without external services
+        run: python -m unittest discover -s tests -v
