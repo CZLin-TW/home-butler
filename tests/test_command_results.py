@@ -2,24 +2,26 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 from command_result import CommandResult
+from device_name_resolution import resolve_ir_device
 from test_callback_concurrency import endpoint
 
 
 class CommandResultTests(unittest.TestCase):
     def test_ir_provider_outcome_and_legacy_text(self):
         api = SimpleNamespace(ir_control=Mock())
-        env = {"CommandResult": CommandResult, "get_device_id_by_name": lambda *a: "fake-id", "switchbot_api": api}
+        env = {"CommandResult": CommandResult, "resolve_ir_device": resolve_ir_device, "switchbot_api": api}
+        ctx = SimpleNamespace(get=lambda _: [{"名稱": "測試", "類型": "IR", "狀態": "啟用", "Device ID": "fake-id"}])
         typed = endpoint("handlers/device.py", "control_ir_result", env)
         legacy = endpoint("handlers/device.py", "handle_control_ir", env)
         for reply, expected in [({"success": True}, "success"), ({"success": False, "error": "rejected"}, "failed"),
                                 ({"success": False, "uncertain": True}, "unknown")]:
             api.ir_control.return_value = reply
-            result = typed({"device_name": "測試", "button": "電源"}, None)
+            result = typed({"device_name": "測試", "button": "電源"}, ctx)
             self.assertEqual(result.status, expected)
             if expected == "unknown": self.assertIn("❌", result.message)
-            self.assertEqual(legacy({"device_name": "測試", "button": "電源"}, None), result.message)
+            self.assertEqual(legacy({"device_name": "測試", "button": "電源"}, ctx), result.message)
         api.ir_control.reset_mock()
-        self.assertEqual(typed({"device_name": "測試"}, None).status, "failed")
+        self.assertEqual(typed({"device_name": "測試"}, ctx).status, "failed")
         api.ir_control.assert_not_called()
 
     def test_dehumidifier_partial_failure_stops_remaining_steps(self):

@@ -1,4 +1,5 @@
 from command_result import CommandResult
+from device_name_resolution import resolve_ir_device
 import gspread
 import json
 from datetime import datetime, timedelta
@@ -491,17 +492,12 @@ def handle_control_ir(data, ctx):
 
 
 def control_ir_result(data, ctx):
-    device_name = data.get("device_name", "")
     button = data.get("button", "")
-    device_id = get_device_id_by_name(device_name, ctx)
-
-    if not device_id:
-        ir_devices = get_all_devices_by_type("IR", ctx)
-        if len(ir_devices) == 1:
-            device_id = ir_devices[0].get("Device ID", "")
-            device_name = ir_devices[0].get("名稱", device_name)
-        else:
-            return CommandResult.failed(f"❌ 找不到「{device_name}」，請確認設備名稱")
+    device, error = resolve_ir_device(data.get("device_name", ""), ctx.get("智能居家"))
+    if error:
+        return CommandResult.failed(error)
+    device_name = device["名稱"]
+    device_id = device["Device ID"]
 
     if not button:
         return CommandResult.failed("❌ 請指定要按哪個按鈕")
