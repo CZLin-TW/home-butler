@@ -609,7 +609,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/auto/rules/{area_id} | DELETE | 刪除該區域的自動夜燈規則 |
 | /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
 | /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
-| /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，走跟 LINE bot 相同的 Claude pipeline，回 `{reply}`；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
+| /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
 
 ---
 
@@ -623,7 +623,15 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 語音 →(Siri 聽寫)→ 文字 →POST /api/assistant→ process_message（共用 LINE 那套）→ {reply} →(Siri 朗讀)
 ```
 
-`/api/assistant` 與 LINE webhook 共用 `assistant.py:process_message`，所以 LINE 能做的指令 Siri 都能做，行為一致。
+`/api/assistant` 與 LINE webhook 共用 `assistant.py:process_message` 的意圖解析與控制。語音入口另外啟用 `voice=True`：純設備操作優先使用 handler 的實際執行結果，避免模型事先產生的冗長回覆；最後經 `voice_reply.py` 整理成適合朗讀的文字。LINE 保留原本的文字回覆路徑。
+
+### Siri 精簡回覆（v1.38.2）
+
+- 原有捷徑繼續讀 `reply` 即可，不必新增來源參數；此格式用於整個 `/api/assistant` 語音入口，不影響 LINE webhook 與 Dashboard 設備 API。
+- 例如 IR handler 回 `✅ 主臥電扇「開」指令已送出`，Siri 收到 `已送出主臥電扇的電源指令。`；IR 沒有狀態回讀，不宣稱設備已開啟／關閉。
+- 移除 emoji、Markdown 裝飾；選項中的 `/` 換成停頓，百分比／攝氏溫度／完整斜線日期轉成可朗讀文字。保留負數、數值、時間；無法判定語意的數字斜線（例如 `3/4`）保留，不亂猜日期或比例。
+- 失敗、結果未確認、部分成功及追問不截斷；查詢與混合指令保留原本內容再做格式整理。沒有另外增加 AI 呼叫，也不修改共用 SYSTEM_PROMPT。
+- `對話暫存` 保存實際收到的輸入及格式化後的語音回覆，以便比對手機實際聽到的內容。
 
 ### 身分辨識（重要）
 
@@ -664,6 +672,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 使用者回報：手動輸入「打開主臥電風扇」可送出，但語音有時只傳入「主臥電風扇」；iPhone 即時辨識畫面顯示完整句子，也不代表捷徑最後取得的文字完整。「要求輸入」可自訂提示，但本次回報中它與「聽寫文字」都曾漏掉開頭動作，尚未確認是否與 Siri／HomeKit 意圖處理有關，也不能宣稱切換動作即可修復。
 
 - 用不連 API 的「聽寫文字 → 顯示結果」小捷徑，比較播放鍵啟動與 Siri 啟動的輸出；保留 iOS 版本、啟動方式、原句及實際結果。
+- 後續使用者對照確認：直接聽寫不漏「打開」，Siri 啟動會漏。建議在開頭加「關閉 Siri 並繼續」（Dismiss Siri and Continue），接「朗讀提示 → 聽寫文字 → API → 取得 reply → 朗讀回覆」；使用者回報此方式看起來可用。此路徑由捷徑負責朗讀，與上方 Siri 保持啟用、讀取最終輸出的流程不同；鎖定手機／HomePod 未驗證，不承諾免解鎖，也未證實是 HomeKit 攔截。
 - 後端 `對話暫存` 的 `user` 內容是 `/api/assistant` 收到的文字（去除頭尾空白）；完整設備指令卻找不到名稱與動作漏字是不同問題。
 - IR 控制現在先匹配啟用 IR 設備的完整名稱，再以結尾「電風扇／電扇」作等價比對，保留房間前綴。唯一匹配才送出，使用設定中的 Device ID 與名稱回覆。不做任意模糊比對、不替遺失的開／關補動作。
 - 名稱省略且僅有一台啟用 IR 設備時可自動選取；明確指定但不相符的名稱不再改用唯一一台設備。重名、別名歧義、停用、錯誤類型或缺少 ID 都拒絕送出。

@@ -4,6 +4,8 @@
 
 IR 名稱修正見 `device_name_resolution.py` 與 `tests/test_ir_names.py`：完整名稱優先，僅等價化結尾「電風扇／電扇」，保留房間；歧義不送出。只有省略名稱時可用單一設備 fallback，明確錯誤名稱不可改控另一台。Siri 漏字與後端名稱解析分開驗證，勿由裸設備名稱自動補上開／關。
 
+Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` 後經 `voice_reply.format_voice_reply`，請保持 `{reply}` 契約。純設備控制用實際 handler 結果；錯誤／未知／部分成功／追問不可為縮短而刪除。LINE 不啟用 voice。格式整理不可改掉溫度、負號、百分比與時間，不新增 LLM 呼叫；測試見 `tests/test_voice_reply.py`。
+
 # 版本管理
 
 系統版本不在 home-butler 管。Source of truth 是 **Dashboard 的 `package.json:version`**，本 repo 透過 `config.py:get_app_version()` 在 runtime 撈 Dashboard `/api/version`（1 小時 cache，失敗 fallback「未知」），由 `prompt.py` 注入 `SYSTEM_PROMPT`，讓 LINE bot 能回答「目前版本是？」之類的問題。

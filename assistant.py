@@ -133,7 +133,7 @@ def _flatten_action(entry):
     return data
 
 
-def process_message(user_id, text, user_name, ctx):
+def process_message(user_id, text, user_name, ctx, *, voice=False):
     """一句話 → Claude 解析 → 分派 actions → 組出使用者可見的回覆字串。
 
     純函式：不碰 LINE / HTTP，也不負責存對話歷史（由 caller 自行決定）。
@@ -199,6 +199,10 @@ def process_message(user_id, text, user_name, ctx):
     has_semantic = bool(action_types & SEMANTIC_ACTIONS)
 
     if has_error or unexpected:
+        return "\n".join(results)
+    # Voice device commands use actual handler outcomes, not the model's verbose
+    # pre-written acknowledgement. Mixed queries/clarifications keep their context.
+    if voice and results and action_types <= {"control_ir", "control_ac", "control_dehumidifier", "set_dehumidifier_auto"}:
         return "\n".join(results)
     if has_semantic and not has_realtime:
         raw_data = "\n".join(r for r in results if r and "❌" not in r)

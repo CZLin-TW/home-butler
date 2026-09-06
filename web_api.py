@@ -14,6 +14,7 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import SIRI_USER_ID, TZ, now_taipei
 from assistant import process_message
+from voice_reply import format_voice_reply
 from prompt import get_user_name
 from conversation import save_conversation, cleanup_conversation
 from sheets import (
@@ -69,7 +70,8 @@ def api_assistant(req: AssistantRequest):
     """語音助理入口：吃一句自然語言，走跟 LINE bot 完全相同的 Claude pipeline。
 
     Siri 捷徑只負責聽寫成文字 POST 過來，後端 process_message 解析 + 分派 + 組句，
-    回 {"reply": ...} 給捷徑朗讀。user_id 不帶則用 config.SIRI_USER_ID。
+    回 {"reply": ...} 給捷徑朗讀；語音專用精簡與符號整理不影響 LINE。
+    user_id 不帶則用 config.SIRI_USER_ID。
     對話歷史在背景存檔，讓多輪對話（「再低一度」）能延續。
     """
     text = (req.text or "").strip()
@@ -80,7 +82,7 @@ def api_assistant(req: AssistantRequest):
     ctx = RequestContext()
     ctx.load()
     user_name = get_user_name(user_id, ctx)
-    reply = process_message(user_id, text, user_name, ctx)
+    reply = format_voice_reply(process_message(user_id, text, user_name, ctx, voice=True))
 
     def _save():
         try:
