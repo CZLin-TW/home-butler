@@ -47,7 +47,7 @@ from agent_ws import send_agent_command
 from config import TZ, line_bot_api
 from sheets import state_get, state_set
 
-# 「家庭成員」分頁上的收件人開關欄（main.py startup 用 ensure_columns 自動補）
+# 「家庭成員」分頁上的收件人開關欄（main.py 的背景 _warm_up 用 ensure_columns 自動補）
 ALERT_COLUMN = "系統告警"
 
 # 連續幾個 tick 打不到劇院 agent 才告警（tick 5 分 → 預設約 15 分）。
@@ -237,12 +237,11 @@ def check_pc_agents(ctx, now=None) -> None:
 def _on_event_loop_thread() -> bool:
     """現在是不是就在 event loop 那條 thread 上。
 
-    `/notify_realtime`（手動 debug 端點）是 async 的，會在 loop 裡**同步**呼叫
-    run_realtime_tick。這條路徑下再 `run_coroutine_threadsafe` 回同一顆 loop 然後 block
+    若 caller 在 event loop 裡同步呼叫健康檢查，再 `run_coroutine_threadsafe` 回同一顆 loop 然後 block
     等結果 = 自己等自己，整個 server 會卡到 timeout 為止，還會被誤記成一次劇院失敗。
 
-    這個檢查本來就只是「順便看一眼」，遇到這種呼叫路徑直接跳過即可——polling thread
-    每 5 分那條照常會檢查到。
+    遇到這種呼叫路徑直接跳過即可；正常 agent-health 工作每 300 秒在獨立 thread 執行。
+    /notify_realtime 現在是同步路由，由 FastAPI threadpool 執行。
     """
     try:
         return asyncio.get_running_loop() is _loop
@@ -314,7 +313,7 @@ def check_theater_agent(ctx) -> None:
 
 
 def run_checks(ctx, now=None) -> None:
-    """由 notify.run_realtime_tick 每 5 分呼叫一次。兩項檢查各自 try/except 隔離——
+    """由 main.py 的 agent-health 工作每 300 秒呼叫；手動相容入口也可呼叫。兩項檢查各自 try/except 隔離——
     一項壞掉不該連累另一項，更不該連累 tick 上其他真正在幹活的步驟。"""
     try:
         check_pc_agents(ctx, now=now)

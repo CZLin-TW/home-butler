@@ -352,7 +352,7 @@ def run_todo_tick(ctx):
 
 
 def run_realtime_tick(ctx, now=None):
-    """即時 tick，每 5 分鐘由 main.py 的 polling thread 呼叫一次（原 GAS 每 15 分鐘）：
+    """未初始化 JobRunner 時的手動相容入口；正常背景由 main.py 註冊的獨立工作執行：
     1. 同步外部行事曆
     2. 補齊週期性待辦的「下一筆」實例（materialize；總開關關閉時 no-op）
     3. 推播即將到期/未完成的待辦提醒
@@ -363,10 +363,10 @@ def run_realtime_tick(ctx, now=None):
     待辦提醒的時間窗與去重都收在 _process_todo_reminders 內（文字由程式規則產生 →
     精確比對去重），不再依賴整點判斷。
 
-    每個步驟各自 try/except 隔離——這是無人值守跑在背景 thread 的工作，一步壞不該擋掉
+    每個步驟各自 try/except 隔離，手動補做時一步壞不該擋掉
     其餘步驟（尤其行事曆同步失敗，不能害到期排程不執行）。
 
-    註：週期性待辦的生成「只」掛這條 tick，絕不另外掛第二個時間源——雙時間源會重入重生。
+    正常週期生成在 run_todo_tick；此函式只作 jobs 未就緒時的 fallback，不另註冊背景計時器。
     """
     now = now or now_taipei()
     today = now.date()
@@ -402,7 +402,7 @@ def run_realtime_tick(ctx, now=None):
 
 @router.post("/notify_realtime")
 def notify_realtime():
-    """手動觸發 realtime tick（debug / 補做）。日常由 polling thread 每 5 分自動驅動，不再靠 GAS。"""
+    """手動補做 schedules／notion／todo-reminders／agent-health；已在跑的工作跳過。正常週期見 main.py。"""
     try:
         ctx = RequestContext()
         ctx.load()

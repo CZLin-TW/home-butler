@@ -51,7 +51,7 @@ _ac_columns_warning_printed = False
 # ── 防黴送風（關冷氣前先吹乾蒸發器） ──
 # 冷氣/除濕運轉會在蒸發器結露，直接關機悶著容易長黴。關機前若「這次運轉夠久且是會結露
 # 的模式」，先切送風吹乾 N 分鐘，再由排程把它真正關掉。
-ANTIMOLD_FAN_MINUTES = 5          # 送風時長「預設」（實際受 polling thread 5 分粒度影響，約 5~10 分）
+ANTIMOLD_FAN_MINUTES = 5          # 預設送風分鐘；收尾由 60 秒 schedules 工作執行，另受網路與工作耗時影響
 ANTIMOLD_MIN_RUNTIME_MINUTES = 30  # 運轉門檻「預設」：從最後一次開機算起運轉滿這麼久才防黴
 ANTIMOLD_MODES = {"冷氣", "除濕"}  # 只有會結露的模式才需要（送風/暖氣/自動不攔）
 ANTIMOLD_SOURCE = "防黴"           # 排程「來源」欄值，跟使用者/自動關機排程區隔開

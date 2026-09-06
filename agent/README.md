@@ -186,7 +186,7 @@ agent start: Xeon-1230V2 (192.168.68.55) → https://home-butler.onrender.com  l
 
 ```python
 THEATER_AGENT_URL = "http://127.0.0.1:8080"
-THEATER_AGENT_KEY = "czhometheater"   # theater-agent 的 API key（有用 THEATER_AGENT_KEY env var 覆蓋就填那個值）
+THEATER_AGENT_KEY = "<部署端設定的 API key>"   # 必須與 theater-agent 相同；不要提交真實值
 ```
 
 設了 URL 之後 agent 會在 WebSocket hello 多宣告一個 `theater` capability，並把 `theater.summary` / `theater.set_flags` 指令轉打到 localhost——Dashboard PC 卡片的「劇院 agent」區塊（功能開關 + log 監看）就是走這條鏈：
@@ -271,7 +271,7 @@ LOG_PATH = r"C:\butler-agent\agent.log"
 
 ## 更新 agent
 
-**預設自動更新**：agent 每 5 ticks（TICK_SECONDS=60 時約 5 分鐘）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。`main` push 完之後約 5 分鐘內所有 PC 自動跟上，**不用手動**。
+**預設自動更新**：agent 每 5 ticks（TICK_SECONDS=60 時約 5 分鐘）跑一次 `git fetch origin main`，跟本機 HEAD 比對，有新 commit 就 `git pull` → `py_compile` 驗新 code syntax 過得了 → 自己用 `subprocess.Popen` spawn detached 新 process 接班 + `os._exit(0)`（不靠 Task Scheduler restart-on-fail，歷史上那條路太脆——使用者沒勾／3 次 attempt 用完都會讓 agent 永久死到下次重開機）。正常連線時通常約 5 個 tick 後偵測更新，另加下載與重啟時間；必須核對新程序回報，不能把 push 成功當成各台已更新。
 
 要調整頻率可在 `agent_config.py` 設定：
 
@@ -362,3 +362,9 @@ agent 啟動時先對 `<butler-agent>/agent.lock`（在 repo 外，例如 `C:\bu
 ```
 
 接收端是 `home-butler/web_api.py:api_pc_heartbeat`，丟進 `pc_state.py` 的 in-memory ring buffer（24h × 60s = 1440 點/PC）。home-butler 重啟資料會丟（第一版簡化版設計），下次 heartbeat 開始重新累積。
+
+## 與劇院 agent 的界線
+
+本 agent 提供 PC 指標、Hue 控制與 HTTP 中繼；三個劇院開關、KEF 訂閱／定期補漏、Apple TV 畫面恢復均屬於獨立的 theater-agent。`theater.summary` 的可選健康欄位透明轉送，這裡不重建一套喇叭監聽器。
+
+本 agent 的更新是 pull 後編譯 `agent.py` 再重啟；它沒有 theater-agent 的候選 worktree、兩程序健康守護與自動回復，不可混用兩者的部署保證。參考 [系統導覽](../docs/system-overview.md) 與 [驗證紀錄](../docs/verification.md)。

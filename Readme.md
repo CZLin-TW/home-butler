@@ -1,6 +1,6 @@
 # 家庭 AI 管家系統
 
-> 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。兩個 repo 一起運作，不分開使用。
+> 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。Dashboard 依賴本後端；LINE Bot 可獨立使用。劇院設備另由私人 theater-agent repo 執行。
 
 ## Dashboard 首頁輕量查詢
 
@@ -460,7 +460,7 @@ Notion 整合會將事件同步到待辦事項 Sheet，並依權限設定標記�
 
 - **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**（`notify.run_daily_push_if_due`）：每天過了 `DAILY_PUSH_HOUR`（環境變數，預設 `21` = 晚上 9 點）後的第一個 tick 觸發一次；用 Sheet「系統狀態」分頁的 `最後每日推播日期` marker 去重，跨 Render 重啟存活——不重發也不漏發。
-- **Agent 失聯告警**（`health_alert.run_checks`）：掛在 realtime tick 最後一步，純觀察不控制設備。詳見 `AGENTS.md` 的「Agent 失聯告警」。
+- **Agent 失聯告警**（`health_alert.run_checks`）：由獨立 `agent-health` 工作每 300 秒執行，純觀察不控制設備。詳見 `AGENTS.md` 的「Agent 失聯告警」。
 
 能這樣做的前提是 **UptimeRobot 每 5 分 ping 保持實例醒著**（見「十三、防冷啟動」）：polling thread 隨行程睡著就停，所以 UptimeRobot 是 load-bearing，**別當成可選監控隨手關掉**。
 
@@ -471,7 +471,7 @@ curl -X POST https://home-butler.onrender.com/notify_realtime -H "X-API-Key: <ke
 curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 ```
 
-> **從舊版 GAS 遷移**：早期版本用 Google Apps Script 每 15 分鐘打 `/notify_realtime`、每日晚間打 `/notify`。改為 in-process 後，請到 https://script.google.com 對應專案，把那兩條觸發條件（時鐘圖示 → 觸發條件）**刪除或停用**，避免與 thread 重複執行。建議順序：先部署新版、確認 Render log 出現 `[notify-tick]` 且排程/推播正常，**再**關掉 GAS——重疊期很短、且工作本身冪等（排程狀態翻「已執行」後第二跑者會 skip、提醒有去重），無害。
+> **從舊版 GAS 遷移**：早期版本用 Google Apps Script 每 15 分鐘打 `/notify_realtime`、每日晚間打 `/notify`。改為 in-process 後，請到 https://script.google.com 對應專案，把那兩條觸發條件（時鐘圖示 → 觸發條件）**刪除或停用**，避免與 thread 重複執行。建議順序：先部署新版、確認 Render log 出現 `[startup] independent periodic jobs started`，並從 `/api/system/jobs` 核對各工作執行時間與錯誤，**再**關掉 GAS——重疊期很短、且工作本身冪等（排程狀態翻「已執行」後第二跑者會 skip、提醒有去重），無害。
 
 ---
 
@@ -530,7 +530,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | / | GET / HEAD | 健康檢查（UptimeRobot 用） |
 | /callback | POST | Line Webhook 接收訊息 |
 | /notify | POST | 手動觸發晚間綜合推播（外部行事曆同步 + 明日天氣 + 食品過期 + 明日與未完成待辦摘要）。日常由 polling thread 每日晚間（預設 21 點）自動驅動，不再靠 GAS |
-| /notify_realtime | POST | 手動觸發 realtime tick（外部行事曆同步 + 即將到時的待辦提醒 + 執行已到時間的設備排程 + 封存）。日常由 polling thread 每 5 分鐘自動驅動，不再靠 GAS |
+| /notify_realtime | POST | 手動觸發 realtime tick（外部行事曆同步 + 即將到時的待辦提醒 + 執行已到時間的設備排程 + 封存）。日常由獨立背景工作執行：排程每 60 秒，Notion／待辦／健康各每 300 秒 |
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
@@ -573,21 +573,21 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/ac/status | GET | 所有空調當下狀態 + 24h history snapshot，給 Dashboard chart 背景畫 AC on 區段用 |
 | /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state，並回傳後端計算的 `humidity_on_threshold` / `humidity_off_threshold`，供 Dashboard 共用同一組 hysteresis |
 | /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
-| /api/todos | GET | 列出所有待辦事項 |
+| /api/todos | GET | 依可信 `X-Dashboard-User` 過濾私人事項；無此 header 的 API-key 系統呼叫維持家庭級權限 |
 | /api/todos | POST | 新增待辦事項 |
-| /api/todos | PATCH | 修改待辦事項 |
-| /api/todos | DELETE | 完成（刪除）待辦事項 |
+| /api/todos | PATCH | 依 `todo_id` 定位並重驗權限；舊呼叫可用明確名稱／日期／時間，重名拒絕 |
+| /api/todos | DELETE | 完成可操作的待辦；Notion 項目保留完成記號 |
 | /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦（含 light_area_id/name），給 PC agent 每分鐘依區域觸發 Hue breathe |
 | /api/food | GET | 列出所有有效食品庫存 |
 | /api/food | POST | 新增食品 |
 | /api/food | PATCH | 修改食品 |
 | /api/food | DELETE | 消耗（刪除）食品 |
-| /api/schedules | GET | 列出所有待執行排程 |
+| /api/schedules | GET | 預設列待執行；`include_attention=true` 加入失敗／待確認紀錄 |
 | /api/schedules | POST | 新增排程 |
-| /api/schedules | DELETE | 取消排程 |
+| /api/schedules | DELETE | 取消待執行排程，或以 `execution_id` 封存失敗／待確認紀錄，不重送指令 |
 | /api/weather | GET | 查詢天氣（date, location） |
 | /api/members | GET | 列出所有啟用的家庭成員 |
-| /api/recurring-todos | GET | 列出啟用中的週期待辦模板（每筆附後端算好的人類可讀「摘要」字串給前端直接顯示） |
+| /api/recurring-todos | GET | 依同一可信使用者邊界過濾啟用模板，附人類可讀「摘要」；系統呼叫維持家庭級權限 |
 | /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/每季/半年/每年/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/start_date/end_date；每季/半年/每年用 start_date 當錨點） |
 | /api/recurring-todos | PATCH | 修改週期待辦模板（Dashboard 走 rule_id 精準定位，或用 item + recur_type 消歧） |
 | /api/recurring-todos | DELETE | 停整個週期（模板狀態 → 停用，不刪除；可帶 rule_id 或 item + recur_type） |
@@ -742,7 +742,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 設備排程由獨立 schedules 工作每 60 秒檢查一次，通常延遲在一個檢查週期內（仍受網路、服務休眠影響）。觸發時間超過 2 小時未執行的排程自動標記為已過期。設備所有排程完成後統一通知建立者（含執行結果與設備目前狀態）。
 
-**冷氣防黴送風**：關冷氣時，若這次以冷氣/除濕（會結露的模式）從最後一次開機算起已運轉 ≥30 分鐘，home-butler 不直接關，而是先切「送風」吹乾蒸發器約 5 分鐘（實際 5~10 分，受 5 分輪詢粒度影響）再由排程自動關閉，降低濕氣悶在機內長黴。全部空調自動套用、免設定；送風期間若重新開冷氣，收尾關會自動取消。經 home-butler 的所有關機路徑（LINE / Dashboard / Siri / Hub 2 按鈕 / 自動關機 timer）都會觸發；唯獨直接用實體遙控器關機因繞過 home-butler 無法攔截。對應排程在「排程指令」分頁以「來源=防黴」標記。**門檻（預設 30 分）與送風時長（預設 5 分）可在「智能居家」分頁逐台調整**：欄位「防黴運轉門檻分鐘」「防黴送風分鐘」，留空用預設、門檻填 0 代表每次關都送風。
+**冷氣防黴送風**：關冷氣時，若這次以冷氣/除濕（會結露的模式）從最後一次開機算起已運轉 ≥30 分鐘，home-butler 不直接關，而是先切「送風」吹乾蒸發器約 5 分鐘（正常情況另加不到一個 60 秒排程週期，仍受網路、工作耗時與服務休眠影響）再由排程自動關閉，降低濕氣悶在機內長黴。全部空調自動套用、免設定；送風期間若重新開冷氣，收尾關會自動取消。經 home-butler 的所有關機路徑（LINE / Dashboard / Siri / Hub 2 按鈕 / 自動關機 timer）都會觸發；唯獨直接用實體遙控器關機因繞過 home-butler 無法攔截。對應排程在「排程指令」分頁以「來源=防黴」標記。**門檻（預設 30 分）與送風時長（預設 5 分）可在「智能居家」分頁逐台調整**：欄位「防黴運轉門檻分鐘」「防黴送風分鐘」，留空用預設、門檻填 0 代表每次關都送風。
 
 ### 風格
 
@@ -770,7 +770,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | 設備列表、除濕機狀態 | 程式的即時數據結果 |
 | 設備控制成功 | Claude 的 reply |
 | 排程操作（新增、取消、查詢） | Claude 的 reply |
-| 排程自動執行 | notify_realtime 執行，設備排程全部完成時通知建立者 |
+| 排程自動執行 | `schedules` 工作執行，回報已執行／失敗／待確認結果給建立者 |
 | 設備控制失敗（❌） | 程式的實際錯誤訊息 |
 | 廣播（@all） | 直接轉發，不經 Claude |
 | 指派待辦給他人 | Claude 的 reply + 自動推送通知給被指派者 |
@@ -785,7 +785,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | 推播 | 觸發時間 | 內容 |
 |------|---------|------|
 | 晚間綜合推播 | 晚上 9 點 | 明日天氣預報（含今日比較與體感溫度）+ 食品過期提醒 + 明日與未完成待辦（週期待辦因為「下一筆」平常就已生成為普通待辦，會自然被這裡納入，不需另外從模板預告） |
-| 即時提醒 | 每 5 分鐘 | 三階段，各發一次：任務前 20 分內事前提醒／逾時 10~60 分「未完成」／逾時滿 1 小時起每小時「已逾時約 N 小時」（逾時提醒只在任務當天發，過午夜自停）+ 排程指令執行 |
+| 即時提醒 | 每 5 分鐘 | 三階段，各發一次：任務前 20 分內事前提醒／逾時 10~60 分「未完成」／逾時滿 1 小時起每小時「已逾時約 N 小時」（逾時提醒只在任務當天發，過午夜自停）；設備排程另由每 60 秒工作執行 |
 | Hue 燈光提醒 | PC agent 每 60 秒 | 有時間、已到期、未完成且燈光提醒=TRUE 的待辦，對每筆設定的 Hue grouped_light 觸發 breathe；同一區域同一輪多筆待辦只呼吸一次 |
 | Agent 即時通道 | PC agent 常駐 WebSocket | PC agent 每約 25 秒 heartbeat 到 `/api/agent/ws`，後端可用 `/api/agent/status` 確認在線狀態 |
 
@@ -904,7 +904,7 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 同步頻率：
 - 使用者查待辦時即時同步
 - /notify（每日推播）觸發同步
-- /notify_realtime（realtime tick，每 5 分鐘）觸發同步
+- `notion` 獨立工作每 300 秒觸發同步；`/notify_realtime` 僅保留手動補做入口
 
 ### 目前支援
 
@@ -966,7 +966,7 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 | device_status.py | Dashboard 共用的統一裝置狀態 in-memory cache、裝置目錄與背景刷新 single-flight 控制 |
 | prompt.py | SYSTEM_PROMPT 與 Claude 提示詞組裝 |
 | conversation.py | 對話暫存管理、Claude API 呼叫、推播訊息生成 |
-| notify.py | 推播端點（/notify 晚間綜合推播、/notify_realtime 即時提醒與排程執行） |
+| notify.py | 獨立背景工作的排程／待辦／推播函式；/notify 與 /notify_realtime 為手動補做入口 |
 | calendar_sync.py | 外部行事曆同步（Notion → 待辦 Sheet） |
 | health_alert.py | Agent 失聯告警：PC agent heartbeat 斷線 / 劇院 agent 無回應時推 LINE，狀態翻轉才推、marker 存 Sheet 跨重啟去重。**只觀察不控制任何設備** |
 | handlers/food.py | 食品庫存 handler（新增、刪除、修改、查詢） |
@@ -1049,3 +1049,9 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 - 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。
 - 執行 `python -m unittest discover -s tests -v` 與編譯檢查。測試使用假 Sheets／SDK，不向家電或 LINE 發送訊息。
 - 部署仍限定單一 Python process／worker。RLock、工作排程與記憶體快取不是跨主機鎖；Sheets 也沒有多步交易，手動直接改表不受鎖保護。需要多 worker 或多實例時，必須先抽出唯一 scheduler／writer 並導入可交易的資料庫或分散式協調，不能只增加 worker 數。
+
+## 文件入口
+
+- [三個 repo 系統導覽](docs/system-overview.md)：責任、資料流、部署／回復與後續 session 的閱讀順序。
+- [驗證紀錄](docs/verification.md)：離線測試、CI 與實際服務觀察的界線。
+- [開發指引](AGENTS.md) 與 [PC agent 維護](agent/README.md)：程式維護與本機部署。

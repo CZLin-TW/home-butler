@@ -3,7 +3,7 @@ from todo_access import TODO_ID, new_todo_id, visible
 
 設計核心：**模板 / 實例分離 + 永遠掛著「下一次」**
 - 「週期待辦模板」分頁只描述「規律」（每天 / 每週幾 / 每月 N 號 / 間隔 N 天）。
-- 每 5 分鐘由 notify.py 的 realtime tick 呼叫 materialize_recurring_todos，確保**每條啟用
+- 每 300 秒由 todo-reminders 工作的 notify.run_todo_tick 呼叫 materialize_recurring_todos，確保**每條啟用
   規則在「待辦事項」分頁裡永遠有且只有一筆 active（待辦）實例**——「下一次要做的」。
 - 生成出來的就是普通待辦 → 完成、燈光提醒、首頁卡、提醒全部沿用既有邏輯，零修改。
   完成 / 刪除那筆 → 該規則暫時沒有 active 實例 → 完成當下 inline（或下個 tick）補上下一筆。
@@ -245,7 +245,7 @@ def _compute_next_occurrence(rule, today):
     return occ
 
 
-# ── 生成引擎（掛在 notify.py 每 5 分的 realtime tick） ──
+# ── 生成引擎（獨立 todo-reminders 工作；手動相容入口也可呼叫） ──
 
 def _template_sheet():
     return get_or_create_sheet(TEMPLATE_SHEET, TEMPLATE_HEADERS)

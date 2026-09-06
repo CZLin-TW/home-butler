@@ -1,3 +1,7 @@
+# 接手入口
+
+先讀 [README](Readme.md)、[系統導覽](docs/system-overview.md) 與 [驗證紀錄](docs/verification.md)。下列歷史事故用來解釋設計；目前背景週期以 `main.py` 的 `jobs.add` 為準。更新行為時同步修正舊段落、API 表格與註解，避免只追加版本章節。
+
 # 版本管理
 
 系統版本不在 home-butler 管。Source of truth 是 **Dashboard 的 `package.json:version`**，本 repo 透過 `config.py:get_app_version()` 在 runtime 撈 Dashboard `/api/version`（1 小時 cache，失敗 fallback「未知」），由 `prompt.py` 注入 `SYSTEM_PROMPT`，讓 LINE bot 能回答「目前版本是？」之類的問題。
@@ -67,7 +71,7 @@ free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際�
 `pc_state` 一直算得出每台 PC 的 `online`，但那個值**只餵給 Dashboard 畫灰點**——
 沒人盯著 Dashboard 的時候等於沒有監控。2026-07-19 兩台 agent 的 self-restart 孤兒
 hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit(0) 回 `Ready`
-不再觸發）。`health_alert` 把那條線接到 LINE，掛在 `notify.run_realtime_tick` 最後一步。
+不再觸發）。`health_alert` 把那條線接到 LINE，由 `main.py` 的獨立 `agent-health` 工作每 300 秒呼叫。
 
 **這個模組只觀察、不控制任何設備**，副作用只有 LINE 推播 + 「系統狀態」KV 的 marker。
 
@@ -97,7 +101,7 @@ hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit
 - **劇院檢查有兩道前置**：`_loop` 沒就緒（startup 未完成）直接跳過、不算失敗；那台 PC 的
   butler agent 不在線也跳過——整台失聯時 PC 那條已經報過了，再補一則「劇院沒回應」只是
   噪音，而且把因果講反。
-- **收件人**：「家庭成員」分頁的 `系統告警` 欄勾 TRUE 的啟用成員（欄位由 `main.py` startup
+- **收件人**：「家庭成員」分頁的 `系統告警` 欄勾 TRUE 的啟用成員（欄位由 `main.py:_warm_up` 背景呼叫
   `ensure_columns` 自動補）。**沒人勾就退回全部啟用成員**——這是刻意的 fail-loud，因為這個
   功能存在的唯一理由就是「不要靜悄悄地沒人知道」，設定沒做就靜音等於把要修的洞原封不動
   搬進新程式碼。
@@ -110,17 +114,17 @@ hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit
 
 # 冷氣防黴送風（關機前吹乾蒸發器）
 
-關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥ 門檻分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（送風分後），由 polling thread 的 realtime tick 來收、真正關掉。**門檻（預設 30）與送風時長（預設 5）可在「智能居家」分頁逐台覆寫**：欄位 `防黴運轉門檻分鐘`、`防黴送風分鐘`（空白用預設；門檻 0 = 每次關都送風）。模式 `ANTIMOLD_MODES={冷氣,除濕}` 仍寫死在 device.py 頂。
+關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥ 門檻分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（送風分後），由每 60 秒的 `schedules` 工作收尾、真正關掉。**門檻（預設 30）與送風時長（預設 5）可在「智能居家」分頁逐台覆寫**：欄位 `防黴運轉門檻分鐘`、`防黴送風分鐘`（空白用預設；門檻 0 = 每次關都送風）。模式 `ANTIMOLD_MODES={冷氣,除濕}` 仍寫死在 device.py 頂。
 
 幾個**非顯而易見、最容易改壞**的點：
 
 - **防遞迴**：收尾關排程的 params 帶 `antimold_final=True`，那次關機跳過防黴判斷直接關。少了它會無限循環（關→送風→排程關→送風…）。
 - **關機後還原模式**：切送風會把「最後模式」覆寫成送風。收尾關排程的 params 另外帶 `restore_mode/temp/fan`（防黴前的原始設定，在切送風「之前」從 prior_row 讀好），收尾關機時由 `_save_ac_last_state(..., restore_on_off=...)` 寫回，否則 UI 跟下次開機都會停在送風而不是原本的冷氣/除濕。
 - **來源欄用「防黴」不是「自動」**：跟 AC 自動關機 timer（來源=自動）區隔開，否則 `maintain_ac_auto_schedule` 會把收尾關當成自動關機排程**誤刪**。
-- **最後開機時間欄（錨定運轉起點）**：開機時記、**關機時清空**；下次開機若這欄是空的就重新錨定——不只靠「關→開」transition 偵測，避免快取電源狀態漂移（如上次用實體遙控器關、home-butler 以為還開著）時錨不到 → 防黴永不觸發。純調整 on→on（欄位非空）不重置。欄位由 `main.py` startup `ensure_columns` 自動補；真的算不出開機時間（如實體遙控器開的）就**保守不防黴**。
+- **最後開機時間欄（錨定運轉起點）**：開機時記、**關機時清空**；下次開機若這欄是空的就重新錨定——不只靠「關→開」transition 偵測，避免快取電源狀態漂移（如上次用實體遙控器關、home-butler 以為還開著）時錨不到 → 防黴永不觸發。純調整 on→on（欄位非空）不重置。欄位由 `main.py:_warm_up` 背景呼叫 `ensure_columns` 自動補；真的算不出開機時間（如實體遙控器開的）就**保守不防黴**。
 - **使用者中途重開**：任何 power=on 指令會 `_cancel_antimold_schedules` 取消待執行的收尾關，避免剛開又被關掉。
 - **自動關機 timer 觸發的關機也會走防黴**（運轉夠久且冷氣/除濕模式）；送風期間刻意不呼叫 `maintain_ac_auto_schedule`，不讓它在送風中又生一筆自動關機。
-- 實際送風 5~10 分（收尾關 trigger=now+5 分，受 thread 5 分粒度影響）。
+- 收尾關 trigger=now+送風分鐘；正常情況另加不到一個 60 秒排程週期，仍受工作耗時、網路與服務休眠影響。
 - **已知限制**：實體遙控器/Hub 機身鈕直接關（沒經 home-butler）攔不到——接受，不補。
 
 # Notion 待辦：完成的記號蓋在 Sheet，主鍵是 Notion page id
@@ -288,7 +292,7 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 中央氣象署的預報與觀測都走 `ttl_cache.TTLCache`，**只快取成功結果**。
 
-**為什麼需要**：`/api/dashboard`（Dashboard 首頁）每次載入實測會打 **6 次** CWA，
+**歷史背景（快取與首頁拆分前）**：當時 `/api/dashboard` 每次載入實測會打 **6 次** CWA，
 每次 timeout 10~15 秒，而拿回來的是同一份資料：
 
 | 呼叫 | 來源 |
