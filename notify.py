@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from schedule_execution import execute_pending, ATTEMPT_COLUMN, RESULT_COLUMN
 from linebot.models import TextSendMessage
 from datetime import datetime, timedelta
 import json
 
 from config import line_bot_api, TZ, now_taipei, date_with_weekday, daily_push_hour
-from sheets import RequestContext, build_row, state_get, state_set
+from sheets import RequestContext, build_row, state_get, state_set, ensure_columns, update_row_fields
 from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
 from handlers.device import (
-    handle_control_ac, handle_control_ir, handle_control_dehumidifier, ANTIMOLD_SOURCE,
+    control_ac_result, control_ir_result, control_dehumidifier_result, ANTIMOLD_SOURCE,
 )
 from handlers.recurring_todo import materialize_recurring_todos
 from auth import verify_api_key
@@ -191,7 +192,7 @@ def run_daily_push_if_due(ctx, now=None):
 
 
 @router.post("/notify")
-async def notify():
+def notify():
     """手動觸發晚間綜合推播（debug / 補發）。日常由 polling thread 自動驅動，不再靠 GAS。
 
     注意：手動呼叫「不」檢查也「不」更新每日 marker——純粹立即發一次，方便補一封。
@@ -297,67 +298,11 @@ def _process_todo_reminders(now, today, ctx):
 
 
 def _execute_pending_schedules(now, ctx):
-    """執行到時間的排程，回傳被處理過的設備名稱集合。
-
-    超時 2 小時以上的排程標為「已過期」不執行（避免使用者離線太久回來突然冷氣全開）；
-    防黴收尾關例外——晚關也該關，不然冷氣會一直送風下去。
-    is_auto 標記用來避免「auto 排程觸發 → 又觸發 auto 重算 → 無限循環」。
-    """
-    schedule_records = ctx.get("排程指令")
-    schedule_sheet = ctx.get_worksheet("排程指令")
-
-    header = schedule_sheet.row_values(1)
-    try:
-        status_col = header.index("狀態") + 1
-    except ValueError:
-        status_col = 7  # fallback
-
-    processed_devices = set()
-    for i, r in enumerate(schedule_records):
-        if r.get("狀態") != "待執行":
-            continue
-        trigger_str = r.get("觸發時間", "")
-        if not trigger_str:
-            continue
-        try:
-            trigger_dt = TZ.localize(datetime.strptime(str(trigger_str), "%Y-%m-%d %H:%M"))
-        except (ValueError, TypeError):
-            continue
-        if trigger_dt > now:
-            continue
-
-        device_name = r.get("設備名稱", "")
-        processed_devices.add(device_name)
-        hours_late = (now - trigger_dt).total_seconds() / 3600
-
-        # 防黴收尾關「不過期」：它就是把還在送風的冷氣關掉，晚關也該關——否則 polling thread
-        # 曾停過 >2h（例如實例睡著），那台冷氣會一直送風下去關不掉。其餘排程維持 2h 過期保險
-        #（避免使用者離線太久、回來冷氣突然全開之類）。
-        if hours_late > 2 and r.get("來源") != ANTIMOLD_SOURCE:
-            schedule_sheet.update_cell(i + 2, status_col, "已過期")
-            print(f"[SCHEDULE EXPIRED] {device_name} {r.get('動作')} 超時 {hours_late:.1f} 小時")
-            continue
-
-        action_type = r.get("動作", "")
-        try:
-            params = json.loads(r.get("參數", "{}"))
-        except (json.JSONDecodeError, TypeError):
-            params = {}
-        params["device_name"] = device_name
-
-        is_auto = r.get("來源") == "自動"
-        result = ""
-        if action_type == "control_ac":
-            result = handle_control_ac(params, ctx, from_auto_schedule=is_auto)
-        elif action_type == "control_ir":
-            result = handle_control_ir(params, ctx)
-        elif action_type == "control_dehumidifier":
-            result = handle_control_dehumidifier(params, ctx)
-
-        schedule_sheet.update_cell(i + 2, status_col, "已執行")
-        print(f"[SCHEDULE EXEC] {device_name} {action_type} {params} → {result}")
-
-    return processed_devices
+    return execute_pending(now, ctx, tz=TZ, antimold_source=ANTIMOLD_SOURCE,
+                           ensure_columns=ensure_columns, update_fields=update_row_fields,
+                           handlers={"control_ac": control_ac_result,
+                                     "control_ir": control_ir_result,
+                                     "control_dehumidifier": control_dehumidifier_result})
 
 
 def _archive_processed_schedules(processed_devices, ctx):
@@ -384,6 +329,8 @@ def _archive_processed_schedules(processed_devices, ctx):
             if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期"):
                 rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
 
+    if rows_to_archive:
+        ensure_columns(schedule_archive, [ATTEMPT_COLUMN, RESULT_COLUMN])
     archive_headers = schedule_archive.row_values(1)
     for sheet_row, row in sorted(rows_to_archive, key=lambda x: x[0], reverse=True):
         schedule_archive.append_row(build_row(archive_headers, row))
@@ -441,7 +388,7 @@ def run_realtime_tick(ctx, now=None):
 
 
 @router.post("/notify_realtime")
-async def notify_realtime():
+def notify_realtime():
     """手動觸發 realtime tick（debug / 補做）。日常由 polling thread 每 5 分自動驅動，不再靠 GAS。"""
     try:
         ctx = RequestContext()

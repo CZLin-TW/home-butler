@@ -28,12 +28,13 @@ from handlers.recurring_todo import (
     handle_stop_recurring_todo, list_recurring_rules,
 )
 from handlers.device import (
-    handle_control_ac, handle_control_ir, handle_query_sensor,
-    handle_control_dehumidifier, handle_query_dehumidifier,
+    control_ac_result, control_ir_result, handle_query_sensor,
+    control_dehumidifier_result, handle_query_dehumidifier,
     apply_sensor_compensation,
 )
 from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
+from schedule_execution import VISIBLE_STATES
 import device_auth
 import remote_auth
 import switchbot_api
@@ -306,9 +307,9 @@ def api_control_ac(req: AcControlRequest):
     if req.temperature is not None: data["temperature"] = req.temperature
     if req.mode is not None: data["mode"] = req.mode
     if req.fan_speed is not None: data["fan_speed"] = req.fan_speed
-    result = handle_control_ac(data, ctx)
-    if "❌" in result: raise HTTPException(status_code=400, detail=result)
-    return {"message": result}
+    result = control_ac_result(data, ctx)
+    if result.status != "success": raise HTTPException(status_code=400, detail=result.message)
+    return {"message": result.message}
 
 
 class IrControlRequest(BaseModel):
@@ -320,9 +321,9 @@ class IrControlRequest(BaseModel):
 def api_control_ir(req: IrControlRequest):
     ctx = RequestContext()
     ctx.load()
-    result = handle_control_ir({"device_name": req.device_name, "button": req.button}, ctx)
-    if "❌" in result: raise HTTPException(status_code=400, detail=result)
-    return {"message": result}
+    result = control_ir_result({"device_name": req.device_name, "button": req.button}, ctx)
+    if result.status != "success": raise HTTPException(status_code=400, detail=result.message)
+    return {"message": result.message}
 
 
 class DehumidifierControlRequest(BaseModel):
@@ -340,9 +341,9 @@ def api_control_dehumidifier(req: DehumidifierControlRequest):
     if req.power is not None: data["power"] = req.power
     if req.mode is not None: data["mode"] = req.mode
     if req.humidity is not None: data["humidity"] = req.humidity
-    result = handle_control_dehumidifier(data, ctx)
-    if "❌" in result: raise HTTPException(status_code=400, detail=result)
-    return {"message": result}
+    result = control_dehumidifier_result(data, ctx)
+    if result.status != "success": raise HTTPException(status_code=400, detail=result.message)
+    return {"message": result.message}
 
 
 # ── 除濕機自動規則 (條件式 ON/OFF) ──
@@ -740,10 +741,11 @@ def api_delete_food(req: FoodDeleteRequest):
 # ── 排程 ──
 
 @router.get("/schedules")
-def api_get_schedules():
+def api_get_schedules(include_attention: bool = False):
     ctx = RequestContext()
     ctx.load(["排程指令"])  # 其餘五張分頁這支用不到
-    return [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
+    states = VISIBLE_STATES if include_attention else {"待執行"}
+    return [r for r in ctx.get("排程指令") if r.get("狀態") in states]
 
 
 class ScheduleAddRequest(BaseModel):
@@ -794,6 +796,7 @@ class ScheduleDeleteRequest(BaseModel):
     device_name: str
     trigger_time: Optional[str] = None
     all: Optional[bool] = False
+    execution_id: Optional[str] = None
 
 
 @router.delete("/schedules")
@@ -803,6 +806,7 @@ def api_delete_schedule(req: ScheduleDeleteRequest):
     data = {"device_name": req.device_name}
     if req.trigger_time: data["trigger_time"] = req.trigger_time
     if req.all: data["all"] = True
+    if req.execution_id: data["execution_id"] = req.execution_id
     result = handle_delete_schedule(data, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}

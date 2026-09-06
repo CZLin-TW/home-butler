@@ -1,3 +1,4 @@
+from command_result import CommandResult
 import gspread
 import json
 from datetime import datetime, timedelta
@@ -386,6 +387,11 @@ def _cancel_antimold_schedules(device_name, ctx):
 
 
 def handle_control_ac(data, ctx, from_auto_schedule=False):
+    """Legacy LINE/automation callers keep their text response."""
+    return control_ac_result(data, ctx, from_auto_schedule=from_auto_schedule).message
+
+
+def control_ac_result(data, ctx, from_auto_schedule=False):
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name, ctx)
 
@@ -396,9 +402,9 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
             device_name = ac_devices[0].get("名稱", device_name)
         elif len(ac_devices) > 1:
             names = "、".join([d.get("名稱") for d in ac_devices])
-            return f"❌ 有多台空調（{names}），請指定要控制哪一台"
+            return CommandResult.failed(f"❌ 有多台空調（{names}），請指定要控制哪一台")
         else:
-            return "❌ 找不到空調設備，請先在「智能居家」分頁設定"
+            return CommandResult.failed("❌ 找不到空調設備，請先在「智能居家」分頁設定")
 
     # 命令前的狀態快照：判斷「關→開」transition（auto-schedule timer 是否重置）+ 防黴判斷
     prior_row = next(
@@ -432,7 +438,7 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
                                        restore_mode=restore_mode, restore_temp=restore_temp,
                                        restore_fan=restore_fan)
                 # 刻意不呼叫 maintain_ac_auto_schedule：送風期間不要再生自動關機排程
-                return f"✅ {device_name} 已運轉一陣子，先送風 {fan_minutes} 分鐘防黴，之後自動關閉 🌬️"
+                return CommandResult.success(f"✅ {device_name} 已運轉一陣子，先送風 {fan_minutes} 分鐘防黴，之後自動關閉 🌬️")
             print(f"[ANTIMOLD] {device_name} 送風失敗，改直接關機：{fan_result.get('error')}")
         elif not data.get("antimold_final"):
             # 沒進防黴 → 印出原因，方便從 Render log 診斷。最常見：開機時間空白（這次開機發生在
@@ -474,12 +480,17 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
         # 自動排程 safety net：非自動排程觸發時才重算（避免 auto 觸發 → auto 再生 auto 的無限循環）
         if not from_auto_schedule:
             maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=transitioned)
-        return f"✅ {device_name} 指令已送出"
+        return CommandResult.success(f"✅ {device_name} 指令已送出")
     else:
-        return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+        return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
 
 
 def handle_control_ir(data, ctx):
+    """Legacy LINE/automation callers keep their text response."""
+    return control_ir_result(data, ctx).message
+
+
+def control_ir_result(data, ctx):
     device_name = data.get("device_name", "")
     button = data.get("button", "")
     device_id = get_device_id_by_name(device_name, ctx)
@@ -490,16 +501,16 @@ def handle_control_ir(data, ctx):
             device_id = ir_devices[0].get("Device ID", "")
             device_name = ir_devices[0].get("名稱", device_name)
         else:
-            return f"❌ 找不到「{device_name}」，請確認設備名稱"
+            return CommandResult.failed(f"❌ 找不到「{device_name}」，請確認設備名稱")
 
     if not button:
-        return "❌ 請指定要按哪個按鈕"
+        return CommandResult.failed("❌ 請指定要按哪個按鈕")
 
     result = switchbot_api.ir_control(device_id, button)
     if result.get("success"):
-        return f"✅ {device_name}「{button}」指令已送出"
+        return CommandResult.success(f"✅ {device_name}「{button}」指令已送出")
     else:
-        return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+        return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
 
 
 def handle_query_sensor(data, ctx):
@@ -645,7 +656,7 @@ def _control_dehumidifier_panasonic(row, device_name, power, mode, humidity):
     auth = row.get("Auth", "")
     gwid = row.get("Device ID", "")
     if not auth or not gwid:
-        return f"❌ {device_name} 缺少 Auth 或 Device ID 設定"
+        return CommandResult.failed(f"❌ {device_name} 缺少 Auth 或 Device ID 設定")
     if power == "off":
         result = panasonic_api.dehumidifier_turn_off(auth, gwid)
     elif power == "on" and not mode and not humidity:
@@ -653,23 +664,23 @@ def _control_dehumidifier_panasonic(row, device_name, power, mode, humidity):
     else:
         turn_on_result = panasonic_api.dehumidifier_turn_on(auth, gwid)
         if not turn_on_result.get("success"):
-            return f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}"
+            return CommandResult.provider_failure(turn_on_result, f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}")
         result = turn_on_result
         if mode:
             result = panasonic_api.dehumidifier_set_mode(auth, gwid, mode)
             if not result.get("success"):
-                return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
+                return CommandResult.provider_failure(result, f"❌ {device_name} 模式設定失敗：{result.get('error')}")
         if humidity:
             result = panasonic_api.dehumidifier_set_humidity(auth, gwid, int(humidity))
     if result.get("success"):
-        return f"✅ {device_name} 指令已送出"
-    return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+        return CommandResult.success(f"✅ {device_name} 指令已送出")
+    return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
 
 
 def _control_dehumidifier_lg(row, device_name, power, mode, humidity):
     device_id = row.get("Device ID", "")
     if not device_id:
-        return f"❌ {device_name} 缺少 Device ID 設定"
+        return CommandResult.failed(f"❌ {device_name} 缺少 Device ID 設定")
     if power == "off":
         result = lg_api.dehumidifier_turn_off(device_id)
     elif power == "on" and not mode and not humidity:
@@ -677,31 +688,36 @@ def _control_dehumidifier_lg(row, device_name, power, mode, humidity):
     else:
         turn_on_result = lg_api.dehumidifier_turn_on(device_id)
         if not turn_on_result.get("success"):
-            return f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}"
+            return CommandResult.provider_failure(turn_on_result, f"❌ {device_name} 開機失敗：{turn_on_result.get('error', '未知錯誤')}")
         result = turn_on_result
         if mode:
             result = lg_api.dehumidifier_set_mode(device_id, mode)
             if not result.get("success"):
-                return f"❌ {device_name} 模式設定失敗：{result.get('error')}"
+                return CommandResult.provider_failure(result, f"❌ {device_name} 模式設定失敗：{result.get('error')}")
         if humidity:
             result = lg_api.dehumidifier_set_humidity(device_id, int(humidity))
     if result.get("success"):
-        return f"✅ {device_name} 指令已送出"
-    return f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}"
+        return CommandResult.success(f"✅ {device_name} 指令已送出")
+    return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
 
 
 def handle_control_dehumidifier(data, ctx, _internal=False):
+    """Legacy LINE/automation callers keep their text response."""
+    return control_dehumidifier_result(data, ctx, _internal=_internal).message
+
+
+def control_dehumidifier_result(data, ctx, _internal=False):
     """除濕機手動控制。_internal=True 是自動模式規則自己呼叫，跳過 lock 檢查。
     依「智能居家」品牌欄分流到 Panasonic / LG。"""
     device_name = data.get("device_name", "")
     row, error = _resolve_dehumidifier(device_name, ctx)
     if error:
-        return error
+        return CommandResult.failed(error)
     device_name = row.get("名稱", device_name)
 
     # 自動模式啟用中拒收外部控制（Dashboard 手動 / LINE bot / 排程都會走這條）
     if not _internal and dehumidifier_auto.is_locked(device_name):
-        return f"❌ {device_name} 目前處於自動模式，請先在 Dashboard 關閉自動模式才能手動控制"
+        return CommandResult.failed(f"❌ {device_name} 目前處於自動模式，請先在 Dashboard 關閉自動模式才能手動控制")
 
     power = data.get("power", "")
     mode = data.get("mode", "")

@@ -139,7 +139,7 @@ def _renew_token(stale_token: str | None = None) -> str | None:
         return _cp_token if ok else None
 
 
-def _request_with_retry(method: str, url: str, **kwargs):
+def _request_with_retry(method: str, url: str, *, retry_ambiguous=True, **kwargs):
     """發送請求，token 過期自動 refresh 重試一次。熔斷開啟或 renew 失敗時直接
     return None，不再無限 hammer Panasonic 雲端。"""
     if not _ensure_token():
@@ -173,6 +173,8 @@ def _request_with_retry(method: str, url: str, **kwargs):
 
             if resp.status_code == 200:
                 if not resp.text or not resp.text.strip():
+                    if not retry_ambiguous:
+                        return None
                     # 空 response 可能是 token 失效，重新登入後重試
                     if attempt == 0:
                         print(f"[PANASONIC] Empty response, re-login and retry...")
@@ -187,6 +189,9 @@ def _request_with_retry(method: str, url: str, **kwargs):
                 return None
 
         except Exception as e:
+            if not retry_ambiguous:
+                print(f"[PANASONIC] Command response uncertain: {type(e).__name__}")
+                return None
             if attempt == 0:
                 print(f"[PANASONIC] Request error (will retry): {e}")
                 if _renew_token(stale_token=used_token) is None:
@@ -281,11 +286,12 @@ def set_dehumidifier_command(device_auth: str, gwid: str, command_type: str, val
     data = _request_with_retry(
         "GET",
         "DeviceSetCommand",
+        retry_ambiguous=False,
         headers=_headers({"cptoken": _cp_token, "auth": device_auth, "gwid": gwid}),
         params={"DeviceID": 1, "CommandType": command_type, "Value": value},
     )
     if data is None:
-        return {"success": False, "error": "指令送出失敗"}
+        return {"success": False, "error": "指令結果未確認", "uncertain": True}
     return {"success": True}
 
 

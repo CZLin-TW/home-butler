@@ -105,7 +105,7 @@ def send_command(device_id, command, parameter="default", command_type="command"
             return {"success": True, "message": "指令已送出"}
         return {"success": False, "error": data.get("message", "未知錯誤")}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "uncertain": True}
 
 
 # ── 高階封裝：冷氣控制 ──

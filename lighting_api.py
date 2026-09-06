@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 import lighting_auto
@@ -92,7 +93,7 @@ async def api_lighting_areas():
     areas = result.get("areas") if isinstance(result.get("areas"), list) else []
     return {
         "agent_id": message.get("agent_id", ""),
-        "areas": apply_area_settings(areas),
+        "areas": await run_in_threadpool(apply_area_settings, areas),
         "counts": result.get("counts", {}),
     }
 
@@ -100,7 +101,7 @@ async def api_lighting_areas():
 @router.patch("/lighting/areas/{area_id}")
 async def api_update_lighting_area(area_id: str, req: HueAreaUpdateRequest):
     try:
-        setting = upsert_area_setting(
+        setting = await run_in_threadpool(upsert_area_setting,
             area_id,
             req.display_name,
             resource_type=req.resource_type or "grouped_light",
@@ -252,7 +253,7 @@ async def api_set_lighting_auto_rule(area_id: str, req: LightingAutoRuleRequest)
     if req.enabled and (not req.sensor_device_id or not req.scene_id):
         raise HTTPException(status_code=400, detail="啟用時需選擇光感應器與場景")
     try:
-        rule = lighting_auto.set_rule(
+        rule = await run_in_threadpool(lighting_auto.set_rule,
             area_id,
             enabled=req.enabled,
             sensor_device_id=req.sensor_device_id,
@@ -275,7 +276,7 @@ async def api_set_lighting_auto_rule(area_id: str, req: LightingAutoRuleRequest)
 @router.delete("/lighting/auto/rules/{area_id}")
 async def api_delete_lighting_auto_rule(area_id: str):
     try:
-        lighting_auto.delete_rule(area_id)
+        await run_in_threadpool(lighting_auto.delete_rule, area_id)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -287,7 +288,7 @@ async def api_lighting_auto_sensors():
     不在這裡逐台確認有沒有 lightLevel——使用者選了之後用 light-level 端點實測。"""
     try:
         ctx = RequestContext()
-        ctx.load()
+        await run_in_threadpool(ctx.load, ["智能居家"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     sensors = []
@@ -318,7 +319,7 @@ async def api_lighting_auto_sensor_light_level(device_id: str):
             "source": "webhook",
             "age_seconds": int(now - cached["at"]),
         }
-    status = switchbot_api.get_device_status(device_id)
+    status = await run_in_threadpool(switchbot_api.get_device_status, device_id)
     if not isinstance(status, dict) or "error" in status:
         if cached:
             # status 打不到但有舊 webhook 快取 → 還是給值，年齡誠實標示

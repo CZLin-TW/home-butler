@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from gspread.exceptions import GSpreadException
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import asyncio
@@ -495,12 +496,18 @@ async def switchbot_webhook(request: Request):
 # LINE Webhook
 # ════════════════════════════════════════════
 
+# Preserve serialized LINE handling without occupying the ASGI loop while waiting
+# on Sheets, Claude or LINE. Waiting callbacks do not consume worker threads.
+_line_callback_lock = asyncio.Lock()
+
+
 @app.post("/callback")
 async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
     body = await request.body()
     try:
-        webhook_handler.handle(body.decode(), signature)
+        async with _line_callback_lock:
+            await run_in_threadpool(webhook_handler.handle, body.decode(), signature)
     except Exception as e:
         # 把完整 traceback 印出來，不然 FastAPI 只顯示 "400 Bad Request"、
         # reply_message 之類底層失敗的原因會整個消失

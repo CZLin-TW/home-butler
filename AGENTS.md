@@ -479,3 +479,13 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 | 跑著但 `cpu_temp_c` 永遠是 None | LibreHardwareMonitor 沒啟／沒 admin | 看 `agent/README.md` 雷點表 |
 | log 反覆 `[ws] connected` 後立刻 `disconnected … 1012`、Hue 指令時好時壞（502 `Unsupported command type` / 504 timeout 交替） | 同台多隻 agent（self-restart 孤兒＋手動 `schtasks /run`）搶同一 agent_id 連線互踢 | Admin PowerShell 按 PID 殺掉所有 butler 的 `agent.py`（**別誤殺其他 agent 如 `theater_agent.py`**）再 `schtasks /run`；單一實例鎖上線後不會再發生 |
 | 改 `agent_config.py` 後 `schtasks /end + /run`，log 只多 `[lock] another agent instance is already running`、新 config 沒生效 | 跑著的 agent 是 self-restart 孤兒，`/end` 殺不到；`/run` 的新實例被單一實例鎖正確擋退，但本尊還抱著舊 config（2026-06-10 加 theater capability 時實測） | 按 PID 殺 butler 的 `agent.py`（同上行，別誤殺 `theater_agent.py`）再 `schtasks /run`，看 `[ws] connected` 行確認新 capability |
+
+# 排程結果與非阻塞端點（v1.36.0）
+
+- `schedule_execution.py` 在送設備指令前，先將 Sheet 狀態寫成「待確認」並保存 `執行識別碼`、`執行結果`（自動補欄位）。寫入失敗不發指令；成功則依 `CommandResult.status` 更新為「已執行／執行失敗／待確認」，不可再靠 emoji 或有回字串判斷成功。
+- 「已執行」代表設備服務接受，不是 IR 實體狀態讀回。多步指令失敗可能已部分變更設備。例外、回應中斷、完成狀態寫入失敗都不可自動重送；重啟後保留待確認，讓使用者先檢查設備。Panasonic 控制只允許明確 token 417 的認證重試，空回應／傳輸例外不重送。
+- 冷氣控制可能增刪排程，結果寫回必須重新依執行識別碼定位，不可沿用舊列號。排程執行器的 process lock 防止同程序 tick 重疊，但 Sheets 不是交易式佇列，不能保證跨實例或外部直接編輯時的原子性；增加 workers／副本前先遷移到可原子認領的儲存。
+- 失敗／待確認留在排程列表；Dashboard 用 `include_attention=true` 取得，預設 GET 保留舊契約。移除這些紀錄須傳 `execution_id`，封存保留原狀態與原因，不重新啟動自動關機排程。不要將失敗列直接改回待執行。
+- `control_*_result` 給排程與 HTTP API 用；`handle_control_*` 仍回字串，維持 LINE／自動控制的相容性。
+- LINE callback 以 async lock 依序處理，耗時 SDK 交給 Starlette threadpool，簽章驗證仍在 SDK 內。照明 Sheets／SwitchBot 呼叫也移入 threadpool；WebSocket 命令仍在 event loop await。手動 notify 使用同步路由，由 FastAPI threadpool 執行。不要在 async 路由直接做同步網路工作。
+- 離線驗證：`python -m unittest discover -s tests -v`；使用 fake Sheet／SDK，不啟動 app、不發 LINE 或家電指令。CI 包含排程失敗、重啟不重送、列位移、控制結果與事件迴圈可繼續服務的測試。

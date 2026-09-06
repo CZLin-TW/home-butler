@@ -1,9 +1,10 @@
 import json
 from datetime import datetime
 from config import now_taipei
-from sheets import get_all_devices_by_type, append_record, update_row_fields
+from sheets import get_all_devices_by_type, append_record, update_row_fields, ensure_columns
 from prompt import _format_schedule_params
 from handlers.device import maintain_ac_auto_schedule
+from schedule_execution import ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
 
 
 def _norm_trigger(s):
@@ -20,7 +21,7 @@ def _norm_trigger(s):
         return s
 
 
-def _locate_schedule_rows(values, device_name, trigger_time, match_all):
+def _locate_schedule_rows(values, device_name, trigger_time, match_all, execution_id=""):
     """在即時 Sheet 值矩陣裡定位待執行排程列，回 [(row_number_1based, row_dict), ...]。
 
     純函式好測；row_number 直接是 Sheet 列號（含 header）。寫入/刪除前用它取代 request
@@ -35,7 +36,10 @@ def _locate_schedule_rows(values, device_name, trigger_time, match_all):
     out = []
     for r, rv in enumerate(values[1:], start=2):
         row = {h: (rv[c] if c < len(rv) else "") for h, c in hidx.items()}
-        if row.get("狀態") != "待執行":
+        if execution_id:
+            if row.get("狀態") not in ATTENTION_STATES or row.get(ATTEMPT_COLUMN) != execution_id:
+                continue
+        elif row.get("狀態") != "待執行":
             continue
         if row.get("設備名稱") != device_name:
             continue
@@ -175,9 +179,12 @@ def handle_delete_schedule(data, ctx):
     device_name = data.get("device_name", "")
     trigger_time = _norm_trigger(data.get("trigger_time", ""))
     delete_all = data.get("all", False)
+    execution_id = data.get("execution_id", "")
+    if execution_id:
+        ensure_columns(archive, [ATTEMPT_COLUMN, RESULT_COLUMN])
 
     # 即時定位待刪列，不信任快取 i+2（背景 tick 會增刪排程列造成位移 → 刪錯列）。
-    matches = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, delete_all)
+    matches = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, delete_all, execution_id)
     if not matches:
         return "❌ 找不到符合條件的排程"
 
@@ -185,14 +192,15 @@ def handle_delete_schedule(data, ctx):
     # 倒序刪，避免刪一列後其餘列號位移。封存內容直接用即時讀到的 row。
     for row_number, row in sorted(matches, key=lambda x: x[0], reverse=True):
         # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
-        if row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
+        if row.get("狀態") == "待執行" and row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
             any_user_ac_deleted = True
-        append_record(archive, {**row, "狀態": "已取消"})
+        # Removing an error record must not erase its original outcome in the archive.
+        append_record(archive, {**row, "狀態": row["狀態"] if execution_id else "已取消"})
         sheet.delete_rows(row_number)
 
     # 同步 request 快取：用內容比對移除（與剛刪掉的 live 條件一致），非索引。
     def _cache_match(rec):
-        return (rec.get("狀態") == "待執行"
+        return ((rec.get(ATTEMPT_COLUMN) == execution_id if execution_id else rec.get("狀態") == "待執行")
                 and rec.get("設備名稱") == device_name
                 and (delete_all or not trigger_time
                      or _norm_trigger(rec.get("觸發時間")) == trigger_time))
@@ -205,11 +213,12 @@ def handle_delete_schedule(data, ctx):
 
 
 def handle_query_schedule(ctx):
-    schedules = [r for r in ctx.get("排程指令") if r.get("狀態") == "待執行"]
+    schedules = [r for r in ctx.get("排程指令") if r.get("狀態") in VISIBLE_STATES]
     if not schedules:
         return "目前沒有排程"
     lines = []
     for r in schedules:
         params_text = _format_schedule_params(r.get("動作", ""), r.get("參數", ""))
-        lines.append(f"• {r['設備名稱']}｜{params_text}｜{r['觸發時間']}")
+        detail = f"｜{r.get(RESULT_COLUMN, '')}" if r.get("狀態") in ATTENTION_STATES else ""
+        lines.append(f"• {r['設備名稱']}｜{params_text}｜{r['觸發時間']}｜{r.get('狀態')}{detail}")
     return "排程列表：\n" + "\n".join(lines)

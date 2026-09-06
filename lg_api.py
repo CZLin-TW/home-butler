@@ -131,12 +131,12 @@ def _request(method: str, path: str, json_body: dict | None = None):
         resp = _client.request(method, url, headers=_headers(), json=json_body)
     except Exception as e:
         _record_result(False)
-        return {"error": f"LG ThinQ 連線失敗：{e}"}
+        return {"error": f"LG ThinQ 連線失敗：{e}", "uncertain": True}
     try:
         data = resp.json()
     except Exception:
         _record_result(False)
-        return {"error": f"LG ThinQ 回應非 JSON（HTTP {resp.status_code}）：{resp.text[:200]}"}
+        return {"error": f"LG ThinQ 回應非 JSON（HTTP {resp.status_code}）：{resp.text[:200]}", "uncertain": True}
     if resp.status_code != 200:
         _record_result(False)
         err = data.get("error", data) if isinstance(data, dict) else data
@@ -173,7 +173,7 @@ def _control(device_id: str, body: dict) -> dict:
     """送控制指令，回傳 {"success": bool, ...} 對齊 panasonic_api 介面。"""
     result = _request("POST", f"/devices/{device_id}/control", json_body=body)
     if isinstance(result, dict) and "error" in result:
-        return {"success": False, "error": result["error"]}
+        return {"success": False, "error": result["error"], "uncertain": result.get("uncertain", False)}
     return {"success": True}
 
 
