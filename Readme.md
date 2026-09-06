@@ -4,6 +4,8 @@
 
 Siri 等待時間診斷：兩個語音入口會在 Render Logs 輸出 `[TIMING]`，依 `request_id` 串起 Sheets、上下文、AI、動作與後端總耗時；不需修改捷徑。階段意義、觀測範圍與查閱步驟見 [語音分段計時](docs/voice-timing.md)。
 
+v1.39.2 減少語音路徑的額外資料請求：組 prompt 的照明名稱改為直接唯讀取得，建表／補欄由原照明探索及設定流程處理；冷氣自動關機只有需要新增或取消排程時，才取得寫入用分頁。仍讀取即時資料、保留原有批次狀態寫入及防黴規則。Log 新增連線、Sheets HTTP、版本／照明、SwitchBot 及 AC 排程子階段；外層已含子階段，請勿重複加總。
+
 ## Dashboard 首頁輕量查詢
 
 `GET /api/dashboard?include_weather=false` 只讀取待辦／庫存並回傳 `{todos, food}`，不呼叫天氣服務。省略參數維持舊版完整回應。

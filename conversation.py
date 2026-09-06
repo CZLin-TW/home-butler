@@ -61,6 +61,8 @@ def get_recent_conversation(user_id, ctx, limit=6):
 
 
 def ask_claude(user_id, user_message, user_name, ctx, *, include_history=True):
+    from request_timing import timed_call
+
     with timing_stage("context_prepare"):
         now = now_taipei()
         today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
@@ -72,11 +74,11 @@ def ask_claude(user_id, user_message, user_name, ctx, *, include_history=True):
             food_info=get_current_food(ctx),
             todo_info=get_current_todo(ctx),
             device_info=get_device_info(ctx),
-            lighting_info=get_lighting_area_info(ctx),
+            lighting_info=timed_call("context.lighting", get_lighting_area_info, ctx),
             schedule_info=get_schedule_info(ctx),
             current_user=user_name,
             user_style=style_instruction,
-            app_version=get_app_version(),
+            app_version=timed_call("context.version", get_app_version),
         )
         # Siri treats each utterance independently; LINE retains its recent turns.
         # Build messages once so the existing schema fallback obeys the same policy.

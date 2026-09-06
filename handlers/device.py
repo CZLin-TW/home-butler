@@ -222,8 +222,6 @@ def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
         power = str(device_row.get("最後電源", "")).strip()
         hours = _parse_int_safe(device_row.get("自動關機小時數"))
 
-        schedule_sheet = ctx.get_worksheet("排程指令")
-        archive_sheet = ctx.get_worksheet("排程封存")
         all_schedules = ctx.get("排程指令")
 
         # 找這台 AC 的 auto 與 user-off 排程
@@ -247,6 +245,9 @@ def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
             """封存 + 刪除（倒序，避免 row index 偏移）。"""
             if not indices_rows:
                 return
+            # Resolve worksheet metadata only when an actual mutation is needed.
+            schedule_sheet = ctx.get_worksheet("排程指令")
+            archive_sheet = ctx.get_worksheet("排程封存")
             archive_headers = archive_sheet.row_values(1)
             for i, row in sorted(indices_rows, key=lambda x: x[0], reverse=True):
                 archive_sheet.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
@@ -255,6 +256,7 @@ def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
 
         def _add_auto():
             """產生一筆自動 off 排程。"""
+            schedule_sheet = ctx.get_worksheet("排程指令")
             trigger = (now_taipei() + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
             now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
             headers = schedule_sheet.row_values(1)
@@ -393,6 +395,8 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
 
 
 def control_ac_result(data, ctx, from_auto_schedule=False):
+    from request_timing import timed_call
+
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name, ctx)
 
@@ -434,8 +438,8 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
                 restore_temp = prior_row.get("最後溫度", "")
                 restore_fan = str(prior_row.get("最後風速", "") or "").strip()
                 # 記成「送風中」的真實狀態，但不更新最後開機時間（這是延續，不是新開機）
-                _save_ac_last_state(ctx, device_id, "on", temp_keep, 4, 1)
-                _schedule_antimold_off(device_name, ctx, fan_minutes,
+                timed_call("ac.save_state", _save_ac_last_state, ctx, device_id, "on", temp_keep, 4, 1)
+                timed_call("ac.antimold_schedule", _schedule_antimold_off, device_name, ctx, fan_minutes,
                                        restore_mode=restore_mode, restore_temp=restore_temp,
                                        restore_fan=restore_fan)
                 # 刻意不呼叫 maintain_ac_auto_schedule：送風期間不要再生自動關機排程
@@ -473,14 +477,14 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
             if data.get("restore_fan"):
                 restore["最後風速"] = data["restore_fan"]
             restore = restore or None
-        _save_ac_last_state(ctx, device_id, power, temperature, mode, fan,
+        timed_call("ac.save_state", _save_ac_last_state, ctx, device_id, power, temperature, mode, fan,
                             mark_on_time=(transitioned or on_time_empty), restore_on_off=restore)
         # 重新開機（含純調整 on→on）→ 取消任何待執行的防黴收尾關，避免剛開又被關
         if power == "on":
-            _cancel_antimold_schedules(device_name, ctx)
+            timed_call("ac.cancel_antimold", _cancel_antimold_schedules, device_name, ctx)
         # 自動排程 safety net：非自動排程觸發時才重算（避免 auto 觸發 → auto 再生 auto 的無限循環）
         if not from_auto_schedule:
-            maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=transitioned)
+            timed_call("ac.auto_schedule", maintain_ac_auto_schedule, device_name, ctx, transitioned_to_on=transitioned)
         return CommandResult.success(f"✅ {device_name} 指令已送出")
     else:
         return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")

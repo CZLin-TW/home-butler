@@ -134,7 +134,8 @@ class RequestTimingTests(unittest.TestCase):
                 self.assertEqual(parse('id', 'text', 'name', object()), '{}')
         ends = [r for r in records(output) if r['event'] == 'stage_end']
         self.assertEqual([(r['stage'], r['status']) for r in ends],
-                         [('context_prepare', 'completed'), ('ai_parse', 'error'), ('ai_parse_fallback', 'completed')])
+                         [('context.lighting', 'completed'), ('context.version', 'completed'),
+                          ('context_prepare', 'completed'), ('ai_parse', 'error'), ('ai_parse_fallback', 'completed')])
         self.assertEqual(model.call_count, 2)
         self.assertEqual(model.call_args_list[0].kwargs['thinking'], {'type': 'adaptive'})
         self.assertEqual(model.call_args_list[1].kwargs['thinking'], {'type': 'disabled'})

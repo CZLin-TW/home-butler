@@ -3,7 +3,7 @@
 import unicodedata
 
 from config import now_taipei
-from sheets import append_record, get_or_create_sheet, update_row_fields
+from sheets import append_record, get_or_create_sheet, get_sheet_records, update_row_fields
 
 
 SHEET_NAME = "Hue 照明區域"
@@ -23,10 +23,12 @@ def _norm(value: str) -> str:
     return unicodedata.normalize("NFC", str(value or "")).strip().lower()
 
 
-def load_area_settings() -> dict[str, dict]:
-    sheet = _worksheet()
+def load_area_settings(*, read_only=False) -> dict[str, dict]:
+    # Prompt construction only reads existing names. Schema creation/repair stays
+    # on the discovery/settings paths, avoiding metadata + header GETs per prompt.
+    records = get_sheet_records(SHEET_NAME) if read_only else _worksheet().get_all_records()
     settings = {}
-    for row in sheet.get_all_records():
+    for row in records:
         hue_id = str(row.get("Hue ID", "") or "").strip()
         if not hue_id:
             continue

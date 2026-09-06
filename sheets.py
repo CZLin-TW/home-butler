@@ -199,10 +199,16 @@ def _install_gspread_get_retry():
         return
 
     def request_with_retry(self, method, endpoint, *args, **kwargs):
+        from request_timing import timing_stage
+
         call = lambda: original(self, method, endpoint, *args, **kwargs)
-        if str(method).lower() != "get":
-            return call()
-        return _with_retry(call, f"GET {str(endpoint).rsplit('/', 1)[-1]}")
+        is_get = str(method).lower() == "get"
+        # Emit only a static category, never a URL, spreadsheet ID or range.
+        category = ("values_read" if "/values" in str(endpoint) else "metadata_read") if is_get else "write"
+        with timing_stage("sheets.http." + category):
+            if not is_get:
+                return call()
+            return _with_retry(call, f"GET {str(endpoint).rsplit('/', 1)[-1]}")
 
     request_with_retry._home_butler_retry = True
     gspread.http_client.HTTPClient.request = request_with_retry
@@ -220,12 +226,14 @@ def _get_client():
 
 
 def _get_spreadsheet():
+    from request_timing import timed_call
+
     global _spreadsheet, _spreadsheet_time
     now = time.time()
     if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
         # open_by_key 會實際打一次 metadata API（GET）——正是 Google 503 最常炸的
         # 地方，重試由 _install_gspread_get_retry 那層吸收。
-        _spreadsheet = _get_client()
+        _spreadsheet = timed_call("sheets.connect", _get_client)
         _spreadsheet_time = now
     return _spreadsheet
 

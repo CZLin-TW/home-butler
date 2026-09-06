@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+v1.39.2 I/O 精簡：`get_lighting_area_info` 以 `load_area_settings(read_only=True)` 讀既有內容；不得在每次 prompt 組裝時重新建表／ensure_columns，原探索與設定路徑仍負責 schema。`maintain_ac_auto_schedule` 只在實際增刪分支取 worksheet，保留 timer anchor 與先封存後刪除。細分計時的 `parent_span_id` 表示包含關係，不能把外層與子階段相加；詳見 voice-timing 文件與 `tests/test_voice_io.py`。
+
 Siri 獨立指令（v1.39.1）：`process_message(..., voice=True)` 使用 `ask_claude(..., include_history=False)`，一般與降級請求都只送當句；初始讀取五張表，略過對話暫存。背景存檔保留，LINE 預設歷史不變。不得因共用解析器把 LINE 歷史一併關閉；Siri 跨輪省略／確認不再依賴上一句，文件與測試見 README、`tests/test_voice_history.py`。未重写完整 SYSTEM_PROMPT。
 
 語音請求計時見 [docs/voice-timing.md](docs/voice-timing.md)。`request_timing.py` 只在兩個 Siri 路由啟用，以 ContextVar 串起 `[TIMING]`；總時間從路由函式進入算起，不包含代理／threadpool 等待。新計時不可寫入輸入、身分、設備參數或金鑰；`completed` 不是硬體成功。原有模型設定、降級／重試與 `{reply}` 契約保持不變。純觀測不 bump Dashboard 版本。

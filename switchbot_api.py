@@ -94,7 +94,9 @@ def send_command(device_id, command, parameter="default", command_type="command"
             "parameter": parameter,
             "commandType": command_type,
         }
-        resp = httpx.post(
+        from request_timing import timed_call
+
+        resp = timed_call("device.switchbot_http", httpx.post,
             f"{BASE_URL}/devices/{device_id}/commands",
             headers=_make_headers(),
             json=payload,

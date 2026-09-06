@@ -8,6 +8,7 @@ from uuid import uuid4
 
 
 _request = ContextVar("voice_request_timing", default=None)
+_span = ContextVar("voice_timing_span", default=None)
 
 
 def _emit(trace, event, **fields):
@@ -23,6 +24,7 @@ def _emit(trace, event, **fields):
 def request_timing(source):
     trace = {"request_id": uuid4().hex, "source": source}
     token = _request.set(trace)
+    span_token = _span.set(None)
     start = perf_counter()
     status = "completed"
     _emit(trace, "request_start")
@@ -35,6 +37,7 @@ def request_timing(source):
         _emit(trace, "request_end", status=status,
               duration_ms=round((perf_counter() - start) * 1000, 2))
         _request.reset(token)
+        _span.reset(span_token)
 
 
 @contextmanager
@@ -45,10 +48,12 @@ def timing_stage(stage):
         yield
         return
     span = uuid4().hex[:12]
+    parent_span = _span.get()
+    token = _span.set(span)
     start = perf_counter()
     status = "completed"
     fields = {}
-    _emit(trace, "stage_start", stage=stage, span_id=span)
+    _emit(trace, "stage_start", stage=stage, span_id=span, parent_span_id=parent_span)
     try:
         yield
     except BaseException as exc:
@@ -57,7 +62,14 @@ def timing_stage(stage):
         raise
     finally:
         _emit(trace, "stage_end", stage=stage, span_id=span, status=status,
+              parent_span_id=parent_span,
               duration_ms=round((perf_counter() - start) * 1000, 2), **fields)
+        _span.reset(token)
+
+
+def timed_call(stage, call, *args, **kwargs):
+    with timing_stage(stage):
+        return call(*args, **kwargs)
 
 
 def timed_model_call(stage, create, **kwargs):

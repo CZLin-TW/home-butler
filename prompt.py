@@ -311,7 +311,7 @@ def get_device_info(ctx):
 
 def get_lighting_area_info(ctx):
     try:
-        settings = load_area_settings()
+        settings = load_area_settings(read_only=True)
     except Exception as e:
         return f"尚未取得照明區域（燈光提醒未指定時預設 {DEFAULT_LIGHT_AREA_NAME}）"
 
