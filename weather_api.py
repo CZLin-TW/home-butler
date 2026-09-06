@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import pytz
 from observation_api import get_observation_for_location
 from ttl_cache import TTLCache
+from weather_budget import weather_query, remaining_timeout, WeatherTimeout
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore"
@@ -76,7 +77,7 @@ def _fetch_forecast(data_id, location_name=None):
         resp = httpx.get(
             f"{BASE_URL}/{data_id}",
             params=params,
-            timeout=15,
+            timeout=remaining_timeout(15),
             verify=False,
         )
         data = resp.json()
@@ -109,6 +110,8 @@ def _fetch_forecast(data_id, location_name=None):
         _forecast_cache.set(cache_key, result)
         return result
 
+    except WeatherTimeout:
+        raise
     except Exception as e:
         return {"error": str(e)}
 
@@ -141,6 +144,7 @@ def _resolve_location(location):
     for city in search_order:
         data_id = CITY_DATA_ID[city]
         for candidate in candidates:
+            remaining_timeout()
             result = _fetch_forecast(data_id, candidate)
             if "error" not in result:
                 return data_id, candidate
@@ -278,6 +282,7 @@ def _parse_date(date_str):
         return now.date()
 
 
+@weather_query
 def get_weather_summary(date_str="today", location=None):
     """
     取得天氣摘要

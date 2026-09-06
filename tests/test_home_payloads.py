@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_function(filename, name, dependencies):
+    dependencies.setdefault("Request", object)
+    dependencies.setdefault("_visible_todos", lambda ctx, request: [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"])
     tree = ast.parse((ROOT / filename).read_text(encoding="utf-8"))
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
     fn.decorator_list = []
@@ -40,11 +42,11 @@ class HomePayloadTests(unittest.TestCase):
 
     def test_legacy_dashboard_still_includes_weather_and_metadata(self):
         class Context:
-            def load(self): pass
+            def load(self, names=None): pass
             def get(self, _): return []
         fn = load_function("web_api.py", "api_dashboard", {
             "RequestContext": Context, "ThreadPoolExecutor": ThreadPoolExecutor,
-            "weather_api": SimpleNamespace(get_weather_summary=lambda date, _: {"date": date}),
+            "weather_service": SimpleNamespace(get_many=lambda dates: [{"date": d} for d in dates]),
             "api_get_device_options": lambda: {"ac": {}},
         })
         result = fn()

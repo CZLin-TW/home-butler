@@ -1,3 +1,4 @@
+from todo_access import visible
 import json
 from sheets import get_all_devices_by_type
 from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, load_area_settings
@@ -256,7 +257,7 @@ def get_current_food(ctx):
 
 
 def get_current_todo(ctx):
-    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦" and visible(r, getattr(ctx, "actor_name", None))]
     if not valid:
         return "目前沒有待辦事項"
     lines = []

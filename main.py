@@ -1,3 +1,4 @@
+from job_runner import jobs
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -154,106 +155,97 @@ def _on_startup():
         print("[light-auto] PUBLIC_BASE_URL / RENDER_EXTERNAL_URL 未設定，跳過 webhook 註冊"
               "（自動夜燈退化為 5min 輪詢反應）")
 
-    def _polling_loop():
-        """每 5 分鐘掃一次「智能居家」分頁：
-        - 感應器：打 SwitchBot API 拉當下溫濕度，寫進 sensor_state
-        - 空調：snapshot「最後電源/溫度/模式/風速」進 ac_history
-          （AC 是 IR write-only 不能 readback，只能用 home-butler 自己記的最後狀態）
-        - 除濕機（手動模式）：打 API 拉電源狀態進 dehumidifier_history，給感測器圖
-          背景斜紋用；自動模式的由下方 evaluate_all 記，這裡跳過避免重複
+    sensor_ready = False
 
-        第一件事是 _warm_up()（backfill / load_rules / ensure_columns），刻意從 startup
-        搬過來讓服務能立刻開始接請求——見該函式 docstring。
-        """
-        _warm_up()
-        while True:
-            try:
-                # 若 startup backfill 曾失敗（cold start / gspread 5xx / quota），這裡每個
-                # tick 補做一次：成功的內部 early-return no-op，失敗的下個 tick 再試，
-                # 避免一次暫時性失敗就永久放棄 cold-start 還原。
-                pc_state.backfill_from_sheet()
-                sensor_state.backfill_from_sheet()
-                ac_history.backfill_from_sheet()
-                dehumidifier_history.backfill_from_sheet()
-                ctx = RequestContext()
-                ctx.load()
-                device_status.load_catalog(ctx.get("智能居家"))
-                for d in ctx.get("智能居家"):
-                    if d.get("狀態") != "啟用":
+    def _sensor_tick():
+        nonlocal sensor_ready
+        if not sensor_ready:
+            _warm_up()
+            sensor_ready = True
+        try:
+            # 若 startup backfill 曾失敗（cold start / gspread 5xx / quota），這裡每個
+            # tick 補做一次：成功的內部 early-return no-op，失敗的下個 tick 再試，
+            # 避免一次暫時性失敗就永久放棄 cold-start 還原。
+            pc_state.backfill_from_sheet()
+            sensor_state.backfill_from_sheet()
+            ac_history.backfill_from_sheet()
+            dehumidifier_history.backfill_from_sheet()
+            ctx = RequestContext()
+            ctx.load()
+            device_status.load_catalog(ctx.get("智能居家"))
+            for d in ctx.get("智能居家"):
+                if d.get("狀態") != "啟用":
+                    continue
+                name = d.get("名稱", "")
+                location = d.get("位置", "")
+                if not name:
+                    continue
+                dtype = d.get("類型")
+                if dtype == "感應器":
+                    device_id = d.get("Device ID", "")
+                    if not device_id:
                         continue
-                    name = d.get("名稱", "")
-                    location = d.get("位置", "")
-                    if not name:
+                    result = switchbot_api.get_hub_sensor(device_id)
+                    if "error" in result:
+                        print(f"[sensor poll] {name}: {result.get('error')}")
                         continue
-                    dtype = d.get("類型")
-                    if dtype == "感應器":
-                        device_id = d.get("Device ID", "")
-                        if not device_id:
-                            continue
-                        result = switchbot_api.get_hub_sensor(device_id)
-                        if "error" in result:
-                            print(f"[sensor poll] {name}: {result.get('error')}")
-                            continue
-                        temp = result.get("temperature")
-                        humidity = result.get("humidity")
-                        co2 = result.get("co2")
-                        temp, humidity = apply_sensor_compensation(temp, humidity, d)
-                        sensor_state.record(name, location, temp, humidity, co2)
-                        device_status.update(name, {
-                            "temperature": temp,
-                            "humidity": humidity,
-                        })
-                    elif dtype == "空調":
-                        power = str(d.get("最後電源", "")).strip()
-                        if not power:
-                            continue  # 從未操作過、skip 不 record
-                        ac_history.record(
-                            name, location, power,
-                            d.get("最後溫度"), d.get("最後模式"), d.get("最後風速"),
-                        )
-                    elif dtype == "除濕機":
-                        # 自動模式的除濕機由下方 evaluate_all 抓狀態 + record，
-                        # 這裡只補「手動模式」的，避免對同一台重複打 API / 重複記錄。
-                        if dehumidifier_auto.is_locked(name):
-                            continue
-                        driver = dehumidifier_driver.make_driver(d)
-                        if driver is None:
-                            continue
-                        status = driver.get_status()
-                        if not isinstance(status, dict) or "error" in status:
-                            err = status.get("error") if isinstance(status, dict) else status
-                            print(f"[dehum poll] {name}: {err}")
-                            continue
-                        device_status.update(name, driver.status_fields(status))
-                        dehumidifier_history.record(name, location, driver.is_power_on(status))
-                # 除濕機自動規則：先 sensor poll 跑完寫進 snapshot 再評估
-                dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())
-            except Exception as e:
-                print(f"[poll] tick error: {e}")
-            # 照明自動化（自動夜燈）：時段邊界處理 + webhook 漏接兜底。
-            # 獨立 try 隔離——上面 sensor/dehum 任一掛掉不影響夜燈時段結束關燈。
-            try:
-                lighting_auto.tick()
-            except Exception as e:
-                print(f"[light-auto] tick error: {e}")
-            # GAS 退場後，原本掛在 GAS cron 的工作改由這條 thread 驅動：
-            #   realtime tick（行事曆同步 / 週期待辦生成 / 待辦提醒 / 設備排程執行 / 封存）
-            #     每 5 分跑一次——比原本 GAS 的 15 分更即時。
-            #   每日綜合推播由 Sheet marker 閘成一天一次（過 DAILY_PUSH_HOUR 後第一個 tick）。
-            # 用各自獨立的 fresh ctx：notify 工作會寫 Sheet（materialize / 排程狀態），需要與
-            # 自身寫入保持一致，且與上面 sensor/dehum 用的 ctx 解耦（那個此刻已稍舊）。
-            # 整段獨立 try——notify 工作出錯不該影響下一輪 sensor/dehum/夜燈。
-            try:
-                ctx_notify = RequestContext()
-                ctx_notify.load()
-                notify.run_realtime_tick(ctx_notify)
-                notify.run_daily_push_if_due(ctx_notify)
-            except Exception as e:
-                print(f"[notify-tick] error: {e}")
-            _time.sleep(300)
+                    temp = result.get("temperature")
+                    humidity = result.get("humidity")
+                    co2 = result.get("co2")
+                    temp, humidity = apply_sensor_compensation(temp, humidity, d)
+                    sensor_state.record(name, location, temp, humidity, co2)
+                    device_status.update(name, {
+                        "temperature": temp,
+                        "humidity": humidity,
+                    })
+                elif dtype == "空調":
+                    power = str(d.get("最後電源", "")).strip()
+                    if not power:
+                        continue  # 從未操作過、skip 不 record
+                    ac_history.record(
+                        name, location, power,
+                        d.get("最後溫度"), d.get("最後模式"), d.get("最後風速"),
+                    )
+                elif dtype == "除濕機":
+                    # 自動模式的除濕機由下方 evaluate_all 抓狀態 + record，
+                    # 這裡只補「手動模式」的，避免對同一台重複打 API / 重複記錄。
+                    if dehumidifier_auto.is_locked(name):
+                        continue
+                    driver = dehumidifier_driver.make_driver(d)
+                    if driver is None:
+                        continue
+                    status = driver.get_status()
+                    if not isinstance(status, dict) or "error" in status:
+                        err = status.get("error") if isinstance(status, dict) else status
+                        print(f"[dehum poll] {name}: {err}")
+                        continue
+                    device_status.update(name, driver.status_fields(status))
+                    dehumidifier_history.record(name, location, driver.is_power_on(status))
+            # 除濕機自動規則：先 sensor poll 跑完寫進 snapshot 再評估
+            dehumidifier_auto.evaluate_all(ctx, sensor_state.snapshot())
+        except Exception as e:
+            print(f"[poll] tick error: {e}")
+            raise
 
-    threading.Thread(target=_polling_loop, daemon=True).start()
-    print("[startup] polling thread started (sensor + ac + dehumidifier auto)")
+    def _with_context(callback, sheets=None):
+        ctx = RequestContext()
+        ctx.load(sheets)
+        callback(ctx)
+
+    jobs.add("sensors", 300, _sensor_tick)
+    jobs.add("lighting", 300, lighting_auto.tick)
+    jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
+    jobs.add("notion", 300, lambda: _with_context(notify.sync_external_events, ["家庭成員"]))
+    jobs.add("todo-reminders", 300, lambda: _with_context(notify.run_todo_tick))
+    jobs.add("daily-push", 300, lambda: _with_context(notify.run_daily_push_if_due))
+    jobs.add("agent-health", 300, lambda: _with_context(notify.health_alert.run_checks, ["家庭成員"]))
+    jobs.start()
+    print("[startup] independent periodic jobs started")
+
+
+@app.on_event("shutdown")
+def _stop_jobs():
+    jobs.stop_event.set()
 
 
 # ════════════════════════════════════════════

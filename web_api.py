@@ -1,3 +1,5 @@
+from todo_access import actor_from_members, visible, TODO_ID
+from todo_coordination import todo_write_lock, refresh_todos
 """
 Web Dashboard REST API
 提供給 Smart Home Dashboard 前端使用的 REST API endpoints。
@@ -6,7 +8,7 @@ Web Dashboard REST API
 
 import threading
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -41,6 +43,7 @@ import switchbot_api
 import panasonic_api
 import lg_api
 import weather_api
+from weather_service import weather_service
 import pc_state
 import sensor_state
 import ac_history
@@ -91,15 +94,30 @@ def api_assistant(req: AssistantRequest):
     return {"reply": reply}
 
 
+def _set_actor(ctx, request):
+    user_id = request.headers.get("X-Dashboard-User") if request is not None else None
+    try:
+        ctx.actor_name = actor_from_members(ctx.get("家庭成員") if user_id is not None else [], user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return ctx.actor_name
+
+
+def _visible_todos(ctx, request):
+    actor = _set_actor(ctx, request)
+    with todo_write_lock:
+        rows = refresh_todos(ctx)
+        return [r for r in rows if r.get("狀態") == "待辦" and visible(r, actor)]
+
+
 # ── 首頁彙整 ──
 
 @router.get("/dashboard")
-def api_dashboard(include_weather: bool = True):
+def api_dashboard(include_weather: bool = True, request: Request = None):
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
     不含頻繁變動的統一裝置狀態——前端另呼叫 /api/devices/status 補齊。
 
-    註：ThreadPoolExecutor 內同時跑兩個天氣 future，主緒程並行跑 ctx.load()
-    （同步）拉 Sheet。進入 with 區塊後才 .result()，讓這三件事重疊起來。
+    舊版完整回應使用共用、有界的天氣 worker；生活摘要使用 include_weather=false。
     """
     # Homepage life cards must not wait for weather, device metadata or conversation sheets.
     # Keep the default response for older Dashboard deployments and other callers.
@@ -107,46 +125,36 @@ def api_dashboard(include_weather: bool = True):
         ctx = RequestContext()
         ctx.load(["待辦事項", "食品庫存"])
         return {
-            "todos": [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"],
+            "todos": _visible_todos(ctx, request),
             "food": [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"],
         }
 
-    results = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        weather_today_future = executor.submit(weather_api.get_weather_summary, "today", None)
-        weather_tomorrow_future = executor.submit(weather_api.get_weather_summary, "tomorrow", None)
+    ctx = RequestContext()
+    ctx.load(["待辦事項", "食品庫存", "智能居家"])
 
-        ctx = RequestContext()
-        ctx.load()
+    device_list = [
+        {
+            "name": d.get("名稱"),
+            "type": d.get("類型"),
+            "brand": d.get("品牌", ""),
+            "location": d.get("位置", ""),
+            "deviceId": d.get("Device ID", ""),
+            "buttons": d.get("按鈕", ""),
+            "lastPower": d.get("最後電源", ""),
+            "lastTemperature": d.get("最後溫度", ""),
+            "lastMode": d.get("最後模式", ""),
+            "lastFanSpeed": d.get("最後風速", ""),
+            "lastUpdatedAt": d.get("最後更新時間", ""),
+        }
+        for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
+    ]
 
-        device_list = [
-            {
-                "name": d.get("名稱"),
-                "type": d.get("類型"),
-                "brand": d.get("品牌", ""),
-                "location": d.get("位置", ""),
-                "deviceId": d.get("Device ID", ""),
-                "buttons": d.get("按鈕", ""),
-                "lastPower": d.get("最後電源", ""),
-                "lastTemperature": d.get("最後溫度", ""),
-                "lastMode": d.get("最後模式", ""),
-                "lastFanSpeed": d.get("最後風速", ""),
-                "lastUpdatedAt": d.get("最後更新時間", ""),
-            }
-            for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
-        ]
-
-        try:
-            results["weatherToday"] = weather_today_future.result(timeout=15)
-        except Exception:
-            results["weatherToday"] = None
-        try:
-            results["weatherTomorrow"] = weather_tomorrow_future.result(timeout=15)
-        except Exception:
-            results["weatherTomorrow"] = None
+    today, tomorrow = weather_service.get_many(["today", "tomorrow"])
+    results = {"weatherToday": None if "error" in today else today,
+               "weatherTomorrow": None if "error" in tomorrow else tomorrow}
 
     results["devices"] = device_list
-    results["todos"] = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    results["todos"] = _visible_todos(ctx, request)
     results["food"] = [r for r in ctx.get("食品庫存") if r.get("狀態") == "有效"]
     results["options"] = api_get_device_options()
 
@@ -433,10 +441,10 @@ def api_remote_verify(payload: dict = Body(default={})):
 # ── 待辦事項 ──
 
 @router.get("/todos")
-def api_get_todos():
+def api_get_todos(request: Request = None):
     ctx = RequestContext()
     ctx.load()
-    return [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    return _visible_todos(ctx, request)
 
 
 def _sheet_bool(value):
@@ -498,9 +506,10 @@ class TodoAddRequest(BaseModel):
 
 
 @router.post("/todos")
-def api_add_todo(req: TodoAddRequest):
+def api_add_todo(req: TodoAddRequest, request: Request = None):
     ctx = RequestContext()
     ctx.load()
+    actor = _set_actor(ctx, request)
     data = {
         "item": req.item,
         "date": req.date,
@@ -514,15 +523,18 @@ def api_add_todo(req: TodoAddRequest):
         data["light_area_id"] = req.light_area_id
     if req.light_area is not None:
         data["light_area"] = req.light_area
-    result = handle_add_todo(data, req.person, ctx)
+    if actor is not None:
+        data["person"] = actor
+    result = handle_add_todo(data, actor or req.person, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
 class TodoModifyRequest(BaseModel):
+    todo_id: Optional[str] = None
     item: str
     # date_orig / time_orig：定位舊 row（同名待辦多筆時用三元組精確找）。
-    # 沒帶或空字串時 fallback 為「找事項名稱第一筆」舊行為，保留 LINE bot 路徑相容。
+    # 沒 ID 時保留名称日期時間定位，但多筆匹配一律拒絕。
     date_orig: Optional[str] = None
     time_orig: Optional[str] = None
     item_new: Optional[str] = None
@@ -537,10 +549,11 @@ class TodoModifyRequest(BaseModel):
 
 
 @router.patch("/todos")
-def api_modify_todo(req: TodoModifyRequest):
+def api_modify_todo(req: TodoModifyRequest, request: Request = None):
     ctx = RequestContext()
     ctx.load()
-    data = {"item": req.item}
+    actor = _set_actor(ctx, request)
+    data = {"item": req.item, "todo_id": req.todo_id}
     if req.date_orig is not None: data["date_orig"] = req.date_orig
     if req.time_orig is not None: data["time_orig"] = req.time_orig
     if req.item_new is not None: data["item_new"] = req.item_new
@@ -551,39 +564,43 @@ def api_modify_todo(req: TodoModifyRequest):
     if req.light_notify is not None: data["light_notify"] = req.light_notify
     if req.light_area_id is not None: data["light_area_id"] = req.light_area_id
     if req.light_area is not None: data["light_area"] = req.light_area
-    result = handle_modify_todo(data, req.requester, ctx)
+    result = handle_modify_todo(data, actor or req.requester, ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
 class TodoDeleteRequest(BaseModel):
+    todo_id: Optional[str] = None
     item: str
-    # date_orig / time_orig：定位 row。同 modify，沒帶就 fallback 找第一筆。
+    # date_orig / time_orig：沒有 ID 時協助消歧，不能任選同名第一筆。
     date_orig: Optional[str] = None
     time_orig: Optional[str] = None
 
 
 @router.delete("/todos")
-def api_delete_todo(req: TodoDeleteRequest):
+def api_delete_todo(req: TodoDeleteRequest, request: Request = None):
     ctx = RequestContext()
     ctx.load()
-    data = {"item": req.item}
+    actor = _set_actor(ctx, request)
+    data = {"item": req.item, "todo_id": req.todo_id}
     if req.date_orig is not None: data["date_orig"] = req.date_orig
     if req.time_orig is not None: data["time_orig"] = req.time_orig
-    result = handle_delete_todo(data, ctx)
+    result = handle_delete_todo(data, ctx, actor or "")
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
 
 # ── 週期性待辦（recurring todo）──
-# 模板 CRUD 純 proxy 到 handlers/recurring_todo.py。實際「生成」由 main.py polling
-# thread 每 5 分呼叫的 notify.run_realtime_tick 跑（/notify_realtime 端點現在只是
+# 模板 CRUD 交給 handlers/recurring_todo.py。實際「生成」由獨立 todo-reminders
+# 工作每 5 分呼叫 notify.run_todo_tick（/notify_realtime 端點現在只是
 # 手動 debug 觸發，不是正常驅動來源），受 config.recurring_todo_enabled() 總開關控制。
 
 @router.get("/recurring-todos")
-def api_get_recurring_todos():
+def api_get_recurring_todos(request: Request = None):
     """列出啟用中的週期模板（每筆附『摘要』人類可讀字串給前端直接顯示）。"""
-    return list_recurring_rules(active_only=True)
+    ctx = RequestContext()
+    actor = _set_actor(ctx, request)
+    return [r for r in list_recurring_rules(active_only=True) if visible(r, actor)]
 
 
 class RecurringTodoAddRequest(BaseModel):
@@ -603,9 +620,10 @@ class RecurringTodoAddRequest(BaseModel):
 
 
 @router.post("/recurring-todos")
-def api_add_recurring_todo(req: RecurringTodoAddRequest):
+def api_add_recurring_todo(req: RecurringTodoAddRequest, request: Request = None):
     ctx = RequestContext()
     ctx.load()
+    actor = _set_actor(ctx, request)
     data = {"item": req.item, "recur_type": req.recur_type}
     for field in ("weekdays", "month_day", "interval_days", "time", "person",
                   "type", "light_notify", "light_area", "light_area_id",
@@ -613,7 +631,9 @@ def api_add_recurring_todo(req: RecurringTodoAddRequest):
         value = getattr(req, field)
         if value is not None:
             data[field] = value
-    result = handle_add_recurring_todo(data, req.person or "", ctx)
+    if actor is not None:
+        data["person"] = actor
+    result = handle_add_recurring_todo(data, actor or req.person or "", ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
@@ -639,9 +659,10 @@ class RecurringTodoModifyRequest(BaseModel):
 
 
 @router.patch("/recurring-todos")
-def api_modify_recurring_todo(req: RecurringTodoModifyRequest):
+def api_modify_recurring_todo(req: RecurringTodoModifyRequest, request: Request = None):
     ctx = RequestContext()
     ctx.load()
+    actor = _set_actor(ctx, request)
     data = {}
     for field in ("rule_id", "item", "recur_type", "item_new", "recur_type_new",
                   "weekdays", "month_day", "interval_days", "time", "person",
@@ -650,7 +671,7 @@ def api_modify_recurring_todo(req: RecurringTodoModifyRequest):
         value = getattr(req, field)
         if value is not None:
             data[field] = value
-    result = handle_modify_recurring_todo(data, req.requester or "", ctx)
+    result = handle_modify_recurring_todo(data, actor or req.requester or "", ctx)
     if "❌" in result: raise HTTPException(status_code=400, detail=result)
     return {"message": result}
 
@@ -662,10 +683,11 @@ class RecurringTodoStopRequest(BaseModel):
 
 
 @router.delete("/recurring-todos")
-def api_stop_recurring_todo(req: RecurringTodoStopRequest):
+def api_stop_recurring_todo(req: RecurringTodoStopRequest, request: Request = None):
     """停整個週期（模板狀態 → 停用，不刪除）。"""
     ctx = RequestContext()
     ctx.load()
+    actor = _set_actor(ctx, request)
     data = {}
     for field in ("rule_id", "item", "recur_type"):
         value = getattr(req, field)
@@ -816,9 +838,9 @@ def api_delete_schedule(req: ScheduleDeleteRequest):
 
 @router.get("/weather")
 def api_get_weather(date: str = "today", location: Optional[str] = None):
-    summary = weather_api.get_weather_summary(date, location)
+    summary = weather_service.get_many([date], location)[0]
     if isinstance(summary, dict) and "error" in summary:
-        raise HTTPException(status_code=400, detail=summary["error"])
+        raise HTTPException(status_code=summary.get("status_code", 400), detail=summary["error"])
     return summary
 
 
@@ -938,3 +960,10 @@ def api_dehumidifier_history():
     會被 polling 因此才有資料；前端只在「自動模式 ON」卡片內畫 on-segments
     背景（fresh 綠色）+ 綁定 sensor 的濕度線。"""
     return dehumidifier_history.snapshot()
+
+
+@router.get("/system/jobs")
+def api_job_health():
+    """Job timing and errors only; protected by the existing API-key dependency."""
+    from job_runner import jobs
+    return jobs.snapshot()

@@ -1,3 +1,5 @@
+from threading import RLock
+_schedule_cycle_lock = RLock()
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from schedule_execution import execute_pending, ATTEMPT_COLUMN, RESULT_COLUMN
@@ -337,6 +339,18 @@ def _archive_processed_schedules(processed_devices, ctx):
         schedule_sheet.delete_rows(sheet_row)
 
 
+def run_schedule_tick(ctx, now=None):
+    with _schedule_cycle_lock:
+        processed = _execute_pending_schedules(now or now_taipei(), ctx)
+        _archive_processed_schedules(processed, ctx)
+
+
+def run_todo_tick(ctx):
+    now = now_taipei()
+    materialize_recurring_todos(now, ctx)
+    _process_todo_reminders(now, now.date(), ctx)
+
+
 def run_realtime_tick(ctx, now=None):
     """即時 tick，每 5 分鐘由 main.py 的 polling thread 呼叫一次（原 GAS 每 15 分鐘）：
     1. 同步外部行事曆
@@ -374,8 +388,7 @@ def run_realtime_tick(ctx, now=None):
         print(f"[realtime] 待辦提醒失敗：{e}")
 
     try:
-        processed_devices = _execute_pending_schedules(now, ctx)
-        _archive_processed_schedules(processed_devices, ctx)
+        run_schedule_tick(ctx, now)
     except Exception as e:
         print(f"[realtime] 排程執行/封存失敗：{e}")
 
@@ -393,7 +406,12 @@ def notify_realtime():
     try:
         ctx = RequestContext()
         ctx.load()
-        run_realtime_tick(ctx)
+        from job_runner import jobs
+        if jobs.jobs:
+            for name in ("schedules", "notion", "todo-reminders", "agent-health"):
+                jobs.run_once(name)
+        else:
+            run_realtime_tick(ctx)
         return {"status": "ok"}
     except Exception as e:
         print(f"[NOTIFY_REALTIME ERROR] {e}")

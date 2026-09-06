@@ -1,3 +1,5 @@
+from todo_access import select_todo, visible, TODO_ID, new_todo_id
+from todo_coordination import todo_write
 import threading
 from linebot.models import TextSendMessage
 from config import line_bot_api, date_with_weekday, now_taipei
@@ -18,6 +20,7 @@ from handlers.todo_helpers import (
 )
 
 
+@todo_write
 def handle_add_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN, LIGHT_AREA_ID_COLUMN])
@@ -26,6 +29,7 @@ def handle_add_todo(data, user_name, ctx):
     light_notify = _resolve_light_notify(data)
     light_area = _resolve_light_area(data, light_notify)
     append_record(sheet, {
+        TODO_ID: new_todo_id(),
         "事項": data.get("item", ""),
         "日期": data.get("date", ""),
         "時間": data.get("time", ""),
@@ -74,6 +78,7 @@ def _matches_todo(row, item_name, date_orig, time_orig):
     return True
 
 
+@todo_write
 def handle_modify_todo(data, user_name, ctx):
     sheet = ctx.get_worksheet("待辦事項")
     ensure_columns(sheet, [LIGHT_NOTIFY_COLUMN, LIGHT_AREA_ID_COLUMN])
@@ -81,65 +86,61 @@ def handle_modify_todo(data, user_name, ctx):
     item_name = data.get("item", "")
     date_orig = data.get("date_orig") or ""
     time_orig = data.get("time_orig") or ""
-    for i, row in enumerate(records):
-        if _matches_todo(row, item_name, date_orig, time_orig):
-            # 檢查屬性：唯讀項目不可修改
-            prop = str(row.get("屬性", "")).strip()
-            if prop == "唯讀":
-                return f"「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
-            updates = {}
-            old_person = row.get("負責人")
-            if data.get("item_new"):
-                updates["事項"] = data.get("item_new")
-            if data.get("date"):
-                updates["日期"] = data.get("date")
-            if data.get("time") is not None:
-                updates["時間"] = data.get("time")
-            if data.get("person"):
-                updates["負責人"] = data.get("person")
-            if data.get("type"):
-                updates["類型"] = data.get("type")
-            if "light_notify" in data:
-                updates[LIGHT_NOTIFY_COLUMN] = _bool_cell(data.get("light_notify"))
-                light_notify_next = _parse_bool(data.get("light_notify"), default=False)
-                updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
-                    {**row, **data},
-                    light_notify_next,
-                    existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
-                ).get("id", "")
-            elif "light_area_id" in data or "light_area" in data:
-                light_notify_next = _parse_bool(row.get(LIGHT_NOTIFY_COLUMN), default=False)
-                updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
-                    {**row, **data},
-                    light_notify_next,
-                    existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
-                ).get("id", "")
-            # 寫入前即時定位列號，不信任快取的 i+2（背景同步搬動外部列會讓本地列位移）。
-            row_number, _ = _locate_todo_row(sheet.get_all_values(), item_name, date_orig, time_orig)
-            if row_number is None:
-                return f"❌ 找不到「{item_name}」"
-            update_count = update_row_fields(sheet, row_number, updates)
-            row.update(updates)
-            new_person = data.get("person")
-            if new_person and new_person != old_person and new_person != user_name:
-                # default-arg pattern：把當下的值「凍結」進函式簽名，避免 thread 起跑時
-                # closure 抓到的是已被覆寫的變數。這個請求可能是「一次多 action」，
-                # 例如 [modify_todo A, modify_todo B] 共用同一個 data dict──
-                # 若 thread 直接 closure data，等它真正 run 時 data 可能已被改成 B 的內容。
-                def _notify(person=new_person, item=data.get("item_new") or data.get("item"), date_str=data.get("date") or row.get("日期")):
-                    for member in ctx.get("家庭成員"):
-                        if member.get("名稱") == person and member.get("狀態") == "啟用":
-                            mid = member.get("Line User ID")
-                            if mid:
-                                notify_text = f"📋 {user_name} 將一項待辦指派給你：\n{item}（{date_str}）"
-                                line_bot_api.push_message(mid, TextSendMessage(text=notify_text))
-                                save_conversation(mid, "assistant", notify_text)
-                                cleanup_conversation(mid)
-                            break
-                threading.Thread(target=_notify, daemon=True).start()
-            if update_count == 0:
-                return f"❌ 找到「{data.get('item')}」但沒收到任何要更新的欄位（收到參數：{list(data.keys())}）"
-            return f"✅ 已更新「{data.get('item')}」"
+    row_number, row = select_todo(records, data, getattr(ctx, "actor_name", None))
+    if row is not None:
+        # 檢查屬性：唯讀項目不可修改
+        prop = str(row.get("屬性", "")).strip()
+        if prop == "唯讀":
+            return f"❌ 「{data.get('item')}」是外部行事曆的項目，請到原本的日曆上操作"
+        updates = {}
+        old_person = row.get("負責人")
+        if data.get("item_new"):
+            updates["事項"] = data.get("item_new")
+        if data.get("date"):
+            updates["日期"] = data.get("date")
+        if data.get("time") is not None:
+            updates["時間"] = data.get("time")
+        if data.get("person"):
+            updates["負責人"] = data.get("person")
+        if data.get("type"):
+            updates["類型"] = data.get("type")
+        if "light_notify" in data:
+            updates[LIGHT_NOTIFY_COLUMN] = _bool_cell(data.get("light_notify"))
+            light_notify_next = _parse_bool(data.get("light_notify"), default=False)
+            updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
+                {**row, **data},
+                light_notify_next,
+                existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
+            ).get("id", "")
+        elif "light_area_id" in data or "light_area" in data:
+            light_notify_next = _parse_bool(row.get(LIGHT_NOTIFY_COLUMN), default=False)
+            updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
+                {**row, **data},
+                light_notify_next,
+                existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
+            ).get("id", "")
+        update_count = update_row_fields(sheet, row_number, updates)
+        row.update(updates)
+        new_person = data.get("person")
+        if new_person and new_person != old_person and new_person != user_name:
+            # default-arg pattern：把當下的值「凍結」進函式簽名，避免 thread 起跑時
+            # closure 抓到的是已被覆寫的變數。這個請求可能是「一次多 action」，
+            # 例如 [modify_todo A, modify_todo B] 共用同一個 data dict──
+            # 若 thread 直接 closure data，等它真正 run 時 data 可能已被改成 B 的內容。
+            def _notify(person=new_person, item=data.get("item_new") or data.get("item"), date_str=data.get("date") or row.get("日期")):
+                for member in ctx.get("家庭成員"):
+                    if member.get("名稱") == person and member.get("狀態") == "啟用":
+                        mid = member.get("Line User ID")
+                        if mid:
+                            notify_text = f"📋 {user_name} 將一項待辦指派給你：\n{item}（{date_str}）"
+                            line_bot_api.push_message(mid, TextSendMessage(text=notify_text))
+                            save_conversation(mid, "assistant", notify_text)
+                            cleanup_conversation(mid)
+                        break
+            threading.Thread(target=_notify, daemon=True).start()
+        if update_count == 0:
+            return f"❌ 找到「{data.get('item')}」但沒收到任何要更新的欄位（收到參數：{list(data.keys())}）"
+        return f"✅ 已更新「{data.get('item')}」"
     return f"❌ 找不到「{data.get('item')}」"
 
 
@@ -245,6 +246,7 @@ def _explain_missing_todo(values, item_name, ctx, user_name=""):
     return f"❌ 找不到「{item_name}」"
 
 
+@todo_write
 def handle_delete_todo(data, ctx, user_name=""):
     sheet = ctx.get_worksheet("待辦事項")
     archive = ctx.get_worksheet("待辦封存")
@@ -253,27 +255,24 @@ def handle_delete_todo(data, ctx, user_name=""):
     date_orig = data.get("date_orig") or ""
     time_orig = data.get("time_orig") or ""
 
-    # 寫入前用「即時 Sheet 內容」定位列號，不信任 request 開頭快取的 i+2：背景 realtime
-    # tick 的 sync_external_events 每次都把所有外部（Notion）列砍掉重建到表尾，若發生在
-    # 解析→寫入的空窗，那筆待辦就換了列 → 用舊 index 會寫到別列（實測：唯讀任務標完成
-    # 沒生效卻回報成功）。改成即時定位，順帶讓「真的找不到」正確回 ❌ 而非假成功。
-    values = sheet.get_all_values()
-    row_number, prop = _locate_todo_row(values, item_name, date_orig, time_orig)
-    if row_number is None:
-        return _explain_missing_todo(values, item_name, ctx, user_name)
+    # todo_write 已在共用鎖內重讀；定位、權限檢查、刪列使用同一份即時資料。
+    row_number, selected = select_todo(records, data, getattr(ctx, "actor_name", None))
+    if selected is None:
+        if data.get("todo_id") or getattr(ctx, "actor_name", None):
+            return "❌ 找不到可操作的待辦，或條件不夠明確。"
+        return _explain_missing_todo(sheet.get_all_values(), item_name, ctx, user_name)
+    item_name = selected.get("事項", item_name)
+    prop = selected.get("屬性")
 
-    if prop == "唯讀":
-        # 唯讀項目：只改狀態為已完成，不刪除不封存
+    if prop == "唯讀" or selected.get("來源") == "Notion":
+        # 外部項目以本地完成記號去重，不向 Notion 寫入。
         update_row_fields(sheet, row_number, {"狀態": "已完成"})
-        for row in records:  # 同步 request 快取，讓同一輪後續動作看到
-            if _matches_todo(row, item_name, date_orig, time_orig):
-                row["狀態"] = "已完成"
-                break
+        selected["狀態"] = "已完成"
         return f"✅ 已標記「{item_name}」為已完成（下次同步後不再顯示）"
 
     # 本地項目：封存 + 刪列。封存內容從快取取（找不到就用手上的最小資訊），
     # 但刪除一定用即時列號，避免砍錯列。
-    cache_row = next((r for r in records if _matches_todo(r, item_name, date_orig, time_orig)), None)
+    cache_row = selected
     append_record(archive, {**(cache_row or {"事項": item_name, "日期": date_orig, "時間": time_orig}), "狀態": "已完成"})
     sheet.delete_rows(row_number)
     if cache_row is not None and cache_row in records:
@@ -292,7 +291,7 @@ def handle_query_todo(user_name, ctx):
     # 先同步外部行事曆到 Sheet
     sync_external_events(ctx)
 
-    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦"]
+    valid = [r for r in ctx.get("待辦事項") if r.get("狀態") == "待辦" and visible(r, user_name)]
     lines = []
     for r in valid:
         todo_type = r.get("類型", "公開")

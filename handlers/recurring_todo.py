@@ -1,3 +1,4 @@
+from todo_access import TODO_ID, new_todo_id, visible
 """週期性待辦（recurring todo）。
 
 設計核心：**模板 / 實例分離 + 永遠掛著「下一次」**
@@ -28,6 +29,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from config import now_taipei, recurring_todo_enabled
+from todo_coordination import todo_write
 from sheets import get_or_create_sheet, append_record, update_row_fields, ensure_columns
 from hue_area_settings import DEFAULT_LIGHT_AREA_NAME
 from handlers.todo_helpers import (
@@ -253,6 +255,7 @@ def _materialize_one(todo_sheet, rule, date_str, ctx):
     """把一條模板生成成一筆普通待辦（日期＝算好的發生日，可能是未來或過去 backlog），
     並同步 ctx 快取（讓同一個 tick 後段的提醒 / 排程步驟看得到這筆新實例）。"""
     record = {
+        TODO_ID: new_todo_id(),
         "事項": rule.get("事項", ""),
         "日期": date_str,
         "時間": str(rule.get("時間", "") or "").strip(),
@@ -272,6 +275,7 @@ def _materialize_one(todo_sheet, rule, date_str, ctx):
         print(f"[recur] ctx cache sync failed: {e}")
 
 
+@todo_write
 def materialize_recurring_todos(now, ctx):
     """每 5 分鐘 tick 呼叫。確保每條啟用規則在活表裡「有且只有一筆 active（待辦）實例」；
     沒有的（新規則、或剛被完成/刪除）就補上算好的下一筆（見 _compute_next_occurrence）。
@@ -352,6 +356,7 @@ def _build_light_data(item, time_str, data):
     return ld
 
 
+@todo_write
 def handle_add_recurring_todo(data, user_name, ctx):
     rtype = str(data.get("recur_type", "")).strip()
     if rtype not in RECUR_TYPES:
@@ -453,7 +458,8 @@ def list_recurring_rules(active_only=True):
 
 def handle_query_recurring_todo(ctx):
     rules = [r for r in _template_sheet().get_all_records()
-             if str(r.get("狀態", "")).strip() == "啟用"]
+             if str(r.get("狀態", "")).strip() == "啟用"
+             and visible(r, getattr(ctx, "actor_name", None))]
     if not rules:
         return "目前沒有設定週期提醒"
     lines = []
@@ -464,6 +470,7 @@ def handle_query_recurring_todo(ctx):
     return "週期提醒：\n" + "\n".join(lines)
 
 
+@todo_write
 def handle_stop_recurring_todo(data, user_name, ctx):
     """停掉整個週期 = 模板狀態改「停用」（不刪，保留可再啟用）。
     已生成的當天那筆實例不主動清，使用者可自行完成或不理。"""
@@ -476,6 +483,7 @@ def handle_stop_recurring_todo(data, user_name, ctx):
 
     sheet = _template_sheet()
     matches = _find_active(sheet.get_all_records(), item, recur_type_filter, rule_id)
+    matches = [(i, r) for i, r in matches if visible(r, getattr(ctx, "actor_name", None))]
     label = item or "週期提醒"
     if not matches:
         return f"❌ 找不到啟用中的週期提醒「{label}」"
@@ -488,6 +496,7 @@ def handle_stop_recurring_todo(data, user_name, ctx):
     return f"✅ 已停止週期提醒：{name}（{format_recur_summary(r)}）"
 
 
+@todo_write
 def handle_modify_recurring_todo(data, user_name, ctx):
     del user_name
     item = str(data.get("item", "")).strip()
@@ -499,6 +508,7 @@ def handle_modify_recurring_todo(data, user_name, ctx):
     sheet = _template_sheet()
     records = sheet.get_all_records()
     matches = _find_active(records, item, recur_type_filter, rule_id)
+    matches = [(i, r) for i, r in matches if visible(r, getattr(ctx, "actor_name", None))]
     label = item or "週期提醒"
     if not matches:
         return f"❌ 找不到啟用中的週期提醒「{label}」"

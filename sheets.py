@@ -43,6 +43,7 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   封存表：食品封存（同欄位）
 
 【待辦事項】（BATCH_SHEETS）
+  待辦ID              str   todo_ + UUID；Dashboard 修改／完成的穩定身分
   事項 / 日期(YYYY-MM-DD) / 時間(HH:MM,可空) / 負責人
   狀態                str   "待辦" | "已完成"
   類型                str   "私人" | "公開"

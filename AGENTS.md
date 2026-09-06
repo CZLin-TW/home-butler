@@ -37,14 +37,14 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 
 # 排程 / 推播架構（in-process scheduler；GAS 已退場）
 
-時間驅動的工作**全部跑在 `main.py` 的 polling thread**（每 5 分一 tick），不再用 Google Apps Script cron。
+背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；感測器、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
-- **realtime tick**：`notify.run_realtime_tick(ctx)`——行事曆同步 / 週期待辦生成 / 待辦提醒 / 設備排程執行 / 封存。每 5 分一次（原 GAS 15 分，現在更即時）。每步驟各自 try/except 隔離，一步壞不擋其餘。
+- **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**：`notify.run_daily_push_if_due(ctx)`——每天過了 `DAILY_PUSH_HOUR`（env，預設 21 點）後第一個 tick 觸發一次。去重 marker 存在 Sheet「系統狀態」分頁的 `最後每日推播日期`（跨 Render 重啟存活，不重發不漏發；睡整晚跨午夜才醒則當天不補）。
 - `/notify`、`/notify_realtime` 端點**保留**但只當手動觸發（debug / 補發）；不再有外部 cron 打它們。手動 `/notify` 不檢查也不更新每日 marker。
 
 **startup 不做任何 Sheets 工作**：backfill（四張歷史表）／`load_rules`／`ensure_columns`
-全部集中在 `main.py:_warm_up()`，由 polling thread 起跑時在背景跑，**不是** startup handler。
+集中在 `main.py:_warm_up()`，由 sensors 工作在背景首次執行，**不是** startup handler；其他工作可獨立啟動。
 理由：FastAPI 的 sync startup handler 是直接 `handler()` 呼叫（不丟 threadpool），而 uvicorn
 在 ASGI lifespan startup 完成前不服務任何請求——四張歷史表整張 `get_all_records()` 在冷啟動的
 free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際咬過（2026-08-28）：一次部署重啟
@@ -126,13 +126,11 @@ hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit
 # Notion 待辦：完成的記號蓋在 Sheet，主鍵是 Notion page id
 
 公司的 Notion 只能讀（`notion_api.py` 沒有任何寫入函式），所以「完成」是在本地蓋章：
-`handle_delete_todo` 對 `屬性=唯讀` 的列**只改狀態成「已完成」、把列留著**。那列是給
+`handle_delete_todo` 對 `來源=Notion` 或 `屬性=唯讀` 的列**只改狀態成「已完成」、把列留著**。那列是給
 `sync_external_events` 看的記號——下一輪 sync 收集這些列的 **Notion page id**（存在
 待辦事項分頁的「外部ID」欄），從 Notion 拉到同一個 id 就跳過不寫回，任務因此不會復活。
 
-**sync 是砍掉重建，不是差異更新**：每 5 分鐘把該成員「來源≠本地 且 狀態=待辦」的列
-全部刪除，再把當下符合「Notion 篩選」的事件寫回表尾。所以 Notion 那邊狀態一改（例如
-不再是 Incoming），那列就直接消失，不會留下任何完成紀錄。
+**sync 使用差異更新**：`notion_reconcile.plan_changes` 以外部ID與成員定位，只更新 Notion 管理欄位、增刪有差異的列；不變時零資料寫入，保留待辦ID、燈光提醒與其他本地欄位。成功查詢後已不符合篩選的項目會移除；查詢失敗的成員完全不動。
 
 ## 為什麼主鍵一定要是 page id（2026-08-31 查了一整天的 bug）
 
@@ -142,9 +140,7 @@ hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit
 在 Notion 改個標題就會踩到——舊列的名字對不上新拉回來的名字，記號當場報銷。
 page id 在改標題／改日期／改時間之後都不變，是唯一穩定的識別碼。
 
-改版前寫進去的列沒有「外部ID」，`_legacy_key` 對那些列退回三元組比對（兩邊都 strip
-再比）；待辦列被 sync 重建過一輪就會帶上 id，只有「改版前就已經標完成」的列會一直
-停留在 legacy 模式。
+沒有外部ID的舊列使用三元組比對，匹配成功便補外部ID，包含完成記號。比不到的舊資料仍受既有完成去重與成功成員範圍保護。
 
 ## 幾個非顯而易見、改壞就會靜默失效的點
 
@@ -164,8 +160,7 @@ page id 在改標題／改日期／改時間之後都不變，是唯一穩定的
 - **`Notion 權限` 讀法是 `str(member.get(...) or "").strip() or "唯讀"`**，兩層 fallback
   缺一不可：欄位存在但**儲存格空白**時 `.get()` 拿到的是 `""`，dict 的預設值不會頂上 →
   `屬性` 寫成空字串 → 標完成時走成「本地」分支（封存＋刪列）→ 活表上沒有記號 → 復活。
-- **`屬性` 若真的設成「讀寫」，完成仍然會失效**（走本地封存＋刪列那條）。要開放讀寫
-  之前，得先讓完成回寫 Notion，或讓唯讀那條分支也涵蓋讀寫的外部項目。
+- **Notion 讀寫項目完成也留記號**；本地修改不回寫 Notion，同步欄位仍以來源為準。不可把 Notion 完成改成本地封存刪列，否則任務會復活。
 
 ## 使用者說「做完了」但列已經不在了
 
@@ -489,3 +484,14 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 - `control_*_result` 給排程與 HTTP API 用；`handle_control_*` 仍回字串，維持 LINE／自動控制的相容性。
 - LINE callback 以 async lock 依序處理，耗時 SDK 交給 Starlette threadpool，簽章驗證仍在 SDK 內。照明 Sheets／SwitchBot 呼叫也移入 threadpool；WebSocket 命令仍在 event loop await。手動 notify 使用同步路由，由 FastAPI threadpool 執行。不要在 async 路由直接做同步網路工作。
 - 離線驗證：`python -m unittest discover -s tests -v`；使用 fake Sheet／SDK，不啟動 app、不發 LINE 或家電指令。CI 包含排程失敗、重啟不重送、列位移、控制結果與事件迴圈可繼續服務的測試。
+
+## v1.37.0 架構改善與維護邊界
+
+- 待辦寫入：`todo_coordination.todo_write` 將即時讀取、ID 補齊、權限檢查、定位和寫入放在同一個 RLock。一般待辦、週期生成與 Notion 同步共用；Notion 網路查詢在鎖外，另有同步鎖避免舊結果覆蓋新結果。
+- 私人待辦：Dashboard BFF 驗證 session，轉送 `X-Dashboard-User` 的 LINE ID；後端以啟用家庭成員精確匹配，不接受前端姓名前綴當權限。私人事項與週期規則在回應之前過濾，修改／完成也重驗。LINE 的 request context 同樣帶 actor。沒有此 header 的既有 API-key 系統呼叫仍有家庭級權限；API key 只能留在受信任伺服器／agent，不能交給瀏覽器。
+- 穩定身分：Sheet 新增「待辦ID」欄，舊資料在首次讀取或寫入時補 UUID；Dashboard 修改／完成傳 `todo_id`，舊呼叫仍可用明確的名稱日期時間。匹配多筆一律拒絕，不能取第一筆。
+- 天氣：`weather_budget` 的單次查詢預算 10 秒，HTTP timeout 使用剩餘時間；`weather_service` 最多 4 個工作、同日期地點共享進行中請求、滿載立即 503，整批最多等 12 秒後回 504。已開始的同步 HTTP 不能強制中止，但不會無限排隊；失敗不進成功快取。生活摘要 `include_weather=false` 完全不等天氣。
+- 工作健康：帶 API key 的 `GET /api/system/jobs` 提供週期、執行中、開始／成功／下次時間、耗時及最近錯誤類別。這表示 callback 的完成情況，不是每個外部裝置已成功；子流程自行捕捉的錯誤仍需看服務 log。狀態在重啟後重建；業務去重仍在 Sheet。
+- 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。
+- 執行 `python -m unittest discover -s tests -v` 與編譯檢查。測試使用假 Sheets／SDK，不向家電或 LINE 發送訊息。
+- 部署仍限定單一 Python process／worker。RLock、工作排程與記憶體快取不是跨主機鎖；Sheets 也沒有多步交易，手動直接改表不受鎖保護。需要多 worker 或多實例時，必須先抽出唯一 scheduler／writer 並導入可交易的資料庫或分散式協調，不能只增加 worker 數。

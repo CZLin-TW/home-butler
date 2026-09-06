@@ -139,6 +139,7 @@ def process_message(user_id, text, user_name, ctx):
     純函式：不碰 LINE / HTTP，也不負責存對話歷史（由 caller 自行決定）。
     回傳值一定是非空字串，失敗時回 fallback 語句而非拋例外。
     """
+    ctx.actor_name = user_name
     result = ask_claude(user_id, text, user_name, ctx)
     print(f"[3] result={repr(result)}")
 

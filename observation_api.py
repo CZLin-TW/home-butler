@@ -9,6 +9,7 @@
 import httpx
 import os
 from ttl_cache import TTLCache
+from weather_budget import remaining_timeout
 
 CWA_API_KEY = os.environ.get("CWA_API_KEY", "")
 BASE_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0003-001"
@@ -114,7 +115,7 @@ def get_observation(station_name):
         resp = httpx.get(
             BASE_URL,
             params={"Authorization": CWA_API_KEY, "StationName": station_name},
-            timeout=10,
+            timeout=remaining_timeout(10),
             verify=False,
         )
         data = resp.json()

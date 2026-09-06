@@ -456,9 +456,9 @@ Notion 整合會將事件同步到待辦事項 Sheet，並依權限設定標記�
 
 ### 十四、排程與推播（in-process scheduler）
 
-時間驅動的工作全部跑在 `main.py` 的 polling thread（每 5 分一 tick），**不需要任何外部 cron**：
+背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；感測器、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
-- **realtime tick**（`notify.run_realtime_tick`）：同步外部行事曆 + 週期待辦生成 + 待辦提醒 + 設備排程執行 + 封存。每 5 分一次（比舊版 GAS 的 15 分更即時）。
+- **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**（`notify.run_daily_push_if_due`）：每天過了 `DAILY_PUSH_HOUR`（環境變數，預設 `21` = 晚上 9 點）後的第一個 tick 觸發一次；用 Sheet「系統狀態」分頁的 `最後每日推播日期` marker 去重，跨 Render 重啟存活——不重發也不漏發。
 - **Agent 失聯告警**（`health_alert.run_checks`）：掛在 realtime tick 最後一步，純觀察不控制設備。詳見 `AGENTS.md` 的「Agent 失聯告警」。
 
@@ -740,7 +740,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | delete_schedule | 取消排程（移至封存） | device_name，選填：trigger_time, all |
 | query_schedule | 查詢目前所有待執行排程 | 無 |
 
-排程由 polling thread 每 5 分鐘跑一次 realtime tick 負責執行，精準度約 5 分鐘。觸發時間超過 2 小時未執行的排程自動標記為已過期。設備所有排程完成後統一通知建立者（含執行結果與設備目前狀態）。
+設備排程由獨立 schedules 工作每 60 秒檢查一次，通常延遲在一個檢查週期內（仍受網路、服務休眠影響）。觸發時間超過 2 小時未執行的排程自動標記為已過期。設備所有排程完成後統一通知建立者（含執行結果與設備目前狀態）。
 
 **冷氣防黴送風**：關冷氣時，若這次以冷氣/除濕（會結露的模式）從最後一次開機算起已運轉 ≥30 分鐘，home-butler 不直接關，而是先切「送風」吹乾蒸發器約 5 分鐘（實際 5~10 分，受 5 分輪詢粒度影響）再由排程自動關閉，降低濕氣悶在機內長黴。全部空調自動套用、免設定；送風期間若重新開冷氣，收尾關會自動取消。經 home-butler 的所有關機路徑（LINE / Dashboard / Siri / Hub 2 按鈕 / 自動關機 timer）都會觸發；唯獨直接用實體遙控器關機因繞過 home-butler 無法攔截。對應排程在「排程指令」分頁以「來源=防黴」標記。**門檻（預設 30 分）與送風時長（預設 5 分）可在「智能居家」分頁逐台調整**：欄位「防黴運轉門檻分鐘」「防黴送風分鐘」，留空用預設、門檻填 0 代表每次關都送風。
 
@@ -892,14 +892,14 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 - **屬性控制**：透過「來源」和「屬性」欄位區分本地/外部、可讀寫/唯讀
 - **每人獨立**：每個家庭成員可設定不同的外部行事曆來源、篩選條件和權限
 - **Sheet 控制**：透過「家庭成員」分頁的欄位控制整合行為，不用改程式碼
-- **定期同步**：query_todo、/notify、/notify_realtime 都會觸發同步（先清舊資料再寫入最新）
+- **定期同步**：query_todo、/notify、/notify_realtime 都會觸發同步（依穩定 ID 差異更新，不重建整張表）
 
 ### 同步機制
 
 每次同步時（`sync_external_events`）：
-1. 刪除待辦 Sheet 中所有「來源」欄不為「本地」的項目
-2. 根據每位成員的 Notion 設定拉取最新事件
-3. 寫入待辦 Sheet，自動填入來源（Notion）和屬性（依成員的「Notion 權限」欄位）
+1. 在待辦寫入鎖外抓取每位成員的 Notion 事件；失敗成員不動資料。
+2. 取得待辦共用寫入鎖後重讀 Sheet，以外部ID及成員計算差異，保留同步期間新增的完成記號。
+3. 先更新欄位，再由下往上刪列，最後插入新列；不變時不寫資料。完成記號、待辦ID與燈光提醒受到保留。同步不回寫 Notion。
 
 同步頻率：
 - 使用者查待辦時即時同步
@@ -1038,3 +1038,14 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 - 天氣查詢因為兩次 Claude 呼叫，會比一般操作多消耗約 1 倍 token
 - 建議在 Anthropic Console 設定 monthly spend limit $5
 - 其他服務（Render、UptimeRobot、SwitchBot、氣象署、Notion）均為免費方案
+
+## v1.37.0 架構改善與維護邊界
+
+- 待辦寫入：`todo_coordination.todo_write` 將即時讀取、ID 補齊、權限檢查、定位和寫入放在同一個 RLock。一般待辦、週期生成與 Notion 同步共用；Notion 網路查詢在鎖外，另有同步鎖避免舊結果覆蓋新結果。
+- 私人待辦：Dashboard BFF 驗證 session，轉送 `X-Dashboard-User` 的 LINE ID；後端以啟用家庭成員精確匹配，不接受前端姓名前綴當權限。私人事項與週期規則在回應之前過濾，修改／完成也重驗。LINE 的 request context 同樣帶 actor。沒有此 header 的既有 API-key 系統呼叫仍有家庭級權限；API key 只能留在受信任伺服器／agent，不能交給瀏覽器。
+- 穩定身分：Sheet 新增「待辦ID」欄，舊資料在首次讀取或寫入時補 UUID；Dashboard 修改／完成傳 `todo_id`，舊呼叫仍可用明確的名稱日期時間。匹配多筆一律拒絕，不能取第一筆。
+- 天氣：`weather_budget` 的單次查詢預算 10 秒，HTTP timeout 使用剩餘時間；`weather_service` 最多 4 個工作、同日期地點共享進行中請求、滿載立即 503，整批最多等 12 秒後回 504。已開始的同步 HTTP 不能強制中止，但不會無限排隊；失敗不進成功快取。生活摘要 `include_weather=false` 完全不等天氣。
+- 工作健康：帶 API key 的 `GET /api/system/jobs` 提供週期、執行中、開始／成功／下次時間、耗時及最近錯誤類別。這表示 callback 的完成情況，不是每個外部裝置已成功；子流程自行捕捉的錯誤仍需看服務 log。狀態在重啟後重建；業務去重仍在 Sheet。
+- 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。
+- 執行 `python -m unittest discover -s tests -v` 與編譯檢查。測試使用假 Sheets／SDK，不向家電或 LINE 發送訊息。
+- 部署仍限定單一 Python process／worker。RLock、工作排程與記憶體快取不是跨主機鎖；Sheets 也沒有多步交易，手動直接改表不受鎖保護。需要多 worker 或多實例時，必須先抽出唯一 scheduler／writer 並導入可交易的資料庫或分散式協調，不能只增加 worker 數。
