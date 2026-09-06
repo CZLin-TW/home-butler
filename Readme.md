@@ -57,7 +57,7 @@ LINE 仍依序處理訊息，同步 SDK 改在工作執行緒執行。照明的 
 | Agent 失聯告警 | PC agent 超過 15 分鐘沒回報 heartbeat、或劇院 agent 連續無回應時，主動推 LINE 通知（含最後回報時間與復原指令）；恢復時再推一則、附失聯時長。只在狀態翻轉時各推一次，不重複洗版。收件人由「家庭成員」分頁的 `系統告警` 欄決定，沒人勾就發給全部啟用成員 |
 | 劇院 agent 轉送 | 劇院 PC 的 agent 設了 `THEATER_AGENT_URL` 會宣告 theater capability，把 `theater.summary` / `theater.set_flags` 指令轉送到同機 [theater-agent](https://github.com/CZLin-TW/theater-agent)（純內網 :8080，Render 連不到，靠 WebSocket 中繼）。`theater_api.py` 對 Dashboard 提供 `/api/theater/summary`（功能開關 + 設備狀態 + log 尾端）與 `/api/theater/flags`（開關寫入） |
 | 自動夜燈 | 依 SwitchBot Hub 2 亮度（lightLevel 1~20）條件式控制 Hue 區域：啟用時段內亮度 ≤ 門檻且燈關著 → 套用指定場景＋亮度；亮度 > 門檻且燈是 auto 自己開的 → 關燈（使用者手動開的燈不碰）；時段結束關燈一次後不再理會。主路徑走 SwitchBot Webhook 推播（秒級），5 分鐘輪詢兜底時段邊界與漏接。每個 Hue 區域一條規則，Dashboard 照明卡片設定，持久化在 Sheet「照明自動規則」（詳見「自動夜燈機制」章節） |
-| Siri 語音控制 | iOS 捷徑把語音聽寫成文字 POST 到 `/api/assistant`，走跟 LINE bot 完全相同的 Claude pipeline（解析 → action 分派 → 回覆），讓你用「嘿 Siri」開冷氣、查濕度、記待辦等。每人捷徑各自帶 Line User ID 以分辨身分（詳見「Siri 語音控制」章節） |
+| Siri 語音控制 | 完整捷徑 POST `/api/assistant`，共用 LINE 意圖解析，可控制家電與使用待辦。長輩／小孩使用獨立金鑰的 `/api/assistant/devices` 家電專用捷徑，不需 Line User ID，後端限制動作及 AI 可見資料（詳見「Siri 語音控制」章節） |
 
 ---
 ## 需要的資源
@@ -494,9 +494,10 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | SPREADSHEET_ID | Google Sheets 的試算表 ID（網址中間那串） | 必要 |
 | GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） | 必要 |
 | ANTHROPIC_API_KEY | Claude API Key（sk-ant- 開頭） | 必要 |
-| HOME_BUTLER_API_KEY | 自訂的 API 認證金鑰，保護 `/api/*` `/notify*` `/switchbot/*` 端點。建議用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生 | 必要 |
+| HOME_BUTLER_API_KEY | 完整 API 認證金鑰，保護 `/api/*` `/notify*` `/switchbot/*`，家電專用入口另用下列金鑰。建議用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生 | 必要 |
+| DEVICE_VOICE_API_KEY | 只用於 `POST /api/assistant/devices` 的家電專用金鑰。使用上列指令另產生一把，至少 32 字元且不可等於 `HOME_BUTLER_API_KEY`；未設、太短或重複時此入口回 503，不影響原有 API。不要放在 Dashboard 或完整捷徑中 | 選配 |
 | DASHBOARD_URL | Dashboard 部署網址（例如 `https://dashboard.example.com`）。home-butler 啟動後會 runtime 從 `{DASHBOARD_URL}/api/version` 撈使用者體感版本（1 小時 cache）注入到 LINE bot 的 SYSTEM_PROMPT。沒設或撈不到時 LINE 回答版本會是「未知」，其他功能不受影響 | 建議 |
-| SIRI_USER_ID | Siri 捷徑（`/api/assistant`）沒帶 `user_id` 時的匿名 fallback 身分。**刻意維持中性，不要設成任何家人的真實 Line ID**——否則「忘了填 user_id」的請求會靜默冒名成那個人並污染其對話記憶。沒設預設字串 `siri`（匿名訪客：能控制家電，但無名字/無風格/對話記憶獨立）。正確用法是每人捷徑各自帶自己的 Line User ID | 選配 |
+| SIRI_USER_ID | 完整 Siri 入口（`/api/assistant`）沒帶 `user_id` 時的匿名 fallback，預設 `siri`。**維持中性，不要設成家人的真實 Line ID**，以免冒名及混用記憶。空白 ID 不會限制成家電權限；只需家電功能請用獨立入口與 `DEVICE_VOICE_API_KEY`。家電入口不使用此變數 | 選配 |
 | LG_PAT | LG ThinQ Connect 的 Personal Access Token（thinq.dev 產生，需勾裝置讀取 + 控制權限）。有 LG 除濕機才需要 | 選配 |
 | LG_COUNTRY | LG ThinQ 國碼，台灣 = `TW`（決定區域 endpoint）。預設 `TW` | 選配 |
 | LG_CLIENT_ID | LG ThinQ client 識別字串，固定一組即可。預設 `home-butler-client` | 選配 |
@@ -556,7 +557,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 供網頁版 Dashboard 使用，所有業務邏輯重用現有 handlers，不重複實作。
 
-> **🔒 認證**：所有 `/api/*` 端點都要求 `X-API-Key` header，值為環境變數 `HOME_BUTLER_API_KEY`。
+> **🔒 認證**：`/api/*` 端點要求 `X-API-Key` header，使用環境變數 `HOME_BUTLER_API_KEY`；唯一獨立入口 `POST /api/assistant/devices` 使用 `DEVICE_VOICE_API_KEY`。兩把金鑰不互通，家電金鑰不能呼叫完整語音、Dashboard API 或其他控制入口。
 > 沒有 header 或 key 不對會回 401；伺服器端未設定 `HOME_BUTLER_API_KEY` 則回 503（fail-closed）。
 > 同樣的保護也套用在 `/notify*` 和 `/switchbot/*` 端點。`/`（健康檢查）、`/callback`（LINE webhook，由 X-Line-Signature 驗證）和 `/switchbot/webhook`（SwitchBot Cloud 推播，SwitchBot 不支援自訂 header，靠感應器比對過濾）不在保護範圍內。
 
@@ -610,6 +611,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
 | /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
+| /api/assistant/devices | POST | 家電專用自然語言入口，只接受 `DEVICE_VOICE_API_KEY`。body 僅 `{text}`，1–500 字元；不接受 `user_id` 等額外欄位。回 `{reply}`，單句獨立解析，不讀寫家庭對話紀錄、不提供私人資料給模型 |
 
 ---
 
@@ -680,7 +682,39 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 
 ### 家人共用
 
-把捷徑分享給家人（捷徑右上分享），他們在自己手機把步驟 2 的 `user_id` 改成**自己的** Line User ID 即可。多支沒帶 ID 的捷徑會共用同一個匿名 `siri` 身分與記憶（多輪對話會互相串），所以匿名只適合一次性單句指令。
+需要完整功能的家人可以使用原捷徑，在自己手機把 `user_id` 改成自己的 Line User ID。這是對話身分，不是權限憑證；持有 `HOME_BUTLER_API_KEY` 代表完整 API 存取能力，留空 ID 也不會變成受限使用者。多支完整捷徑沒帶 ID 時會共用 `siri` 記憶。
+
+<a id="device-only-voice"></a>
+
+### 家電專用捷徑：長輩／小孩（v1.39.0）
+
+不必加入 LINE 家庭成員，也不必填 User ID。權限由獨立的金鑰及後端入口決定，不由 Siri 聲紋、年齡或傳入的使用者名稱決定。
+
+1. 在自己的終端執行 `python -c "import secrets; print(secrets.token_urlsafe(32))"`，另產生一把新金鑰。
+2. 在 Render 的 home-butler 服務 **Environment** 新增 `DEVICE_VOICE_API_KEY`，貼上新金鑰並套用部署。保留原本 `HOME_BUTLER_API_KEY`。新金鑰至少 32 字元且必須不同；沒有設定時新入口保持停用。
+3. 複製已能正常收音的捷徑，改名為「家電管家」。保留目前的「關閉 Siri 並繼續 → 朗讀提示 → 聽寫文字」流程；調整取得 URL 內容：
+   - URL：`https://<你的 render 網址>/api/assistant/devices`
+   - 方法：`POST`
+   - 標頭：`X-API-Key` = 新的 **DEVICE_VOICE_API_KEY**；`Content-Type` = `application/json`
+   - JSON 主體只留 `text` = 聽寫文字，**刪除整個 `user_id` 欄位**（不是留空）；不要傳 `role`、`mode` 或 `actions`。
+4. 繼續取回字典的 `reply` 並朗讀。分享前檢查副本不再含原本的完整金鑰或 User ID；只分享這個副本。
+
+| 可用 | 不提供 |
+| --- | --- |
+| 已啟用的 IR 設備開關及已設定按鈕（如電扇風速） | 待辦、食品的查詢／新增／修改／刪除 |
+| 冷氣開關、16–30 度、模式及風速 | 成員資料、個人風格、私人對話或身分切換 |
+| Panasonic／LG 除濕機開關、支援的模式、40–70% 每 5% 一級的目標濕度 | 建立／修改／查詢排程、修改除濕機自動規則 |
+| 感應器溫濕度、除濕機狀態、上述支援設備清單 | 未列入允許清單的其他 API（包含 Hue／劇院管理） |
+
+使用完整單句，例如「打開主臥電扇」「主臥冷氣調到二十六度」「客廳除濕機濕度設五十五」。此模式沒有共用聊天記憶，「再低一度」這類依賴上一句的指令需改說完整名稱及設定值。IR 只能確認指令送出，不能確認實際開關狀態。
+
+後端只載入 `智能居家` 並將名稱、類型、位置、按鈕、控制類型及品牌投影給專用解析器，**不傳 Device ID、Auth、家庭成員、待辦、食品或對話紀錄**。模型解析後，後端會先驗證整批動作、參數範圍及唯一設備名稱，全部通過才執行；不使用完整 `ACTION_HANDLERS`。範圍外要求回固定拒絕句，不由模型編造查詢結果。最多四個動作；有效動作執行時的硬體失敗不具交易回復能力，發生例外會保留前面結果、停止後續動作且不自動重送。
+
+冷氣控制仍會由原 handler 維護既有防黴收尾與自動關機排程；這是設備控制的必要副作用，不代表此金鑰可直接管理排程。除濕機自動模式鎖定時，仍需由完整 Dashboard 關閉自動模式才能手動控制，家電捷徑不能繞過鎖定。
+
+錯誤判讀：401 為金鑰錯誤；422 通常是仍帶 `user_id`／多餘欄位或輸入長度錯誤；400 為全空白文字；503 可能是未啟用、金鑰設定不合規或上游暫時不可用。停用時移除 `DEVICE_VOICE_API_KEY` 並套用部署；輪替則換新值及更新共用捷徑，原家電金鑰失效，完整金鑰不必更換。所有持有家電金鑰的人權限相同；沒有個人識別、逐人撤銷或逐台設備限制。
+
+離線驗證涵蓋真正的 FastAPI 認證與輸入驗證、假模型／Sheets／設備處理；部署後仍需確認 Render 設定與手機收音。家電模式不寫 `對話暫存`，若要確認 Siri 有無漏字，先在捷徑顯示聽寫文字；不要靠私人對話歷史除錯。
 
 ---
 
@@ -980,6 +1014,7 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 |------|------|
 | main.py | FastAPI 主程式（LINE Webhook、SwitchBot Cloud webhook 接收與 startup 註冊、啟動 polling thread、SwitchBot debug 端點）。訊息處理委派給 `assistant.py` |
 | assistant.py | 自然語言處理核心：`process_message`（Claude 解析 → action 分派 → 組句）與 action 路由表。LINE webhook 與 `/api/assistant`（Siri）共用，避免邏輯複製兩份 |
+| device_voice_api.py / device_voice.py | 家電專用語音入口、獨立模型目錄與 schema、動作及參數白名單。只掛載 `/api/assistant/devices`，不使用完整對話 pipeline；`tests/test_device_voice.py` 驗證權限邊界 |
 | config.py | 環境變數、LINE/Claude 初始化、時區設定 |
 | sheets.py | Google Sheets 存取封裝（RequestContext 批次讀取、快取、append_record / update_row_fields 集中寫入） |
 | device_status.py | Dashboard 共用的統一裝置狀態 in-memory cache、裝置目錄與背景刷新 single-flight 控制 |

@@ -22,6 +22,8 @@ LINE／Siri ──────────────────────�
 
 Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
 
+Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API；既有設備 handler 的防黴及自動關機仍運作。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
+
 ## 週期與事件的責任
 
 | 工作 | 實作／頻率 | 限制 |

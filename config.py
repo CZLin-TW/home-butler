@@ -12,13 +12,16 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 HOME_BUTLER_API_KEY = os.environ.get("HOME_BUTLER_API_KEY", "")
+# Separate capability: accepted ONLY by POST /api/assistant/devices. Empty disables it.
+DEVICE_VOICE_API_KEY = os.environ.get("DEVICE_VOICE_API_KEY", "")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "")
 # Siri 捷徑語音入口（/api/assistant）沒帶 user_id 時的「匿名」fallback 身分。
 # 正確用法：每位家人（含自己）的捷徑各自帶自己的 Line User ID，後端才認得出是誰
 # （拿到對應名字、自訂風格、各自的對話記憶）。
 # 這個值刻意維持中性、不要設成任何家人的真實 Line ID——否則「忘了填 user_id」的請求
 # 會靜默變成那個人、冒名操作並污染他的對話記憶。沒帶 ID 就當匿名訪客：能正常控制家電，
-# 但無名字/無風格/對話記憶獨立一份。
+# 但無名字/無風格/對話記憶獨立一份。空白 ID 不會限制權限；家電專用請改走
+# /api/assistant/devices + DEVICE_VOICE_API_KEY，該入口不使用 SIRI_USER_ID。
 SIRI_USER_ID = os.environ.get("SIRI_USER_ID", "siri")
 
 # LG ThinQ Connect（thinq.dev 官方 API）。除濕機等 LG 智慧家電用。

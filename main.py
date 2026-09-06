@@ -32,6 +32,10 @@ app.include_router(notify_router)
 from web_api import router as web_api_router
 app.include_router(web_api_router)
 
+# A separate router prevents the restricted key from entering the owner API.
+from device_voice_api import router as device_voice_router
+app.include_router(device_voice_router)
+
 # Local PC agent realtime channel
 from agent_ws import router as agent_ws_router
 app.include_router(agent_ws_router)

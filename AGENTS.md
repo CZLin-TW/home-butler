@@ -6,6 +6,8 @@ IR 名稱修正見 `device_name_resolution.py` 與 `tests/test_ir_names.py`：�
 
 Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` 後經 `voice_reply.format_voice_reply`，請保持 `{reply}` 契約。純設備控制用實際 handler 結果；錯誤／未知／部分成功／追問不可為縮短而刪除。LINE 不啟用 voice。格式整理不可改掉溫度、負號、百分比與時間，不新增 LLM 呼叫；測試見 `tests/test_voice_reply.py`。
 
+家電專用語音：`device_voice_api.py` 的 `/api/assistant/devices` 只接受獨立 `DEVICE_VOICE_API_KEY`。**不得把此金鑰加入 `verify_api_key` 或讓它進入完整 assistant pipeline**。模型僅見設備目錄投影，不讀家庭／待辦／食品／對話，不接受 `user_id`；先驗證整批白名單動作及參數才執行。冷氣原有防黴／自動關機副作用仍保留，除濕機不能繞過自動鎖。新增能力必須同步專用 schema、驗證、handler 白名單、README 及 `tests/test_device_voice.py`；完整 prompt 的動作擴充不會自動授權家電捷徑。
+
 # 版本管理
 
 系統版本不在 home-butler 管。Source of truth 是 **Dashboard 的 `package.json:version`**，本 repo 透過 `config.py:get_app_version()` 在 runtime 撈 Dashboard `/api/version`（1 小時 cache，失敗 fallback「未知」），由 `prompt.py` 注入 `SYSTEM_PROMPT`，讓 LINE bot 能回答「目前版本是？」之類的問題。

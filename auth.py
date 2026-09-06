@@ -8,7 +8,7 @@ LINE webhook (/callback) 與健康檢查 (/) 不套用此認證——
 
 import secrets
 from fastapi import Header, HTTPException, status
-from config import HOME_BUTLER_API_KEY
+from config import HOME_BUTLER_API_KEY, DEVICE_VOICE_API_KEY
 
 
 def verify_api_key(x_api_key: str = Header(default="")):
@@ -30,3 +30,16 @@ def verify_api_key(x_api_key: str = Header(default="")):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-API-Key header",
         )
+
+
+def verify_device_voice_key(x_api_key: str = Header(default="")):
+    """Dedicated capability, never add it to verify_api_key's accepted keys.
+
+    Reusing the owner key would give shortcut recipients full API access, so
+    refuse that configuration. The owner API remains independently protected.
+    """
+    if (not HOME_BUTLER_API_KEY or len(DEVICE_VOICE_API_KEY) < 32
+            or secrets.compare_digest(DEVICE_VOICE_API_KEY.encode(), HOME_BUTLER_API_KEY.encode())):
+        raise HTTPException(status_code=503, detail="Device voice access is not configured")
+    if not x_api_key or not secrets.compare_digest(x_api_key.encode(), DEVICE_VOICE_API_KEY.encode()):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
