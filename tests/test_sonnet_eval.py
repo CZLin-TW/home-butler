@@ -88,6 +88,21 @@ class BenchmarkTests(unittest.TestCase):
                 bench.run(Path(directory), bench.make_manifest())
             client.assert_not_called()
 
+    def test_supplied_key_does_not_read_environment_and_cancel_does_not_fall_back(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(bench, "api_key") as key_reader, patch("httpx.Client") as client:
+            with self.assertRaises(RuntimeError):
+                bench.run(Path(directory), bench.make_manifest(), supplied_key="")
+            key_reader.assert_not_called()
+            client.assert_not_called()
+
+    def test_gui_cancel_does_not_call_api_and_releases_lock(self):
+        with tempfile.TemporaryDirectory() as directory, patch("evals.secret_prompt.prompt_key", return_value=None), patch.object(bench, "run") as run:
+            with patch("sys.argv", ["benchmark", "run", "--prompt-key", "--out", directory]):
+                bench.main()
+            run.assert_not_called()
+            self.assertFalse((Path(directory) / "runner.lock").exists())
+            self.assertFalse((Path(directory) / "attempts.jsonl").exists())
+
     def test_auth_error_stops_without_retry_and_redacts_key(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(bench, "api_key", return_value="fake-secret"), patch("httpx.Client") as client:
             out = Path(directory)

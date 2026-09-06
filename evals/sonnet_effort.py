@@ -252,8 +252,9 @@ def prepare(out):
     return manifest
 
 
-def run(out, manifest):
-    key = api_key()
+def run(out, manifest, *, supplied_key=None):
+    # A supplied secret stays in this process and never enters os.environ/files.
+    key = api_key() if supplied_key is None else supplied_key.strip()
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY is not configured; zero new API calls")
     import httpx
@@ -367,7 +368,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["prepare", "run", "report"])
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--prompt-key", action="store_true", help="Ask for a masked, in-memory key in a local window")
     args = parser.parse_args()
+    if args.prompt_key and args.command != "run":
+        parser.error("--prompt-key is only available with run")
     if args.command == "report":
         manifest = json.loads((args.out / "manifest.json").read_text(encoding="utf-8"))
         print(json.dumps(report(args.out, manifest), ensure_ascii=False))
@@ -380,7 +384,18 @@ def main():
         os.write(fd, str(os.getpid()).encode())
         manifest = prepare(args.out)
         if args.command == "run":
-            run(args.out, manifest)
+            if args.prompt_key:
+                from evals.secret_prompt import prompt_key
+                key = prompt_key()
+                if not key:
+                    print("Key entry cancelled; zero new API calls.")
+                    return
+                try:
+                    run(args.out, manifest, supplied_key=key)
+                finally:
+                    key = None
+            else:
+                run(args.out, manifest)
         summary = report(args.out, manifest)
         print(f"Prepared {LIMIT} trials; claimed={summary['claimed_calls']}, completed={summary['completed_calls']}")
     finally:

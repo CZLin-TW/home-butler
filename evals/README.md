@@ -37,6 +37,11 @@ python evals/sonnet_effort.py run --out ../sonnet-effort-run-20260906
 python evals/sonnet_effort.py report --out ../sonnet-effort-run-20260906
 ```
 
+一次性測試可免設環境變數，改執行 `python evals/sonnet_effort.py run --prompt-key --out ../sonnet-effort-run-20260906`。
+本機會開啟遮蔽字元的輸入視窗（需要 Python tkinter），貼上測試 Key 後按「開始測試」。
+Key 只交給目前程序，不写入環境變數或檔案；取消視窗不送請求，也不改用其他已設定金鑰。
+程序結束後，再到 Claude Console 撤銷測試 Key。此模式與原模式共用同一份 manifest／ledger，額度不會重置。
+
 第一次 prepare 寫出不可變的 `manifest.json`：所有請求、預期結果、程式摘要及價格來源。
 執行會先將請求占額紀錄 fsync 至 `attempts.jsonl`，才送出 HTTP。每筆僅送一次，無 SDK、自動重試、轉址、schema fallback 或額外暖機呼叫。
 相同資料夾續跑時跳過所有已占額的請求（含中斷），總數仍 ≤120。不得另開輸出資料夾繞過原授權上限。
