@@ -14,6 +14,8 @@ python -m unittest discover -s tests -v
 
 測試不啟動正式服務、不發 LINE 或家電指令；不能證明 Google Sheets、認證憑證、外部雲端與家中設備當下可用。
 
+付費的真實模型效能／辨識評估另見 [Sonnet effort benchmark](../evals/README.md)。它使用固定合成資料，只跑解析，不執行業務 handler；必須先取得 API 呼叫額度授權，且不加入 CI 自動執行。既有的 fake 模型測試不能當作降低 effort 後辨識率的證據。
+
 ## 已有紀錄與未涵蓋範圍
 
 - 2026-09-06 家電專用語音（系統 v1.39.0）：Windows／Python 3.12 本機 85 項測試及編譯檢查通過，新增 16 項測試。使用真實 FastAPI／TestClient 驗證獨立金鑰、原完整入口的 verifier、停用／重複／輪替、身分覆寫與輸入邊界；假模型／Sheets／handler 驗證設備目錄投影、混合越權動作整批拒絕、名稱／參數範圍、無效模型輸出、簡潔實際結果、部分執行例外不重送。既有完整語音回歸一併通過。未以正式 Claude、Render 環境金鑰、iPhone 或實體設備驗證；上線需另設 `DEVICE_VOICE_API_KEY`。
