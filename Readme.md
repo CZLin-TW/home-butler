@@ -1001,7 +1001,8 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 ## 效能優化
 
 - **Google Sheets 批次讀取**：RequestContext 使用 values_batch_get 一次讀取所有分頁，取代原本多次個別 API 呼叫
-- **Google Sheets 快取**：get_sheet() 快取已認證的 spreadsheet 物件 60 秒，避免每次都重新 OAuth
+- **Google Sheets 連線重用**：同一程序持續重用已認證的 spreadsheet／HTTP session，不再每 60 秒重建；google-auth 按需要更新憑證，既有暫時性重試用盡後讓下次存取重建連線。初始化以 RLock 避免同時重建；不是跨程序鎖，也不快取業務資料或長期保存欄位位置。
+- **冷氣狀態寫入**：成功送出後，一次讀取「智能居家」最新內容，依 Device ID 唯一定位設備列及現有欄位，再一次 RAW 批次寫入；省掉 worksheet metadata 查詢，也不再沿用請求開始時的舊列號。缺表、重複欄名／ID 或目標消失時不寫入，寫入失敗不重送設備。Google Sheets 仍無讀取與寫入之間的交易保障。
 - **統一裝置狀態快取**：`/api/devices/status` 從 in-memory cache 立即回應；空調控制、5 分鐘背景輪詢與雲端查詢共同更新同一份狀態，避免 Dashboard 等待完整 Sheet 與其他裝置 API
 - **Google Sheets 集中寫入**：新增資料統一走 `append_record()`，多欄位修改統一走 `update_row_fields()` 的 batch update，減少 API 呼叫也避免欄位位置散落在 handler 裡
 - **背景寫入**：save_conversation（對話暫存）在背景 thread 執行

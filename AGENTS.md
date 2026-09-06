@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+v1.39.3 Sheets：`_get_spreadsheet` 持續重用連線，RLock 僅保護建立／失效，不再每分鐘重新認證；google-auth 管理 token 更新，GET 暫時性重試用盡才失效讓下次建立。`update_device_state_fields` 一次讀取最新欄位及 Device ID 所在列，再 RAW 批次写入，缺失／歧義拒寫，未知寫入不重試；不要恢復用 ctx 舊 row index 或長期快取欄位位置。詳見 README、voice-timing 及 `tests/test_sheets_reuse.py`；不提供 Sheets 外部並行編輯的交易保證。
+
 v1.39.2 I/O 精簡：`get_lighting_area_info` 以 `load_area_settings(read_only=True)` 讀既有內容；不得在每次 prompt 組裝時重新建表／ensure_columns，原探索與設定路徑仍負責 schema。`maintain_ac_auto_schedule` 只在實際增刪分支取 worksheet，保留 timer anchor 與先封存後刪除。細分計時的 `parent_span_id` 表示包含關係，不能把外層與子階段相加；詳見 voice-timing 文件與 `tests/test_voice_io.py`。
 
 Siri 獨立指令（v1.39.1）：`process_message(..., voice=True)` 使用 `ask_claude(..., include_history=False)`，一般與降級請求都只送當句；初始讀取五張表，略過對話暫存。背景存檔保留，LINE 預設歷史不變。不得因共用解析器把 LINE 歷史一併關閉；Siri 跨輪省略／確認不再依賴上一句，文件與測試見 README、`tests/test_voice_history.py`。未重写完整 SYSTEM_PROMPT。

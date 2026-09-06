@@ -1,10 +1,9 @@
 from command_result import CommandResult
 from device_name_resolution import resolve_ir_device
-import gspread
 import json
 from datetime import datetime, timedelta
 from config import now_taipei, TZ
-from sheets import get_device_id_by_name, get_all_devices_by_type, build_row
+from sheets import get_device_id_by_name, get_all_devices_by_type, build_row, update_device_state_fields
 import switchbot_api
 import panasonic_api
 import lg_api
@@ -46,8 +45,6 @@ def apply_sensor_compensation(temp, humidity, device_row):
 
 _AC_MODE_LABEL = {1: "自動", 2: "冷氣", 3: "除濕", 4: "送風", 5: "暖氣"}
 _AC_FAN_LABEL = {1: "自動", 2: "低", 3: "中", 4: "高"}
-_AC_STATE_COLUMNS = ["最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間"]
-_ac_columns_warning_printed = False
 
 # ── 防黴送風（關冷氣前先吹乾蒸發器） ──
 # 冷氣/除濕運轉會在蒸發器結露，直接關機悶著容易長黴。關機前若「這次運轉夠久且是會結露
@@ -74,35 +71,11 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
       在卡片上顯示「目前 26°C 冷氣」之類的提示。
     - power == "off" 時刻意保留先前的溫度/模式/風速，方便下次重新開機時沿用。
 
-    使用 batch_update 一次更新多格，避免多次 API 呼叫。
-    若欄位尚未在 sheet 上建立會自動略過，不會中斷主流程。
+    寫入前一次讀取最新欄位與 Device ID 所在列，再直接批次更新多格，
+    不取 worksheet metadata、不沿用 ctx 舊列號。缺少的狀態欄位略過；
+    無法唯一定位或寫入失敗時記錄錯誤，不重送設備指令。
     """
     try:
-        sheet = ctx.get_worksheet("智能居家")
-        records = ctx.get("智能居家")
-        row_idx = None
-        for i, row in enumerate(records):
-            if row.get("Device ID") == device_id:
-                row_idx = i + 2  # 第 1 列為 header，records 從第 2 列開始
-                break
-        if row_idx is None:
-            return
-
-        headers = sheet.row_values(1)
-        header_to_col = {h: idx + 1 for idx, h in enumerate(headers)}
-        if not any(col in header_to_col for col in _AC_STATE_COLUMNS):
-            # sheet 還沒新增任何狀態欄位 → 不寫入但留下一次性警告，避免使用者好奇
-            # 「為什麼 Dashboard 永遠顯示『尚無使用記錄』」卻沒線索可查。
-            global _ac_columns_warning_printed
-            if not _ac_columns_warning_printed:
-                print(
-                    f"[WARN] AC state columns not found in 智能居家 sheet "
-                    f"({_AC_STATE_COLUMNS}). Last state will not be persisted; "
-                    f"add these columns to enable Dashboard last-state display."
-                )
-                _ac_columns_warning_printed = True
-            return
-
         now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
         new_values = {"最後更新時間": now_str, "最後電源": power}
         if power == "on":
@@ -113,7 +86,7 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
             if fan_int is not None:
                 new_values["最後風速"] = _AC_FAN_LABEL.get(fan_int, "")
             # 開機時錨定「最後開機時間」（防黴算運轉時長用）；由 caller 決定何時記
-            #（transition，或欄位本來就空）。欄位不存在時下面 header_to_col 會自動略過。
+            #（transition，或欄位本來就空）。欄位不存在時寫入函式會自動略過。
             if mark_on_time:
                 new_values["最後開機時間"] = now_str
         else:
@@ -126,23 +99,12 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
                 new_values.update(restore_on_off)
         # power == "off" 一般情況仍保留先前的溫度/模式/風速，方便下次重新開機時沿用
 
-        updates = []
-        for header, value in new_values.items():
-            col = header_to_col.get(header)
-            if col is None:
-                continue
-            cell = gspread.utils.rowcol_to_a1(row_idx, col)
-            updates.append({"range": cell, "values": [[value]]})
-
-        if not updates:
-            return
-        sheet.batch_update(updates)
-
-        # 同步更新 ctx 快取，讓同一 request 後續（例如排程或連續 action）能讀到新值
-        rec = records[row_idx - 2]
-        for header, value in new_values.items():
-            if header in header_to_col:
-                rec[header] = value
+        rec, applied = update_device_state_fields(device_id, new_values)
+        # Keep this request's subsequent actions in sync only after persistence.
+        # Match stable ID, since the fresh Sheet row may have moved or been renamed.
+        for cached in ctx.get("智能居家"):
+            if str(cached.get("Device ID", "")) == str(device_id):
+                cached.update(applied)
         device_status.update(device_name=rec.get("名稱", ""), fields={
             "lastPower": rec.get("最後電源", ""),
             "lastTemperature": rec.get("最後溫度", ""),

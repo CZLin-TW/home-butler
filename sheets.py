@@ -98,9 +98,15 @@ from config import SPREADSHEET_ID, GOOGLE_CREDENTIALS
 def _norm(s):
     return unicodedata.normalize("NFC", str(s or "")).strip()
 
-_sheets_cache_ttl = 60
 _spreadsheet = None
-_spreadsheet_time = 0
+_spreadsheet_lock = _threading.RLock()
+
+
+def _invalidate_spreadsheet():
+    global _spreadsheet
+    with _spreadsheet_lock:
+        # In-flight requests may still hold the old session; do not close it here.
+        _spreadsheet = None
 
 
 # ── 暫時性錯誤自動重試 ──
@@ -165,7 +171,6 @@ class no_retry:
 
 def _with_retry(op, what="sheets"):
     """跑 op()，遇到暫時性 Google 錯誤時短退避重試；非暫時性錯誤原樣拋出。"""
-    global _spreadsheet
     if getattr(_retry_off, "on", False):
         return op()
     last = None
@@ -180,9 +185,8 @@ def _with_retry(op, what="sheets"):
                 delay = _RETRY_BASE_SLEEP * (2 ** (attempt - 1)) + random.uniform(0, 0.3)
                 print(f"[SHEETS RETRY] {what} 第 {attempt} 次失敗（{e}），{delay:.1f}s 後重試")
                 time.sleep(delay)
-    # 重試用盡：丟掉快取的 spreadsheet，下一次請求重新 authorize + open，
-    # 避免壞掉的 session／過期 token 被 60s 快取黏住。
-    _spreadsheet = None
+    # 重試用盡：下一次請求重建連線；不在此重送任何業務寫入。
+    _invalidate_spreadsheet()
     print(f"[SHEETS ERROR] {what} 重試 {_RETRY_ATTEMPTS} 次仍失敗：{last}")
     raise last
 
@@ -228,14 +232,49 @@ def _get_client():
 def _get_spreadsheet():
     from request_timing import timed_call
 
-    global _spreadsheet, _spreadsheet_time
-    now = time.time()
-    if _spreadsheet is None or (now - _spreadsheet_time) > _sheets_cache_ttl:
-        # open_by_key 會實際打一次 metadata API（GET）——正是 Google 503 最常炸的
-        # 地方，重試由 _install_gspread_get_retry 那層吸收。
-        _spreadsheet = timed_call("sheets.connect", _get_client)
-        _spreadsheet_time = now
-    return _spreadsheet
+    global _spreadsheet
+    # AuthorizedSession refreshes expired credentials before requests. Reuse its
+    # transport instead of reauthorizing/opening every 60 seconds. Data and
+    # worksheet lookups still query Google; only the connection object persists.
+    # RLock also allows failed initialization's GET retry path to invalidate.
+    with _spreadsheet_lock:
+        if _spreadsheet is None:
+            _spreadsheet = timed_call("sheets.connect", _get_client)
+        return _spreadsheet
+
+
+def update_device_state_fields(device_id, fields):
+    """Fresh header + stable-ID lookup, then one RAW batch write; no write retry.
+
+    Avoid worksheet metadata and stale request row indexes. Direct external edits
+    between this read and write remain outside Sheets' transaction guarantees.
+    Return the fresh row and fields actually persisted, only after write success.
+    """
+    ss = _get_spreadsheet()
+    values = ss.values_get("'智能居家'", params={"valueRenderOption": "FORMATTED_VALUE"}).get("values", [])
+    if not values or not str(device_id or "").strip():
+        raise ValueError("Missing device or device sheet")
+    headers = values[0]
+    nonempty = [h for h in headers if h]
+    if len(set(nonempty)) != len(nonempty) or headers.count("Device ID") != 1:
+        raise ValueError("Ambiguous device sheet headers")
+    id_col = headers.index("Device ID")
+    matches = [(i, row) for i, row in enumerate(values[1:], start=2)
+               if len(row) > id_col and str(row[id_col]) == str(device_id)]
+    if len(matches) != 1:
+        raise ValueError("Missing or ambiguous device ID")
+    row_number, row = matches[0]
+    # Preserve legacy behavior: write only state columns already configured.
+    state_columns = {"最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間", "最後開機時間"}
+    applied = {key: value for key, value in fields.items() if key in headers and key in state_columns}
+    if not applied:
+        raise ValueError("No device state columns configured")
+    updates = [{"range": "'智能居家'!" + rowcol_to_a1(row_number, headers.index(key) + 1),
+                "values": [[value]]} for key, value in applied.items()]
+    ss.values_batch_update({"valueInputOption": "RAW", "data": updates})
+    record = _parse_sheet_values([headers, row])[0]
+    record.update(applied)
+    return record, applied
 
 
 def get_sheet(name):
