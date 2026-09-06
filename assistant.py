@@ -142,7 +142,7 @@ def process_message(user_id, text, user_name, ctx, *, voice=False):
     from request_timing import timing_stage
 
     ctx.actor_name = user_name
-    result = ask_claude(user_id, text, user_name, ctx)
+    result = ask_claude(user_id, text, user_name, ctx, include_history=not voice)
     print(f"[3] result={repr(result)}")
 
     if not result or not result.strip():

@@ -612,7 +612,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/auto/rules/{area_id} | DELETE | 刪除該區域的自動夜燈規則 |
 | /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
 | /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
-| /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；對話歷史背景存檔支援多輪。`user_id` 不帶則用 `SIRI_USER_ID` |
+| /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；每次只送當句，不帶歷史對話，仍背景存檔供查閱。`user_id` 不帶則用 `SIRI_USER_ID` |
 | /api/assistant/devices | POST | 家電專用自然語言入口，只接受 `DEVICE_VOICE_API_KEY`。body 僅 `{text}`，1–500 字元；不接受 `user_id` 等額外欄位。回 `{reply}`，單句獨立解析，不讀寫家庭對話紀錄、不提供私人資料給模型 |
 
 ---
@@ -628,6 +628,8 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 ```
 
 `/api/assistant` 與 LINE webhook 共用 `assistant.py:process_message` 的意圖解析與控制。語音入口另外啟用 `voice=True`：純設備操作優先使用 handler 的實際執行結果，避免模型事先產生的冗長回覆；最後經 `voice_reply.py` 整理成適合朗讀的文字。LINE 保留原本的文字回覆路徑。
+
+Siri 每次解析視為獨立指令：`voice=True` 會傳入 `ask_claude(..., include_history=False)`，一般及降級模型呼叫都只送當句文字，保留即時家庭／設備資料與使用者身分。初始 Sheets 載入略過「對話暫存」，但對話仍背景存檔供查閱。請說完整設備與動作，不依靠「再低一度」「把它關掉」或跨輪確認；涉及永久刪除／停止的追問，需保留上下文時改用 LINE。LINE 維持既有多輪對話；家電專用入口原本就不帶歷史，也不存對話。少數業務 handler 為辨識既有提醒仍可能補讀對話暫存，這不會把舊對話放進 Siri 的模型 messages。此變更未修改 prompt 內容，速度及辨識影響需用部署後的實測判斷。
 
 ### Siri 精簡回覆（v1.38.2）
 

@@ -72,7 +72,8 @@ def api_assistant(req: AssistantRequest):
     Siri 捷徑只負責聽寫成文字 POST 過來，後端 process_message 解析 + 分派 + 組句，
     回 {"reply": ...} 給捷徑朗讀；語音專用精簡與符號整理不影響 LINE。
     user_id 不帶則用 config.SIRI_USER_ID。
-    對話歷史在背景存檔，讓多輪對話（「再低一度」）能延續。
+    每次解析只送當句，不帶歷史對話；「再低一度」等省略設備的接續語句不再
+    依靠前一輪。對話仍在背景存檔供查閱，不代表 Siri 會讀回作為模型上下文。
     """
     from request_timing import request_timing, timing_stage
 
@@ -84,7 +85,8 @@ def api_assistant(req: AssistantRequest):
         user_id = req.user_id or SIRI_USER_ID
         ctx = RequestContext()
         with timing_stage("sheets_load"):
-            ctx.load()
+            # Keep live household/device context, skip the conversation worksheet.
+            ctx.load(["家庭成員", "食品庫存", "待辦事項", "智能居家", "排程指令"])
         with timing_stage("identity"):
             user_name = get_user_name(user_id, ctx)
         reply = format_voice_reply(process_message(user_id, text, user_name, ctx, voice=True))

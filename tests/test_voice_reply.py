@@ -66,6 +66,8 @@ class VoicePipelineTests(unittest.TestCase):
                          '已送出主臥電扇的電源指令。')
         self.assertEqual(handlers['control_ir'].call_count, 2)
         self.assertEqual(env['ask_claude'].call_count, 2)
+        self.assertTrue(env['ask_claude'].call_args_list[0].kwargs['include_history'])
+        self.assertFalse(env['ask_claude'].call_args_list[1].kwargs['include_history'])
         env['ask_claude_semantic'].assert_not_called()
 
     def test_multiple_device_results_and_partial_failure_are_all_preserved(self):
@@ -107,6 +109,7 @@ class VoicePipelineTests(unittest.TestCase):
         run = endpoint('web_api.py', 'api_assistant', env)
         response = run(SimpleNamespace(text=' 打開主臥電風扇 ', user_id='user'))
         self.assertEqual(response, {'reply': '已送出主臥電扇的電源指令。'})
+        ctx.load.assert_called_once_with(['家庭成員', '食品庫存', '待辦事項', '智能居家', '排程指令'])
         process.assert_called_once_with('user', '打開主臥電風扇', 'name', ctx, voice=True)
         self.assertEqual(save.call_args_list[0].args, ('user', 'user', '打開主臥電風扇'))
         self.assertEqual(save.call_args_list[1].args, ('user', 'assistant', response['reply']))

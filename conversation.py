@@ -60,7 +60,7 @@ def get_recent_conversation(user_id, ctx, limit=6):
     return [{"role": r["角色"], "content": r["內容"]} for _, r in recent if r.get("內容")]
 
 
-def ask_claude(user_id, user_message, user_name, ctx):
+def ask_claude(user_id, user_message, user_name, ctx, *, include_history=True):
     with timing_stage("context_prepare"):
         now = now_taipei()
         today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
@@ -78,7 +78,9 @@ def ask_claude(user_id, user_message, user_name, ctx):
             user_style=style_instruction,
             app_version=get_app_version(),
         )
-        history = get_recent_conversation(user_id, ctx)
+        # Siri treats each utterance independently; LINE retains its recent turns.
+        # Build messages once so the existing schema fallback obeys the same policy.
+        history = get_recent_conversation(user_id, ctx) if include_history else []
         messages = history + [{"role": "user", "content": user_message}]
     try:
         response = timed_model_call("ai_parse", claude.messages.create,

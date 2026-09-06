@@ -22,9 +22,9 @@
 
 | stage／event | 範圍 |
 | --- | --- |
-| `sheets_load` | 初始 Sheets 讀取及轉換；完整入口六張分頁、家電入口只有智能居家，包含這次載入觸發的認證／metadata／既有重試 |
+| `sheets_load` | 初始 Sheets 讀取及轉換；完整入口五張分頁（略過對話暫存）、家電入口只有智能居家，包含這次載入觸發的認證／metadata／既有重試 |
 | `identity` | 完整入口的使用者名稱解析 |
-| `context_prepare` | prompt、設備目錄、對話上下文組裝；完整入口也含版本查詢、照明資料等可能觸發的額外 I/O，不能一律當純 CPU 處理 |
+| `context_prepare` | prompt、設備目錄及當句文字組裝，Siri 不帶歷史對話；完整入口也含版本查詢、照明資料等可能觸發的額外 I/O，不能一律當純 CPU 處理 |
 | `ai_parse` | 第一次意圖解析的 SDK 呼叫，包含網路、供應商處理及 SDK 原有重試 |
 | `ai_parse_fallback` | 完整入口原有 BadRequest 降級呼叫，僅在觸發時出現，與第一次分開計時 |
 | `validate_actions` | 家電專用入口整批動作驗證；拒絕或需要釐清時不執行設備 |

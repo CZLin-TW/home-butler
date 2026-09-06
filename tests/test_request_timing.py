@@ -88,7 +88,7 @@ class RequestTimingTests(unittest.TestCase):
         run, handlers, _ = test_voice_reply.VoicePipelineTests().make_pipeline(
             [{'action': 'query_sensor'}], '', {'query_sensor': '濕度55%'})
         model = Mock(return_value=SimpleNamespace())
-        def parse(*args):
+        def parse(*args, **kwargs):
             with timing_stage('context_prepare'):
                 pass
             timed_model_call('ai_parse', model)
