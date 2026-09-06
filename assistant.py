@@ -139,6 +139,8 @@ def process_message(user_id, text, user_name, ctx, *, voice=False):
     純函式：不碰 LINE / HTTP，也不負責存對話歷史（由 caller 自行決定）。
     回傳值一定是非空字串，失敗時回 fallback 語句而非拋例外。
     """
+    from request_timing import timing_stage
+
     ctx.actor_name = user_name
     result = ask_claude(user_id, text, user_name, ctx)
     print(f"[3] result={repr(result)}")
@@ -182,7 +184,8 @@ def process_message(user_id, text, user_name, ctx, *, voice=False):
         handler = ACTION_HANDLERS.get(data.get("action"))
         if handler is None:
             continue  # 未知 action：跳過，避免 Claude 偶爾捏造的 action 讓整個 request 壞掉
-        action_result = handler(data, user_name, ctx)
+        with timing_stage("action." + data["action"]):
+            action_result = handler(data, user_name, ctx)
         if action_result is not None:
             results.append(action_result)
             if (data.get("action") in TRUTHFUL_ACTIONS

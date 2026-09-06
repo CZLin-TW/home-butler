@@ -1,5 +1,6 @@
 import threading
 import anthropic
+from request_timing import timing_stage, timed_model_call
 from config import claude, now_taipei, get_app_version, weekday_zh
 from sheets import get_sheet
 from prompt import (
@@ -60,26 +61,27 @@ def get_recent_conversation(user_id, ctx, limit=6):
 
 
 def ask_claude(user_id, user_message, user_name, ctx):
-    now = now_taipei()
-    today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
-    now_time = now.strftime("%H:%M")
-    style_instruction = get_style_instruction(user_name, ctx)
-    prompt = SYSTEM_PROMPT.format(
-        today=today, now_time=now_time,
-        family_info=get_family_members_info(ctx),
-        food_info=get_current_food(ctx),
-        todo_info=get_current_todo(ctx),
-        device_info=get_device_info(ctx),
-        lighting_info=get_lighting_area_info(ctx),
-        schedule_info=get_schedule_info(ctx),
-        current_user=user_name,
-        user_style=style_instruction,
-        app_version=get_app_version(),
-    )
-    history = get_recent_conversation(user_id, ctx)
-    messages = history + [{"role": "user", "content": user_message}]
+    with timing_stage("context_prepare"):
+        now = now_taipei()
+        today = f"{now.strftime('%Y-%m-%d')}（{weekday_zh(now)}）"
+        now_time = now.strftime("%H:%M")
+        style_instruction = get_style_instruction(user_name, ctx)
+        prompt = SYSTEM_PROMPT.format(
+            today=today, now_time=now_time,
+            family_info=get_family_members_info(ctx),
+            food_info=get_current_food(ctx),
+            todo_info=get_current_todo(ctx),
+            device_info=get_device_info(ctx),
+            lighting_info=get_lighting_area_info(ctx),
+            schedule_info=get_schedule_info(ctx),
+            current_user=user_name,
+            user_style=style_instruction,
+            app_version=get_app_version(),
+        )
+        history = get_recent_conversation(user_id, ctx)
+        messages = history + [{"role": "user", "content": user_message}]
     try:
-        response = claude.messages.create(
+        response = timed_model_call("ai_parse", claude.messages.create,
             model="claude-sonnet-5",
             # thinking 跟回覆共用 max_tokens 預算，開 adaptive 後要留思考空間，否則
             # 複雜指令思考一長就把 JSON 擠掉（stop_reason=max_tokens、回應被截斷）。
@@ -99,7 +101,7 @@ def ask_claude(user_id, user_message, user_name, ctx):
         # optional >24 直接 400 → bot 全掛），退回「無 schema + 關思考」的已知可用
         # 組合——降級（少了強制 JSON 保證）但不斷線。看到這行 log 就要回頭修 schema。
         print(f"[ask_claude] structured outputs 被 API 拒絕，降級為無 schema 模式：{e}")
-        response = claude.messages.create(
+        response = timed_model_call("ai_parse_fallback", claude.messages.create,
             model="claude-sonnet-5",
             max_tokens=2000,
             thinking={"type": "disabled"},
@@ -140,7 +142,7 @@ def ask_claude_semantic(user_text, raw_data, user_name, ctx, action_types):
         system = SEMANTIC_DEFAULT_PROMPT + style_block
         max_tokens = 1200
 
-    response = claude.messages.create(
+    response = timed_model_call("ai_reply", claude.messages.create,
         model="claude-sonnet-5",
         max_tokens=max_tokens,
         system=system,

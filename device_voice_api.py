@@ -33,12 +33,15 @@ DEVICE_HANDLERS = {
 
 @router.post("/devices")
 def api_device_voice(req: DeviceVoiceRequest):
-    text = req.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text 不可為空")
-    try:
-        reply = run_device_voice(text, RequestContext(), claude, DEVICE_HANDLERS)
-    except Exception:
-        # Do not return provider exceptions, keys or private request context.
-        raise HTTPException(status_code=503, detail="家電語音服務暫時無法使用，請稍後再試") from None
-    return {"reply": reply}
+    from request_timing import request_timing
+
+    with request_timing("siri_devices"):
+        text = req.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text 不可為空")
+        try:
+            reply = run_device_voice(text, RequestContext(), claude, DEVICE_HANDLERS)
+        except Exception:
+            # Do not return provider exceptions, keys or private request context.
+            raise HTTPException(status_code=503, detail="家電語音服務暫時無法使用，請稍後再試") from None
+        return {"reply": reply}

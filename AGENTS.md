@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+語音請求計時見 [docs/voice-timing.md](docs/voice-timing.md)。`request_timing.py` 只在兩個 Siri 路由啟用，以 ContextVar 串起 `[TIMING]`；總時間從路由函式進入算起，不包含代理／threadpool 等待。新計時不可寫入輸入、身分、設備參數或金鑰；`completed` 不是硬體成功。原有模型設定、降級／重試與 `{reply}` 契約保持不變。純觀測不 bump Dashboard 版本。
+
 系統版本不在 home-butler 管。Source of truth 是 **Dashboard 的 `package.json:version`**，本 repo 透過 `config.py:get_app_version()` 在 runtime 撈 Dashboard `/api/version`（1 小時 cache，失敗 fallback「未知」），由 `prompt.py` 注入 `SYSTEM_PROMPT`，讓 LINE bot 能回答「目前版本是？」之類的問題。
 
 需要設定環境變數 `DASHBOARD_URL`（Dashboard 部署網址）才撈得到；沒設或撈不到就會回「未知」，但 bot 仍能正常運作。

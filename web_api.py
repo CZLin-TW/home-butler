@@ -74,26 +74,31 @@ def api_assistant(req: AssistantRequest):
     user_id 不帶則用 config.SIRI_USER_ID。
     對話歷史在背景存檔，讓多輪對話（「再低一度」）能延續。
     """
-    text = (req.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text 不可為空")
+    from request_timing import request_timing, timing_stage
 
-    user_id = req.user_id or SIRI_USER_ID
-    ctx = RequestContext()
-    ctx.load()
-    user_name = get_user_name(user_id, ctx)
-    reply = format_voice_reply(process_message(user_id, text, user_name, ctx, voice=True))
+    with request_timing("siri_full"):
+        text = (req.text or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text 不可為空")
 
-    def _save():
-        try:
-            save_conversation(user_id, "user", text)
-            save_conversation(user_id, "assistant", reply)
-            cleanup_conversation(user_id)
-        except Exception as e:
-            print(f"[ASSISTANT SAVE ERROR] {e}")
-    threading.Thread(target=_save, daemon=True).start()
+        user_id = req.user_id or SIRI_USER_ID
+        ctx = RequestContext()
+        with timing_stage("sheets_load"):
+            ctx.load()
+        with timing_stage("identity"):
+            user_name = get_user_name(user_id, ctx)
+        reply = format_voice_reply(process_message(user_id, text, user_name, ctx, voice=True))
 
-    return {"reply": reply}
+        def _save():
+            try:
+                save_conversation(user_id, "user", text)
+                save_conversation(user_id, "assistant", reply)
+                cleanup_conversation(user_id)
+            except Exception as e:
+                print(f"[ASSISTANT SAVE ERROR] {e}")
+        threading.Thread(target=_save, daemon=True).start()
+
+        return {"reply": reply}
 
 
 def _set_actor(ctx, request):

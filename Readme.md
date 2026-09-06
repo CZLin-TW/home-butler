@@ -2,6 +2,8 @@
 
 > 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。Dashboard 依賴本後端；LINE Bot 可獨立使用。劇院設備另由私人 theater-agent repo 執行。
 
+Siri 等待時間診斷：兩個語音入口會在 Render Logs 輸出 `[TIMING]`，依 `request_id` 串起 Sheets、上下文、AI、動作與後端總耗時；不需修改捷徑。階段意義、觀測範圍與查閱步驟見 [語音分段計時](docs/voice-timing.md)。
+
 ## Dashboard 首頁輕量查詢
 
 `GET /api/dashboard?include_weather=false` 只讀取待辦／庫存並回傳 `{todos, food}`，不呼叫天氣服務。省略參數維持舊版完整回應。

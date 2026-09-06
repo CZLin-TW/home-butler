@@ -8,6 +8,7 @@ so boundary tests run offline. Do not reuse assistant.ACTION_HANDLERS here.
 import json
 import re
 import unicodedata
+from request_timing import timing_stage, timed_model_call
 
 from device_name_resolution import resolve_ir_device
 from voice_reply import format_voice_reply
@@ -87,12 +88,14 @@ def device_list_reply(data, ctx):
 
 
 def parse_device_voice(client, text, rows):
-    response = client.messages.create(
+    with timing_stage("context_prepare"):
+        messages = [{"role": "user", "content": json.dumps(
+            {"devices": device_catalog(rows), "request": text}, ensure_ascii=False)}]
+    response = timed_model_call("ai_parse", client.messages.create,
         model="claude-sonnet-5", max_tokens=2000, thinking={"type": "adaptive"},
         output_config={"format": {"type": "json_schema", "schema": SCHEMA}},
         system=SYSTEM,
-        messages=[{"role": "user", "content": json.dumps(
-            {"devices": device_catalog(rows), "request": text}, ensure_ascii=False)}],
+        messages=messages,
     )
     # No free-text fallback: malformed/unavailable model output cannot dispatch.
     raw = "".join(block.text for block in response.content if block.type == "text")
@@ -179,10 +182,13 @@ def validate_actions(payload, rows):
 
 def run_device_voice(text, ctx, client, handlers):
     """No member identity, private sheets, conversation writes or semantic reply LLM."""
-    ctx.load(["智能居家"])
+    with timing_stage("sheets_load"):
+        ctx.load(["智能居家"])
     rows = ctx.get("智能居家")
     try:
-        prepared = validate_actions(parse_device_voice(client, text, rows), rows)
+        payload = parse_device_voice(client, text, rows)
+        with timing_stage("validate_actions"):
+            prepared = validate_actions(payload, rows)
     except VoicePolicyError as exc:
         return format_voice_reply(str(exc))
     except (ValueError, TypeError, AttributeError):
@@ -192,7 +198,8 @@ def run_device_voice(text, ctx, client, handlers):
     results = []
     for action, data in prepared:
         try:
-            results.append(handlers[action](data, ctx))
+            with timing_stage("action." + action):
+                results.append(handlers[action](data, ctx))
         except Exception:
             results.append("指令結果未確認，請檢查設備狀態。系統不會自動重送；後續指令尚未執行。")
             break
