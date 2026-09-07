@@ -30,7 +30,8 @@ Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`�
 Homebridge 插件位於 home-butler 的 `homebridge/`，與 Windows PC agent 分開部署，
 不需要第四個 repo。以獨立橋接 Key 和設備名稱清單限制明確 AC 控制；每輪完成後約 5 秒
 重新讀取後端快取，不呼叫 AI、不增加 Sheets 輪詢。冷氣狀態仍為最後指令；室溫來自同房間
-感測器。權限、安裝、同步延遲及不支援的模式見 [橋接文件](../homebridge/README.md)。
+感測器。冷／暖房使用空調控制，除濕／送風使用同配件內的模式開關；關閉模式開關會在後端
+新讀資料後核對當前模式，已切換時不關機。權限、安裝、同步延遲及限制見 [橋接文件](../homebridge/README.md)。
 
 | 工作 | 實作／頻率 | 限制 |
 | --- | --- | --- |

@@ -2,6 +2,7 @@
   "pluginAlias": "HomeButler",
   "pluginType": "platform",
   "singular": true,
+  "headerDisplay": "空調支援冷氣、暖氣及目標溫度；除濕、送風以同一配件內的模式開關呈現，與後端狀態同步。",
   "schema": {
     "type": "object",
     "properties": {

@@ -46,9 +46,7 @@ class CommandQueue {
   get busy() { return this.running || this.pending !== null; }
   enqueue(patch) {
     if (this.closed) return Promise.reject(new Error('Bridge stopped'));
-    // Off wins over companion temperature/mode writes within the same gesture.
-    this.pending = { ...this.pending, ...patch };
-    if (this.pending.power === 'off') this.pending = { power: 'off' };
+    this.pending = mergePatch(this.pending, patch);
     const promise = new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
     if (!this.running) this.schedule();
     return promise;
@@ -86,6 +84,23 @@ class CommandQueue {
     this.waiters = [];
     this.pending = null;
   }
+}
+
+// A main power OFF dominates its companion writes. Turning an old mode switch
+// off must not defeat selection of another mode in the same HomeKit scene.
+function mergePatch(previous, patch) {
+  if (!previous) return { ...patch };
+  const hardOff = p => p.power === 'off' && !p.off_if_mode;
+  if (hardOff(previous) || hardOff(patch)) return { power: 'off' };
+  if (previous.off_if_mode && patch.off_if_mode) {
+    return { power: 'off', off_if_mode: [...new Set([...previous.off_if_mode, ...patch.off_if_mode])] };
+  }
+  if (previous.off_if_mode || patch.off_if_mode) {
+    const conditional = previous.off_if_mode ? previous : patch;
+    const settings = previous.off_if_mode ? patch : previous;
+    return settings.power === 'on' || settings.mode ? { ...settings } : { ...conditional };
+  }
+  return { ...previous, ...patch };
 }
 
 module.exports = { ButlerClient, CommandQueue };

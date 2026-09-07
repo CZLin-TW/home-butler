@@ -123,15 +123,28 @@ class AcPatch(BaseModel):
     temperature: int | None = Field(default=None, ge=16, le=30, strict=True)
     mode: Literal["auto", "cool", "dry", "fan", "heat"] | None = None
     fan_speed: Literal["auto", "low", "medium", "high"] | None = None
+    off_if_mode: list[Literal["dry", "fan"]] | None = Field(default=None, min_length=1, max_length=2)
 
 
 def merge_command(req, row):
     patch = req.model_dump(exclude={"request_id"}, exclude_unset=True)
     if not patch or any(v is None for v in patch.values()):
         raise HTTPException(422, "Provide non-null AC settings")
+    conditional = patch.pop("off_if_mode", None)
+    if conditional is not None and patch != {"power": "off"}:
+        raise HTTPException(422, "Mode condition is only valid with power off")
     if patch.get("power") == "off":
         if len(patch) != 1:
             raise HTTPException(422, "Power off cannot be combined with other settings")
+        if conditional is not None:
+            previous = project(row)
+            uncertain = device_status.snapshot().get(row["名稱"], {}).get("stateUncertain", False)
+            if uncertain or previous["power"] is None or previous["mode"] is None:
+                raise HTTPException(409, "AC state is unknown; confirm its state first")
+            # Read from this request's fresh Sheet, not the bridge's older poll.
+            # An inactive mode switch is a no-op, never a command to another mode.
+            if previous["power"] == "off" or previous["mode"] not in conditional:
+                return None
         return {"device_name": row["名稱"], "power": "off"}
     previous = project(row)
     power = patch.get("power", previous["power"])
@@ -180,6 +193,10 @@ def patch_ac(device_id: str, req: AcPatch):
         if len(_results) >= 256:
             _results.popitem(last=False)
         _results[request_id] = (now, fingerprint, response)
+        if data is None:
+            response = {"status": "success", "message": "Mode is already inactive", "device": project(row)}
+            _results[request_id] = (now, fingerprint, response)
+            return response
         ctx._ac_state_saved = False
         try:
             result = control_ac_result(data, ctx)

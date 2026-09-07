@@ -10,7 +10,7 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
-Homebridge 第一版見 [homebridge/README.md](homebridge/README.md)。`homebridge_api.py` 獨立 router 與
+Homebridge 見 [homebridge/README.md](homebridge/README.md)。`homebridge_api.py` 獨立 router 與
 `HOMEBRIDGE_API_KEY`，只允許 JSON `HOMEBRIDGE_DEVICE_NAMES` 的唯一啟用 AC；不得把此 Key 加入
 owner／device-voice verifier。GET 僅既有快取，POST 重新驗證 Sheet，ctx 限定精確 ID 後才呼叫原 handler。
 局部設定保留其他欄位，沒有歷史狀態則拒絕，不暗中套用 defaults。`_ac_state_saved` 表示保存完成，
@@ -19,6 +19,13 @@ owner／device-voice verifier。GET 僅既有快取，POST 重新驗證 Sheet，
 allowlist、投影、插件特徵、schema、文件與測試。`npm ci --ignore-scripts && npm test` 在 homebridge/，
 測試用真實 HAP／PlatformAccessory 配 fake I/O，不 publish、不控制硬體；後端完整 unittest 仍必跑。
 版本以 Dashboard 為準，插件 package 的版本用於打包安裝；不要新增 repo tag／Release。
+
+插件 1.1.0 支援 cool／heat，dry／fan 為同一配件內穩定 subtype 的模式開關；保留原配件 UUID。
+TargetHeaterCoolerState 沒有 dry／fan，運行時保留最近冷／暖選擇、Current=idle，以模式開關表達實際模式。
+`off_if_mode` 僅接受 dry／fan 的非空清單，且只能與 power=off 搭配；後端以新讀的 Sheet 判斷，
+已非該模式時成功 no-op、未知狀態拒絕，不把條件傳入 legacy handler。no-op 也必須去重。
+同手勢明確選模式優先於關掉另一模式開關，主電源 OFF 仍優先；未確認結果不可重送或假設成功。
+部署先後端再插件，舊後端會拒絕新增欄位。不要把模式關閉改成無條件關機。
 
 v1.39.3 Sheets：`_get_spreadsheet` 持續重用連線，RLock 僅保護建立／失效，不再每分鐘重新認證；google-auth 管理 token 更新，GET 暫時性重試用盡才失效讓下次建立。`update_device_state_fields` 一次讀取最新欄位及 Device ID 所在列，再 RAW 批次写入，缺失／歧義拒寫，未知寫入不重試；不要恢復用 ctx 舊 row index 或長期快取欄位位置。詳見 README、voice-timing 及 `tests/test_sheets_reuse.py`；不提供 Sheets 外部並行編輯的交易保證。
 

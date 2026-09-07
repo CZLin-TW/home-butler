@@ -20,6 +20,7 @@ class AcAccessory {
       .setCharacteristic(C.SerialNumber, id);
     this.service = accessory.getService(S.HeaterCooler)
       || accessory.addService(S.HeaterCooler, accessory.displayName);
+    this.service.setPrimaryService(true);
     this.queue = new CommandQueue(async patch => {
       this.generation++;
       try {
@@ -39,23 +40,25 @@ class AcAccessory {
     });
     this.bind(C.Active, () => this.state.power === 'on' ? 1 : 0,
       value => value === 1 ? { power: 'on' } : { power: 'off' });
-    // First release exposes cooling mode only. Dry/fan remain controllable in
-    // Dashboard and are represented as powered/idle, not silently rewritten.
-    this.service.getCharacteristic(C.TargetHeaterCoolerState).updateValue(2).setProps({ validValues: [2] });
-    this.bind(C.TargetHeaterCoolerState, () => 2, value => {
-      if (value !== 2) throw this.error();
-      return { mode: 'cool', power: 'on' };
+    // HAP has no dry/fan target enum. Separate switches represent those modes;
+    // the thermal selector retains its last cool/heat choice while they run.
+    this.service.getCharacteristic(C.TargetHeaterCoolerState).updateValue(2).setProps({ validValues: [1, 2] });
+    this.bind(C.TargetHeaterCoolerState, () => accessory.context.butlerThermalMode === 'heat' ? 1 : 2, value => {
+      if (![1, 2].includes(value)) throw this.error();
+      return { mode: value === 1 ? 'heat' : 'cool', power: 'on' };
     });
-    this.service.getCharacteristic(C.CoolingThresholdTemperature)
-      .updateValue(16).setProps({ minValue: 16, maxValue: 30, minStep: 1 });
-    this.bind(C.CoolingThresholdTemperature, () => {
-      if (!Number.isInteger(this.state.temperature)) throw this.error();
-      return this.state.temperature;
-    }, value => ({ temperature: value }));
+    for (const type of [C.CoolingThresholdTemperature, C.HeatingThresholdTemperature]) {
+      this.service.getCharacteristic(type)
+        .updateValue(16).setProps({ minValue: 16, maxValue: 30, minStep: 1 });
+      this.bind(type, () => {
+        if (!Number.isInteger(this.state.temperature)) throw this.error();
+        return this.state.temperature;
+      }, value => ({ temperature: value }));
+    }
     this.bind(C.CurrentHeaterCoolerState, () => {
       if (this.state.power === 'off') return 0;
       // Inferred operating mode, not compressor feedback or physical readback.
-      return this.state.mode === 'cool' ? 3 : 1;
+      return this.state.mode === 'cool' ? 3 : this.state.mode === 'heat' ? 2 : 1;
     });
     this.bind(C.CurrentTemperature, () => {
       const sensor = platform.temperatureSensor(this.state);
@@ -63,35 +66,46 @@ class AcAccessory {
       return sensor.temperature;
     });
     this.service.getCharacteristic(C.TemperatureDisplayUnits).updateValue(0);
+    for (const [mode, label] of [['dry', '除濕'], ['fan', '送風']]) {
+      const name = `${accessory.displayName}${label}`;
+      const service = accessory.getServiceById(S.Switch, `mode-${mode}`)
+        || accessory.addService(S.Switch, name, `mode-${mode}`);
+      service.setCharacteristic(C.Name, name);
+      if (!service.testCharacteristic(C.ConfiguredName)) {
+        service.addOptionalCharacteristic(C.ConfiguredName);
+        service.setCharacteristic(C.ConfiguredName, name);
+      }
+      this.bind(C.On, () => this.state.power === 'on' && this.state.mode === mode,
+        value => value ? { power: 'on', mode } : { power: 'off', off_if_mode: [mode] }, service);
+    }
     this.fail(); // Construction defaults are never advertised as live readings.
   }
   error() { return new this.platform.api.hap.HapStatusError(-70402); }
   check() {
     if (!this.available || Date.now() - this.lastSeen > 45000) throw this.error();
   }
-  bind(type, read, write) {
-    this.readers.set(type, read);
-    const characteristic = this.service.getCharacteristic(type);
+  bind(type, read, write, service = this.service) {
+    const characteristic = service.getCharacteristic(type);
+    this.readers.set(characteristic, read);
     characteristic.onGet(() => { this.check(); return read(); });
     if (write) characteristic.onSet(value => this.queue.enqueue(write(value)));
   }
   apply(state) {
     this.state = state;
     this.available = !state.uncertain && ['on', 'off'].includes(state.power)
-      && ['cool', 'dry', 'fan'].includes(state.mode);
+      && ['cool', 'heat', 'dry', 'fan'].includes(state.mode);
+    if (this.available && ['cool', 'heat'].includes(state.mode)) {
+      this.accessory.context.butlerThermalMode = state.mode;
+    }
     this.lastSeen = Date.now();
     this.publish();
   }
   publish() {
-    const C = this.C;
-    const values = [C.Active, C.TargetHeaterCoolerState, C.CoolingThresholdTemperature,
-      C.CurrentHeaterCoolerState, C.CurrentTemperature];
-    for (const type of values) {
-      const characteristic = this.service.getCharacteristic(type);
+    for (const [characteristic, read] of this.readers) {
       // Invoke only GET handlers; updateValue does not call control SET handlers.
       try {
         this.check();
-        const value = this.readers.get(type)();
+        const value = read();
         characteristic.updateValue(value);
       } catch {
         characteristic.updateValue(this.error());

@@ -181,3 +181,150 @@ test('restored accessories stay unavailable while backend is offline', async () 
   assert.equal(p.devices.get(state.id).available, false);
   p.api.emit('shutdown');
 });
+
+const modeOn = (d, mode) => d.accessory.getServiceById(hap.Service.Switch, `mode-${mode}`)
+  .getCharacteristic(hap.Characteristic.On);
+
+test('all four modes sync from backend without SET, including powered-off switches', async () => {
+  const p = platform();
+  const d = device(p);
+  p.client.command = async () => { assert.fail('Reading state must not control hardware'); };
+  const C = hap.Characteristic;
+  for (const [mode, current] of [['heat', 2], ['dry', 1], ['fan', 1], ['cool', 3]]) {
+    d.apply({ ...state, mode });
+    assert.equal(await d.service.getCharacteristic(C.CurrentHeaterCoolerState).handleGetRequest(), current);
+    assert.equal(await modeOn(d, 'dry').handleGetRequest(), mode === 'dry');
+    assert.equal(await modeOn(d, 'fan').handleGetRequest(), mode === 'fan');
+    // In dry/fan the thermal selector remembers heat; it is not the active mode.
+    assert.equal(d.service.getCharacteristic(C.TargetHeaterCoolerState).value, mode === 'cool' ? 2 : 1);
+  }
+  d.apply({ ...state, power: 'off', mode: 'dry' });
+  assert.equal(modeOn(d, 'dry').value, false);
+  assert.equal(modeOn(d, 'fan').value, false);
+  d.apply({ ...state, mode: 'auto' });
+  await assert.rejects(modeOn(d, 'dry').handleGetRequest());
+  d.fail();
+  await assert.rejects(modeOn(d, 'fan').handleGetRequest());
+  p.api.emit('shutdown');
+});
+
+test('real HAP heating and cooling SET combine mode and target temperature', async () => {
+  const p = platform();
+  const d = device(p);
+  d.apply({ ...state, power: 'off' });
+  const C = hap.Characteristic;
+  const sent = [];
+  p.client.command = async (id, patch) => {
+    sent.push(patch);
+    return { status: 'success', device: { ...d.state, ...patch } };
+  };
+  for (const [target, mode, type, temperature] of [[1, 'heat', C.HeatingThresholdTemperature, 24],
+    [2, 'cool', C.CoolingThresholdTemperature, 26]]) {
+    await Promise.all([d.service.getCharacteristic(C.TargetHeaterCoolerState).handleSetRequest(target),
+      d.service.getCharacteristic(type).handleSetRequest(temperature)]);
+    await tick();
+    assert.deepEqual(sent.at(-1), { power: 'on', mode, temperature });
+    assert.equal(d.service.getCharacteristic(C.HeatingThresholdTemperature).value, temperature);
+    assert.equal(d.service.getCharacteristic(C.CoolingThresholdTemperature).value, temperature);
+    assert.equal(modeOn(d, 'dry').value, false);
+  }
+  p.api.emit('shutdown');
+});
+
+test('mode switches coalesce scene OFF/ON in both orders and send only the selected mode', async () => {
+  const p = platform();
+  const d = device(p);
+  d.apply({ ...state, mode: 'dry' });
+  const sent = [];
+  p.client.command = async (id, patch) => {
+    sent.push(patch);
+    return { status: 'success', device: { ...d.state, ...patch } };
+  };
+  for (const reverse of [false, true]) {
+    const actions = [() => modeOn(d, 'dry').handleSetRequest(false),
+      () => modeOn(d, 'fan').handleSetRequest(true)];
+    if (reverse) actions.reverse();
+    await Promise.all(actions.map(f => f()));
+    await tick();
+    assert.deepEqual(sent.at(-1), { power: 'on', mode: 'fan' });
+    assert.equal(modeOn(d, 'dry').value, false);
+    assert.equal(modeOn(d, 'fan').value, true);
+  }
+  await modeOn(d, 'dry').handleSetRequest(true);
+  await tick();
+  assert.deepEqual(sent.at(-1), { power: 'on', mode: 'dry' });
+  assert.equal(modeOn(d, 'fan').value, false);
+  p.api.emit('shutdown');
+});
+
+test('mode OFF uses fresh backend guard and publishes actual antimold/no-op response', async () => {
+  const p = platform();
+  const d = device(p);
+  d.apply({ ...state, mode: 'dry' });
+  p.client.command = async (id, patch) => {
+    assert.deepEqual(patch, { power: 'off', off_if_mode: ['dry'] });
+    return { status: 'success', device: { ...state, mode: 'fan' } };
+  };
+  await modeOn(d, 'dry').handleSetRequest(false);
+  await tick();
+  assert.equal(modeOn(d, 'dry').value, false);
+  assert.equal(modeOn(d, 'fan').value, true);
+  assert.equal(d.service.getCharacteristic(hap.Characteristic.Active).value, 1);
+  p.client.command = async (id, patch) => {
+    assert.deepEqual(patch, { power: 'off', off_if_mode: ['fan'] });
+    // Dashboard switched to heat before the conditional OFF reached the backend.
+    return { status: 'success', device: { ...state, mode: 'heat' } };
+  };
+  await modeOn(d, 'fan').handleSetRequest(false);
+  await tick();
+  assert.equal(d.state.mode, 'heat');
+  assert.equal(d.service.getCharacteristic(hap.Characteristic.Active).value, 1);
+  p.api.emit('shutdown');
+});
+
+test('combined mode OFF guards and main OFF have unambiguous precedence', async () => {
+  const sent = [];
+  const q = new CommandQueue(async patch => sent.push(patch), 1);
+  await Promise.all([q.enqueue({ power: 'off', off_if_mode: ['dry'] }),
+    q.enqueue({ power: 'off', off_if_mode: ['fan'] })]);
+  assert.deepEqual(sent.at(-1), { power: 'off', off_if_mode: ['dry', 'fan'] });
+  for (const reverse of [false, true]) {
+    const patches = [{ power: 'off' }, { power: 'on', mode: 'heat' }, { temperature: 24 }];
+    if (reverse) patches.reverse();
+    await Promise.all(patches.map(patch => q.enqueue(patch)));
+    assert.deepEqual(sent.at(-1), { power: 'off' });
+  }
+  q.close();
+});
+
+test('mode SET failure invalidates all controls and is not retried', async () => {
+  const p = platform();
+  const d = device(p);
+  d.apply(state);
+  let calls = 0;
+  p.client.command = async () => { calls++; return { status: 'unknown' }; };
+  await assert.rejects(modeOn(d, 'dry').handleSetRequest(true));
+  await tick();
+  for (const mode of ['dry', 'fan']) await assert.rejects(modeOn(d, mode).handleGetRequest());
+  assert.equal(d.state.mode, 'cool');
+  assert.equal(calls, 1);
+  p.api.emit('shutdown');
+});
+
+test('upgrade reuses accessory and service identities without resetting user names', () => {
+  const p = platform();
+  const d = device(p);
+  d.apply({ ...state, mode: 'heat' });
+  const a = d.accessory;
+  const ids = a.services.map(s => s.UUID + ':' + s.subtype);
+  const dry = a.getServiceById(hap.Service.Switch, 'mode-dry');
+  dry.setCharacteristic(hap.Characteristic.ConfiguredName, 'My dry mode');
+  d.queue.close();
+  const restored = new AcAccessory(p, a, state.id);
+  assert.deepEqual(a.services.map(s => s.UUID + ':' + s.subtype), ids);
+  assert.equal(dry.getCharacteristic(hap.Characteristic.ConfiguredName).value, 'My dry mode');
+  restored.apply({ ...state, mode: 'fan' });
+  assert.equal(restored.service.getCharacteristic(hap.Characteristic.TargetHeaterCoolerState).value, 1);
+  restored.queue.close();
+  p.api.emit('shutdown');
+});

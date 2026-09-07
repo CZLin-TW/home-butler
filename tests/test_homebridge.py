@@ -71,6 +71,8 @@ class HomebridgeTests(unittest.TestCase):
         row["最後電源"] = data["power"]
         if "temperature" in data:
             row["最後溫度"] = data["temperature"]
+        if "mode" in data:
+            row["最後模式"] = {"cool": "冷氣", "heat": "暖氣", "dry": "除濕", "fan": "送風"}[data["mode"]]
         ctx._ac_state_saved = True
         return SimpleNamespace(status="success")
 
@@ -193,6 +195,68 @@ class HomebridgeTests(unittest.TestCase):
         tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
         self.assertTrue(any(isinstance(n, ast.Call) and ast.unparse(n) ==
                             "app.include_router(homebridge_router)" for n in ast.walk(tree)))
+
+    def test_four_modes_keep_temperature_fan_and_report_saved_mode(self):
+        for mode in ["cool", "heat", "dry", "fan"]:
+            with self.subTest(mode=mode):
+                response = self.post({"power": "on", "mode": mode})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["device"]["mode"], mode)
+                self.assertEqual(self.control.call_args.args[0], {
+                    "device_name": "客廳冷氣", "power": "on", "mode": mode,
+                    "temperature": 27, "fan_speed": "low"})
+
+    def test_inactive_mode_off_uses_fresh_sheet_and_deduplicates_noop(self):
+        # Bridge/cache still says dry; Dashboard has already saved heat in Sheet.
+        self.status.update("客廳冷氣", {"lastMode": "除濕"})
+        row = self.ctx.data["智能居家"][0]
+        row["最後模式"] = "暖氣"
+        request_id = str(uuid4())
+        response = self.post({"power": "off", "off_if_mode": ["dry"]}, request_id=request_id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["device"]["mode"], "heat")
+        self.assertEqual(response.json()["device"]["power"], "on")
+        row["最後模式"] = "除濕"
+        again = self.post({"power": "off", "off_if_mode": ["dry"]}, request_id=request_id)
+        self.assertEqual(again.json(), response.json())
+        self.control.assert_not_called()
+
+    def test_active_mode_off_runs_original_antimold_handler_once(self):
+        self.ctx.data["智能居家"][0]["最後模式"] = "除濕"
+        def antimold(data, ctx):
+            self.assertEqual(data, {"device_name": "客廳冷氣", "power": "off"})
+            ctx.get("智能居家")[0].update({"最後電源": "on", "最後模式": "送風"})
+            ctx._ac_state_saved = True
+            return SimpleNamespace(status="success")
+        self.control.side_effect = antimold
+        request_id = str(uuid4())
+        data = {"power": "off", "off_if_mode": ["dry", "fan"]}
+        response = self.post(data, request_id=request_id)
+        self.assertEqual(response.json()["device"]["mode"], "fan")
+        self.assertEqual(response.json()["device"]["power"], "on")
+        self.post(data, request_id=request_id)
+        self.control.assert_called_once()
+
+    def test_mode_off_already_off_is_noop_and_uncertain_state_rejects(self):
+        row = self.ctx.data["智能居家"][0]
+        row.update({"最後模式": "送風", "最後電源": "off"})
+        self.assertEqual(self.post({"power": "off", "off_if_mode": ["fan"]}).json()["status"], "success")
+        row["最後電源"] = "on"
+        self.status.update("客廳冷氣", {"stateUncertain": True})
+        self.assertEqual(self.post({"power": "off", "off_if_mode": ["fan"]}).status_code, 409)
+        self.status.update("客廳冷氣", {"stateUncertain": False})
+        row["最後模式"] = ""
+        self.assertEqual(self.post({"power": "off", "off_if_mode": ["fan"]}).status_code, 409)
+        self.control.assert_not_called()
+
+    def test_mode_off_condition_is_strict_and_only_allowed_with_off(self):
+        for data in [{"off_if_mode": ["dry"]}, {"power": "on", "off_if_mode": ["dry"]},
+                     {"power": "off", "off_if_mode": ["dry"], "temperature": 25},
+                     *[{"power": "off", "off_if_mode": v} for v in
+                       [None, [], ["heat"], ["dry", "fan", "dry"], "dry", [None]]]]:
+            with self.subTest(data=data):
+                self.assertEqual(self.post(data).status_code, 422)
+        self.control.assert_not_called()
 
 
 if __name__ == "__main__":
