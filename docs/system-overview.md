@@ -13,6 +13,7 @@
 ```text
 瀏覽器 → Dashboard（Session／API 邊界）→ home-butler → Sheets／設備雲端
 LINE／Siri ─────────────────────────→ home-butler
+Apple 家庭／Siri → 家中 Homebridge ──→ home-butler（獨立設備權限 API）
                                            │
                                       PC agent WebSocket
                                            ├→ Hue Bridge
@@ -25,6 +26,11 @@ Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat
 Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API；既有設備 handler 的防黴及自動關機仍運作。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
 
 ## 週期與事件的責任
+
+Homebridge 插件位於 home-butler 的 `homebridge/`，與 Windows PC agent 分開部署，
+不需要第四個 repo。以獨立橋接 Key 和設備名稱清單限制明確 AC 控制；每輪完成後約 5 秒
+重新讀取後端快取，不呼叫 AI、不增加 Sheets 輪詢。冷氣狀態仍為最後指令；室溫來自同房間
+感測器。權限、安裝、同步延遲及不支援的模式見 [橋接文件](../homebridge/README.md)。
 
 | 工作 | 實作／頻率 | 限制 |
 | --- | --- | --- |

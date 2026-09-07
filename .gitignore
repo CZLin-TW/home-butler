@@ -3,3 +3,5 @@ venv/
 __pycache__/
 .claude/
 agent/agent_config.py
+homebridge/node_modules/
+homebridge/*.tgz

@@ -2,7 +2,18 @@
 
 以下是維護入口及已留存的驗證範圍，不是每次部署自動續期的保證。
 
+2026-09-07 Homebridge 第一版（系統 v1.40.0）：本機 Python 3.12 完整 137 項離線測試、
+Python 編譯檢查通過；Node 24 / Homebridge 2.4.0 的 11 項插件測試通過。
+`npm pack --dry-run` 確認安裝包只含五個程式／設定／說明檔案，無憑證或測試依賴。
+使用者已完成家中 VM 安裝與主橋接器配對；插件、Render 橋接 Key、Siri／冷氣控制仍待部署及實機驗證。
+
 ## 離線檢查
+
+Homebridge 插件另在 `homebridge/` 執行 `npm ci --ignore-scripts`、`npm test`，
+以官方 Homebridge 2.4.0 的 PlatformAccessory／HAP 特徵驗證狀態更新、SET 完成後的防黴狀態、
+同手勢合併、舊輪詢隔離、無回應、真實室溫來源及未知結果不重送。HTTP 為 fake，沒有啟動橋接廣播。
+後端 `tests/test_homebridge.py` 使用真實 FastAPI 與 fake Sheets／設備，驗證獨立權限、
+同名／同 ID 拒絕、局部設定、狀態投影、去重及保存失敗。實機驗收流程在 [插件文件](../homebridge/README.md)。
 
 ```sh
 pip install -c requirements.lock fastapi httpx

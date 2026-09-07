@@ -1,0 +1,27 @@
+{
+  "name": "homebridge-home-butler",
+  "version": "1.0.0",
+  "description": "HomeButler AC bridge with backend state synchronization",
+  "main": "index.js",
+  "keywords": [
+    "homebridge-plugin"
+  ],
+  "engines": {
+    "node": ">=22",
+    "homebridge": ">=1.8.0 <3.0.0"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "config.schema.json",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "homebridge": "2.4.0"
+  }
+}

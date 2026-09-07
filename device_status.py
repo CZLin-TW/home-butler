@@ -12,12 +12,14 @@ from threading import Lock
 _lock = Lock()
 _statuses: dict[str, dict] = {}
 _device_rows: dict[str, dict] = {}
+_catalog_rows: list[dict] = []
 _refreshing = False
 _last_refresh_started = 0.0
 
 
 def load_catalog(rows) -> None:
     """Replace the active device catalog and hydrate persisted AC state."""
+    rows = list(rows)
     active_rows = {}
     for row in rows:
         if row.get("狀態") != "啟用":
@@ -27,6 +29,9 @@ def load_catalog(rows) -> None:
             active_rows[name] = dict(row)
 
     with _lock:
+        # Preserve duplicates for capability validation; the Dashboard map alone
+        # collapses duplicate names and cannot safely authorize a bridge target.
+        _catalog_rows[:] = [dict(r) for r in rows if r.get("狀態") == "啟用"]
         next_statuses = {}
         for name, row in active_rows.items():
             status = dict(_statuses.get(name, {}))
@@ -58,6 +63,12 @@ def has_catalog() -> bool:
 def device_rows() -> list[dict]:
     with _lock:
         return [dict(row) for row in _device_rows.values()]
+
+
+def catalog_rows() -> list[dict]:
+    """Copy active source rows without collapsing duplicate names/IDs."""
+    with _lock:
+        return [dict(row) for row in _catalog_rows]
 
 
 def update(device_name: str, fields: dict) -> None:

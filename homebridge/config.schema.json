@@ -1,0 +1,21 @@
+{
+  "pluginAlias": "HomeButler",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {"title": "名稱", "type": "string", "default": "HomeButler"},
+      "backendUrl": {"title": "HomeButler HTTPS 後端網址（Render）", "type": "string", "required": true},
+      "apiKey": {"title": "HOMEBRIDGE_API_KEY", "type": "string", "required": true, "minLength": 32},
+      "pollSeconds": {"title": "狀態同步間隔（秒）", "type": "integer", "default": 5, "minimum": 5, "maximum": 30},
+      "devices": {"title": "室溫來源（同房間多個感測器時必填）", "type": "array", "items": {
+        "type": "object", "properties": {
+          "name": {"title": "冷氣設備名稱", "type": "string", "required": true},
+          "temperatureSensor": {"title": "室溫感測器名稱", "type": "string", "required": true}
+        }
+      }}
+    }
+  },
+  "layout": ["name", "backendUrl", {"key": "apiKey", "type": "password"}, "pollSeconds", "devices"]
+}

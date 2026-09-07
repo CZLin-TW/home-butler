@@ -6,6 +6,16 @@ Siri 等待時間診斷：兩個語音入口會在 Render Logs 輸出 `[TIMING]`
 
 v1.39.2 減少語音路徑的額外資料請求：組 prompt 的照明名稱改為直接唯讀取得，建表／補欄由原照明探索及設定流程處理；冷氣自動關機只有需要新增或取消排程時，才取得寫入用分頁。仍讀取即時資料、保留原有批次狀態寫入及防黴規則。Log 新增連線、Sheets HTTP、版本／照明、SwitchBot 及 AC 排程子階段；外層已含子階段，請勿重複加總。
 
+## Apple「家庭」與 Homebridge
+
+`homebridge/` 提供 HomeButler 專用插件，將允許清單中的冷氣呈現在 Apple「家庭」，
+透過明確 API 控制，無需 Claude。沿用後端防黴／排程與狀態保存；LINE、Dashboard、
+捷徑與排程的已保存狀態也由插件讀取同步。紅外線狀態仍是最後指令，沒有實體讀回。
+
+需要家中常開的 Homebridge、獨立 `HOMEBRIDGE_API_KEY` 和 `HOMEBRIDGE_DEVICE_NAMES` JSON 名稱清單；
+未設定不啟用。第一版為冷氣開關、冷房與目標溫度，室溫來自同位置感測器；缺失／過時不偽造數值。
+安装、欄位對應、5 秒快取同步、失敗不重送與復原流程見 [Homebridge 說明](homebridge/README.md)。
+
 ## Dashboard 首頁輕量查詢
 
 `GET /api/dashboard?include_weather=false` 只讀取待辦／庫存並回傳 `{todos, food}`，不呼叫天氣服務。省略參數維持舊版完整回應。
@@ -494,6 +504,8 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | 變數名稱 | 說明 | 必要 |
 |----------|------|------|
 | LINE_CHANNEL_ACCESS_TOKEN | Line Bot 的 Channel Access Token | 必要 |
+| HOMEBRIDGE_API_KEY | 僅 `/api/homebridge/*` 接受的獨立 Key，至少 32 字元，不可與 owner／device-voice Key 相同；未設定停用 | 橋接選配 |
+| HOMEBRIDGE_DEVICE_NAMES | 允許橋接的冷氣名稱 JSON 陣列，例如 `["客廳冷氣"]`；精確名稱，未設定停用 | 橋接選配 |
 | LINE_CHANNEL_SECRET | Line Bot 的 Channel Secret | 必要 |
 | SPREADSHEET_ID | Google Sheets 的試算表 ID（網址中間那串） | 必要 |
 | GOOGLE_CREDENTIALS | Google Service Account 的 JSON 金鑰（整個內容，從 { 到 }） | 必要 |
@@ -614,6 +626,8 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/auto/rules/{area_id} | DELETE | 刪除該區域的自動夜燈規則 |
 | /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
 | /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
+| /api/homebridge/devices | GET | 獨立橋接 Key，僅允許冷氣與同位置室溫感測器投影；直接讀快取，不查 Sheets／設備 |
+| /api/homebridge/devices/{id}/ac | POST | 獨立橋接 Key，明確 AC 局部設定與 UUID request_id；即時重驗允許清單、保留防黴排程，不經 AI。完整契約見 homebridge/README.md |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；每次只送當句，不帶歷史對話，仍背景存檔供查閱。`user_id` 不帶則用 `SIRI_USER_ID` |
 | /api/assistant/devices | POST | 家電專用自然語言入口，只接受 `DEVICE_VOICE_API_KEY`。body 僅 `{text}`，1–500 字元；不接受 `user_id` 等額外欄位。回 `{reply}`，單句獨立解析，不讀寫家庭對話紀錄、不提供私人資料給模型 |
 

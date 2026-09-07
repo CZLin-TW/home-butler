@@ -111,7 +111,9 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
             "lastMode": rec.get("最後模式", ""),
             "lastFanSpeed": rec.get("最後風速", ""),
             "lastUpdatedAt": rec.get("最後更新時間", ""),
+            "stateUncertain": False,
         })
+        ctx._ac_state_saved = True
     except Exception as e:
         print(f"[AC STATE SAVE ERROR] device={device_id}: {e}")
 
