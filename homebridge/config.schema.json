@@ -5,7 +5,7 @@
   "schema": {
     "type": "object",
     "properties": {
-      "name": {"title": "名稱", "type": "string", "default": "HomeButler"},
+      "name": {"title": "插件名稱", "type": "string", "default": "HomeButler"},
       "backendUrl": {"title": "HomeButler HTTPS 後端網址（Render）", "type": "string", "required": true},
       "apiKey": {"title": "HOMEBRIDGE_API_KEY", "type": "string", "required": true, "minLength": 32},
       "pollSeconds": {"title": "狀態同步間隔（秒）", "type": "integer", "default": 5, "minimum": 5, "maximum": 30},
@@ -17,5 +17,27 @@
       }}
     }
   },
-  "layout": ["name", "backendUrl", {"key": "apiKey", "type": "password"}, "pollSeconds", "devices"]
+  "layout": [
+    {
+      "type": "section",
+      "title": "連線設定（可收合）",
+      "expandable": true,
+      "expanded": true,
+      "items": ["name", "backendUrl", {"key": "apiKey", "type": "password"}, {"key": "pollSeconds", "type": "number"}]
+    },
+    {
+      "type": "section",
+      "title": "室溫來源（同房間僅一個感測器可略過）",
+      "expandable": true,
+      "expanded": true,
+      "items": [
+        {
+          "key": "devices",
+          "type": "tabarray",
+          "title": "{{ value.name || '新增室溫來源' }}",
+          "items": ["devices[].name", "devices[].temperatureSensor"]
+        }
+      ]
+    }
+  ]
 }

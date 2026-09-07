@@ -27,7 +27,7 @@ Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBo
 git clone https://github.com/CZLin-TW/home-butler.git ~/home-butler-bridge
 cd ~/home-butler-bridge/homebridge
 npm pack --ignore-scripts
-npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.0.0.tgz"
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.0.1.tgz"
 ```
 
 官方 VM 的插件目錄是 `/var/lib/homebridge/node_modules`，以上指令明確安裝到該位置。
@@ -37,7 +37,24 @@ Homebridge 2.4.0 / Node 24 已做程式庫層測試；其他版本尚未實機�
 
 4. 重啟 Homebridge，在「插件」找到 `homebridge-home-butler` 並打開設定。
 填入 **Render 後端的 HTTPS 網址**（不是 Dashboard，也不是家中的 Homebridge 管理網址），
-以及相同的 `HOMEBRIDGE_API_KEY`。儲存並重啟。
+以及相同的 `HOMEBRIDGE_API_KEY`。「插件名稱」可維持 HomeButler，冷氣名稱來自後端清單。
+同位置只有一個感測器時可直接儲存並重啟，不必新增室溫來源。
+需要指定時，在「室溫來源」按新增項目，再填冷氣及感測器的完整 Sheet 名稱。
+例如冷氣 `客廳空調`、感測器 `SwitchBot Hub 2 客廳`；表單欄位填純文字，不加 JSON 方括號。
+畫面高度不足時先點「連線設定」收合，再操作室溫來源。
+
+插件 1.0.1 改用明確的可新增陣列欄位與可收合區塊。若 1.0.0 設定畫面只有室溫來源標題，
+先保存已填的連線資料，再於 Homebridge 網頁終端機更新（原有 Key／設定會保留）：
+
+```sh
+cd ~/home-butler-bridge
+git pull --ff-only
+cd homebridge
+npm pack --ignore-scripts
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.0.1.tgz"
+```
+
+重啟 Homebridge 並重新整理管理網頁後，再開插件設定。不需要重新配對主橋接器。
 
 若使用 JSON 設定，在原 `platforms` 陣列新增一項，保留原有 `bridge`、`accessories`、UI 設定：
 

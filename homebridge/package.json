@@ -1,6 +1,6 @@
 {
   "name": "homebridge-home-butler",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "HomeButler AC bridge with backend state synchronization",
   "main": "index.js",
   "keywords": [
