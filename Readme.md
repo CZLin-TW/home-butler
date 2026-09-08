@@ -314,7 +314,7 @@ home-butler 啟動 / 第一次寫入時自動建出來，header 也自動補：
 
 | 分頁 | 寫入者 | 內容 |
 |------|--------|------|
-| 感測器歷史 | `sensor_state.py` 每 5 min polling 寫入 | timestamp, device_name, location, temp, humidity, co2（24h 後自動 trim） |
+| 感測器歷史 | `sensor_state.py` 每 5 min 紀錄最新快照 | timestamp, device_name, location, temp, humidity, co2（24h 後自動 trim） |
 | 空調歷史 | `ac_history.py` 每 5 min polling 寫入 | timestamp, device_name, location, power, temp, mode, fan_speed（24h 後自動 trim） |
 | 除濕機歷史 | `dehumidifier_history.py` 自動模式 polling 時寫入 | timestamp, device_name, location, power（24h 後自動 trim，給 Dashboard 自動模式 chart 背景畫運轉區段） |
 | 除濕機自動規則 | `dehumidifier_auto.py` 規則設定 / 評估時寫入 | device_name, auto_mode, sensor_name, duration_min, threshold, on_mode, auto_phase, countdown_min, last_event, last_event_at（每台一行，覆蓋更新） |
@@ -476,7 +476,7 @@ Notion 整合會將事件同步到待辦事項 Sheet，並依權限設定標記�
 
 ### 十四、排程與推播（in-process scheduler）
 
-背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；感測器、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
+背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；一般感測器／歷史、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒；空調回饋每 60 秒先更新使用中的感測器再評估。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
 - **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**（`notify.run_daily_push_if_due`）：每天過了 `DAILY_PUSH_HOUR`（環境變數，預設 `21` = 晚上 9 點）後的第一個 tick 觸發一次；用 Sheet「系統狀態」分頁的 `最後每日推播日期` marker 去重，跨 Render 重啟存活——不重發也不漏發。
@@ -1024,7 +1024,7 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 - **Google Sheets 批次讀取**：RequestContext 使用 values_batch_get 一次讀取所有分頁，取代原本多次個別 API 呼叫
 - **Google Sheets 連線重用**：同一程序持續重用已認證的 spreadsheet／HTTP session，不再每 60 秒重建；google-auth 按需要更新憑證，既有暫時性重試用盡後讓下次存取重建連線。初始化以 RLock 避免同時重建；不是跨程序鎖，也不快取業務資料或長期保存欄位位置。
 - **冷氣狀態寫入**：成功送出後，一次讀取「智能居家」最新內容，依 Device ID 唯一定位設備列及現有欄位，再一次 RAW 批次寫入；省掉 worksheet metadata 查詢，也不再沿用請求開始時的舊列號。缺表、重複欄名／ID 或目標消失時不寫入，寫入失敗不重送設備。Google Sheets 仍無讀取與寫入之間的交易保障。
-- **統一裝置狀態快取**：`/api/devices/status` 從 in-memory cache 立即回應；空調控制、5 分鐘背景輪詢與雲端查詢共同更新同一份狀態，避免 Dashboard 等待完整 Sheet 與其他裝置 API
+- **統一裝置狀態快取**：`/api/devices/status` 從 in-memory cache 立即回應；空調控制、感測器共用輪詢（回饋使用中約 1 分鐘，其餘背景 5 分鐘）與雲端查詢共同更新同一份狀態，避免 Dashboard 等待完整 Sheet 與其他裝置 API
 - **Google Sheets 集中寫入**：新增資料統一走 `append_record()`，多欄位修改統一走 `update_row_fields()` 的 batch update，減少 API 呼叫也避免欄位位置散落在 handler 裡
 - **背景寫入**：save_conversation（對話暫存）在背景 thread 執行
 - **先回覆再存檔**：reply_message 在 save_conversation 之前，使用者體感更快
@@ -1072,7 +1072,8 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 | lighting_auto.py | 自動夜燈規則引擎：SwitchBot Hub 2 亮度條件式控制 Hue 區域。Webhook 推播主路徑（秒級）+ 5min tick 兜底時段邊界與漏接；規則持久化 Sheet「照明自動規則」、runtime in-memory；webhook 進來順手快取各感應器 lightLevel 供偵測端點用。Hue 指令從 sync thread 經 run_coroutine_threadsafe 橋接到 agent WebSocket |
 | hue_area_settings.py | Sheet「Hue 照明區域」讀寫：保存 Hue ID 與 Dashboard 顯示名稱的對應 |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
-| sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。home-butler 每 5min 主動 polling SwitchBot API 寫入 |
+| sensor_state.py | SwitchBot 感測器 in-memory ring buffer（24h × 5min/sensor）+ Sheet append/backfill。即時讀值由 sensor_polling 更新，歷史每 5min 記錄 |
+| sensor_polling.py | 感測器共用讀取與每分鐘回饋取值；同一 Device ID／時段去重，補償只套用一次，不直接寫歷史或 Sheet |
 | ac_history.py | 空調狀態 in-memory ring buffer（24h × 5min/AC）+ Sheet append/backfill。每 5min snapshot「智能居家」的最後電源/溫度/模式/風速 |
 | ring_buffer.py | pc_state / sensor_state / ac_history / dehumidifier_history 共用的純機制（`to_float_or_none`、24h `trim_sheet`）。各模組資料形狀差異刻意不抽繼承基類，只共用這兩段逐字重複的工具 |
 | dehumidifier_auto.py | 除濕機條件式自動 ON/OFF（hysteresis + sensor 失聯 fallback + 排他鎖）。品牌無關狀態機，控制/狀態委派給 dehumidifier_driver。runtime state in-memory，rule 設定值持久化到 Sheet「除濕機自動規則」 |
@@ -1137,3 +1138,5 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 - [三個 repo 系統導覽](docs/system-overview.md)：責任、資料流、部署／回復與後續 session 的閱讀順序。
 - [驗證紀錄](docs/verification.md)：離線測試、CI 與實際服務觀察的界線。
 - [開發指引](AGENTS.md) 與 [PC agent 維護](agent/README.md)：程式維護與本機部署。
+
+空調回饋 v1.44.0：評估間隔最低 1 分鐘（上限 30）、最短調整間隔最低 1 分鐘（上限 60）。預設仍 5／10 分鐘，既有設定不變；回饋使用中的感測器約每分鐘取得最新讀值，歷史記錄仍約每 5 分鐘；同一顆感測器共用查詢，相同讀取樣本不重複調整。

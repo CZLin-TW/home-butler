@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+v1.44.0：空調回饋 interval_min 可設整數 1–30、min_adjust_min 可設整數 1–60；預設仍 5／10 分鐘。後端 valid_config、Dashboard 進階欄位與 simulator 必須一致。回饋啟用且冷暖房開機時，其感測器約每分鐘取值；其他背景讀取及歷史仍每 300 秒。sensor_polling 共用每 ID 的鎖與每個 60 秒時段內的讀取結果，sensor_state.update_current 不寫歷史。1 分鐘查詢不等於設備有新測量，保留樣本去重、冷卻等待、關機／未知結果限制。
+
 插件 1.3.0／系統 v1.43.1：`halfDegreeTest` 必須嚴格為 true 才建立 `diagnostic.js` 的純本機配件。與正式空調共用 HAP 介面，但模擬 adapter 不可取得真實 ButlerClient、不可進入 devices map；cached 診斷 UUID 在一般還原前分流，停用僅 unregister 診斷配件。冷暖 minStep 必須在首次 register 前設為 0.5，測試狀態重啟歸 26°C。使用者已確認 Siri 可半度、Apple Home 可顯示，但按鈕仍整度，勿再將協定支援當成 iPhone UI 已通過；驗證見 homebridge/tests/diagnostic.test.js。
 
 v1.43.0 半度目標：`ac_temperature.py` 是 16–30°C、0.5°C 步進和 half-up 捨入的共用規則。回饋啟用保留半度 `最後溫度`，實際 IR 仍為整數；停用時目標歸整但不發 IR、保留 IR 狀態。補償上下界必須 ceil／floor 向內取整。`_ac_saved_state` 是該次保存結果，Dashboard 用它確認後端接受的目標，不能和原始半度請求硬比；語音／排程的 ARG_KEY_TYPES.temperature 使用 num，不能先截斷。Homebridge 1.2.0 需更新並保留配件 UUID／設定。
@@ -80,7 +82,7 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 
 # 排程 / 推播架構（in-process scheduler；GAS 已退場）
 
-背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；感測器、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
+背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；一般感測器／歷史、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒；空調回饋每 60 秒先更新使用中的感測器再評估。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
 - **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**：`notify.run_daily_push_if_due(ctx)`——每天過了 `DAILY_PUSH_HOUR`（env，預設 21 點）後第一個 tick 觸發一次。去重 marker 存在 Sheet「系統狀態」分頁的 `最後每日推播日期`（跨 Render 重啟存活，不重發不漏發；睡整晚跨午夜才醒則當天不補）。

@@ -511,14 +511,14 @@ def handle_query_sensor(data, ctx):
         else:
             return "❌ 找不到感應器設備，請先在「智能居家」分頁設定"
 
-    result = switchbot_api.get_hub_sensor(device_id)
+    from sensor_polling import refresh
+    device_row = next((r for r in ctx.get("智能居家") if r.get("Device ID") == device_id and r.get("狀態") == "啟用"), {})
+    result = refresh(device_row)
     if "error" in result:
         return f"❌ 讀取 {device_name} 失敗：{result['error']}"
 
     temp = result.get("temperature", "N/A")
     humidity = result.get("humidity", "N/A")
-    device_row = next((r for r in ctx.get("智能居家") if r.get("Device ID") == device_id and r.get("狀態") == "啟用"), {})
-    temp, humidity = apply_sensor_compensation(temp, humidity, device_row)
     return f"🌡️ {device_name}:溫度 {temp}°C，濕度 {humidity}%"
 
 

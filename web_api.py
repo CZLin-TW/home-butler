@@ -33,7 +33,6 @@ from handlers.recurring_todo import (
 from handlers.device import (
     control_ac_result, control_ir_result, handle_query_sensor,
     control_dehumidifier_result, handle_query_dehumidifier,
-    apply_sensor_compensation,
 )
 from handlers.schedule import handle_add_schedule, handle_modify_schedule, handle_delete_schedule, handle_query_schedule
 from auth import verify_api_key
@@ -172,15 +171,11 @@ def api_dashboard(include_weather: bool = True, request: Request = None):
 
 # ── 裝置 ──
 
-def _fetch_sensor_status(device_id):
-    """查詢感測器狀態（供平行執行）"""
-    try:
-        status = switchbot_api.get_hub_sensor(device_id)
-        if "error" not in status:
-            return {"temperature": status.get("temperature"), "humidity": status.get("humidity")}
-    except Exception as e:
-        print(f"[WEB API] Sensor error: {e}")
-    return {}
+def _fetch_sensor_status(device_row):
+    """Share live sensor reads with background feedback; never append history."""
+    from sensor_polling import refresh
+    result = refresh(device_row)
+    return {} if "error" in result else {k: result[k] for k in ("temperature", "humidity")}
 
 
 def _fetch_dehumidifier_status(device_row):
@@ -223,7 +218,7 @@ def _refresh_device_statuses(devices):
         for row in devices:
             device_name = row.get("名稱", "")
             if row.get("類型") == "感應器" and row.get("Device ID"):
-                future = executor.submit(_fetch_sensor_status, row["Device ID"])
+                future = executor.submit(_fetch_sensor_status, row)
                 futures[future] = (device_name, row)
             elif row.get("類型") == "除濕機" and row.get("Device ID"):
                 future = executor.submit(_fetch_dehumidifier_status, row)
@@ -233,14 +228,6 @@ def _refresh_device_statuses(devices):
             device_name, device_row = futures[future]
             try:
                 status = future.result(timeout=15)
-                if "temperature" in status or "humidity" in status:
-                    temp, humidity = apply_sensor_compensation(
-                        status.get("temperature"),
-                        status.get("humidity"),
-                        device_row,
-                    )
-                    status["temperature"] = temp
-                    status["humidity"] = humidity
                 if status:
                     device_status.update(device_name, status)
             except Exception as e:

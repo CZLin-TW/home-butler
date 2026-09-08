@@ -1,6 +1,7 @@
 """SwitchBot 感測器溫濕度 in-memory state + Sheet backup（解 home-butler 重啟資料遺失）。
 
-設計同 pc_state.py，但資料來源是 home-butler 自己每 60s 主動 polling SwitchBot API
+最新讀值由 sensor_polling 共用更新；回饋使用中每分鐘，一般每 5 分鐘。
+歷史由 main.py sensors 工作每 300 秒取一筆快照，與即時讀取分開。
 （不需要 PC agent，因為 SwitchBot 是 cloud API、home-butler 自己就拿得到）。
 
 - 啟用中、類型=感應器 的設備全部 polling
@@ -20,7 +21,7 @@ import gspread
 from sheets import _get_spreadsheet
 import ring_buffer
 
-MAX_HISTORY_POINTS = 288           # 24h / 5min（polling 5 分鐘一次）
+MAX_HISTORY_POINTS = 288           # 24h / 5min（歷史每 5 分鐘一筆）
 OFFLINE_THRESHOLD_S = 900          # 15 分鐘沒 poll 視為離線（給 polling 一兩次容錯）
 SENSOR_HISTORY_SHEET = "感測器歷史"
 HISTORY_HEADERS = ["timestamp", "device_name", "location", "temp", "humidity", "co2"]
@@ -40,13 +41,12 @@ def _new_sensor():
         "history_dict": {},
         "current": {},
         "last_polled_at": 0.0,
+        "last_history_bucket": None,
     }
 
 
-def record(device_name: str, location: str, temp, humidity, co2=None) -> None:
-    """寫入一筆感測器讀值。in-memory 即時、Sheet append 走背景 thread。
-    temp / humidity / co2 任一可為 None（讀值缺失），不影響其他。
-    Meter Pro CO2 三合一感測器會三欄都有；一般 SwitchBot 溫濕度感測器 co2=None。"""
+def update_current(device_name: str, location: str, temp, humidity, co2=None) -> None:
+    """Update only live state, retaining polling time rather than claiming device measurement time."""
     if temp is None and humidity is None and co2 is None:
         return  # 三個都缺、沒意義
     now = time.time()
@@ -57,15 +57,35 @@ def record(device_name: str, location: str, temp, humidity, co2=None) -> None:
             _sensors[device_name] = _new_sensor()
         s = _sensors[device_name]
         s["meta"] = {"location": location}
-        s["history_dict"][int(now)] = point
+        s["current"] = point
+        s["last_polled_at"] = now
+
+
+def record_history(device_name: str) -> None:
+    """Called by the five-minute job only; no cloud read and no stale replay."""
+    now = time.time()
+    bucket = int(now // 300)
+    with _lock:
+        s = _sensors.get(device_name)
+        if not s or not s["current"] or not 0 <= now - s["last_polled_at"] <= 60:
+            return
+        point = dict(s["current"])
+        if s.get("last_history_bucket") == bucket or int(point["t"]) in s["history_dict"]:
+            return
+        s["last_history_bucket"] = bucket
+        location = s["meta"].get("location", "")
+        s["history_dict"][int(point["t"])] = point
         if len(s["history_dict"]) > MAX_HISTORY_POINTS:
             sorted_keys = sorted(s["history_dict"].keys())
             for k in sorted_keys[:-MAX_HISTORY_POINTS]:
                 del s["history_dict"][k]
-        s["current"] = point
-        s["last_polled_at"] = now
-
     threading.Thread(target=_sheet_append_async, args=(point, device_name, location), daemon=True).start()
+
+
+def record(device_name: str, location: str, temp, humidity, co2=None) -> None:
+    """Compatibility helper; frequent live readers must use update_current instead."""
+    update_current(device_name, location, temp, humidity, co2)
+    record_history(device_name)
 
 
 def snapshot(include_history: bool = True, name: str = "") -> dict:
@@ -190,6 +210,7 @@ def backfill_from_sheet() -> None:
                 if point["temp"] == 0 and point["humidity"] == 0:
                     continue
                 s["history_dict"][int(t)] = point
+                s["last_history_bucket"] = max(s.get("last_history_bucket") or 0, int(t // 300))
                 loaded += 1
         print(f"[sensor_state] backfilled {loaded} points from Sheet")
         _backfilled = True

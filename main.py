@@ -95,6 +95,7 @@ def _on_startup():
     import time as _time
     import pc_state
     import sensor_state
+    import sensor_polling
     import ac_history
     import dehumidifier_auto
     import dehumidifier_history
@@ -104,7 +105,6 @@ def _on_startup():
     import notify
     from sheets import RequestContext
     import switchbot_api
-    from handlers.device import apply_sensor_compensation
 
     def _warm_up():
         """所有會打 Google Sheets 的暖機工作，由 polling thread 起跑時在背景執行。
@@ -195,19 +195,9 @@ def _on_startup():
                     device_id = d.get("Device ID", "")
                     if not device_id:
                         continue
-                    result = switchbot_api.get_hub_sensor(device_id)
-                    if "error" in result:
-                        print(f"[sensor poll] {name}: {result.get('error')}")
-                        continue
-                    temp = result.get("temperature")
-                    humidity = result.get("humidity")
-                    co2 = result.get("co2")
-                    temp, humidity = apply_sensor_compensation(temp, humidity, d)
-                    sensor_state.record(name, location, temp, humidity, co2)
-                    device_status.update(name, {
-                        "temperature": temp,
-                        "humidity": humidity,
-                    })
+                    result = sensor_polling.refresh(d)
+                    if "error" not in result:
+                        sensor_state.record_history(name)
                 elif dtype == "空調":
                     power = str(d.get("最後電源", "")).strip()
                     if not power:
@@ -243,7 +233,7 @@ def _on_startup():
         callback(ctx)
 
     jobs.add("sensors", 300, _sensor_tick)
-    jobs.add("ac-temperature-feedback", 60, ac_feedback.tick)
+    jobs.add("ac-temperature-feedback", 60, sensor_polling.feedback_tick)
     jobs.add("lighting", 300, lighting_auto.tick)
     jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
     jobs.add("notion", 300, lambda: _with_context(notify.sync_external_events, ["家庭成員"]))

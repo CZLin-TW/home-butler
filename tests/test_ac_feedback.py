@@ -142,12 +142,44 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaises(ValueError): feedback.save_config("空調", CFG)
 
     def test_invalid_config_and_wrong_sensor_identity_fail_closed(self):
-        for values in [{"enabled": "true"}, {"step": 0.5}, {"interval_min": 1}, {"max_offset": 8},
+        for values in [{"enabled": "true"}, {"step": 0.5}, {"interval_min": 0}, {"min_adjust_min": 0}, {"interval_min": 0.5}, {"min_adjust_min": 0.5}, {"interval_min": 31}, {"min_adjust_min": 61}, {"max_offset": 8},
                        {"tolerance": float("nan")}, {"power": "on"}]:
             with self.assertRaises(ValueError): feedback.valid_config(values)
         self.rows[1]["位置"] = "主臥"
         feedback.tick()
         self.api.ac_set_all.assert_not_called()
+
+    def test_one_minute_api_settings_persist_without_changing_defaults(self):
+        from test_homebridge import OWNER
+        cfg = {**CFG, "interval_min": 1, "min_adjust_min": 1}
+        client = self.api_client()
+        response = client.post("/api/ac/feedback", headers={"X-API-Key": OWNER},
+            json={"device_name": "空調", "config": cfg})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(feedback.config_for(self.rows[0]), cfg)
+        self.assertEqual(feedback.DEFAULTS["interval_min"], 5)
+        self.assertEqual(feedback.DEFAULTS["min_adjust_min"], 10)
+        self.api.ac_set_all.assert_not_called()
+
+    def test_one_minute_respects_both_intervals_and_requires_fresh_sample(self):
+        cfg = {**CFG, "interval_min": 1, "min_adjust_min": 1}
+        self.rows[0][feedback.CONFIG_COL] = json.dumps(cfg)
+        recent = {**STATE, "last_adjusted_at": NOW - 59}
+        self.assertEqual(feedback.decide(ROW, cfg, recent, self.sensor, NOW), ("settling", None))
+        self.assertEqual(feedback.decide(ROW, cfg, recent, self.sensor, NOW + 1), ("adjusting", 25))
+        feedback.tick()
+        self.api.ac_set_all.assert_called_once()
+        self.sensor["室溫"]["last_polled_at"] = NOW + 59
+        with patch.object(feedback.time, "time", return_value=NOW + 59):
+            feedback.tick()
+        self.api.ac_set_all.assert_called_once()
+        with patch.object(feedback.time, "time", return_value=NOW + 60):
+            feedback.tick()
+        self.assertEqual(self.api.ac_set_all.call_count, 2)
+        with patch.object(feedback.time, "time", return_value=NOW + 120):
+            feedback.tick()
+        self.assertEqual(self.api.ac_set_all.call_count, 2)
+        self.assertEqual(feedback._runtime["ac-id"]["status"], "waiting_sample")
 
     def test_manual_wrapper_resets_ir_to_target_and_preserves_user_setting(self):
         self.rows[0][feedback.STATE_COL] = json.dumps({**STATE, "ir_temperature": 24})

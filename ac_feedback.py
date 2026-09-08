@@ -38,8 +38,8 @@ def valid_config(value):
     if type(cfg["enabled"]) is not bool or not isinstance(cfg["sensor_name"], str):
         raise ValueError("啟用狀態或感測器名稱無效")
     cfg["sensor_name"] = cfg["sensor_name"].strip()
-    for key, low, high in [("interval_min", 5, 30), ("step", 1, 2),
-                           ("min_adjust_min", 5, 60), ("max_offset", 1, 5)]:
+    for key, low, high in [("interval_min", 1, 30), ("step", 1, 2),
+                           ("min_adjust_min", 1, 60), ("max_offset", 1, 5)]:
         if type(cfg[key]) is not int or not low <= cfg[key] <= high:
             raise ValueError(f"{key} 超出允許範圍")
     tolerance = cfg["tolerance"]

@@ -36,7 +36,7 @@ Homebridge 插件位於 home-butler 的 `homebridge/`，與 Windows PC agent 分
 | 工作 | 實作／頻率 | 限制 |
 | --- | --- | --- |
 | 家電排程 | `main.py` 註冊 `schedules`，每 60 秒 | 工作耗時、服務休眠及外部 I/O 仍影響延遲；送出前記錄執行識別碼，未知結果不自動重送 |
-| 空調室溫補償 | `ac-temperature-feedback` 每 60 秒檢查，各設備預設 5 分鐘評估 | 預設關閉，僅已開機冷／暖房；不改舒適目標、不重設排程，未知結果暫停。[設定與 IR 限制](ac-temperature-feedback.md) |
+| 空調室溫補償 | `ac-temperature-feedback` 每 60 秒先更新回饋使用中感測器，再檢查；各設備預設 5 分鐘評估，最低 1 分鐘 | 預設關閉，僅已開機冷／暖房；不改舒適目標、不重設排程，未知結果暫停。[設定與 IR 限制](ac-temperature-feedback.md) |
 | 感測器、照明、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
 | PC 指標 | `agent/agent.py` 每 tick 回報，預設 60 秒 | 心跳只代表 PC agent 的回報 |
 | AVR／KEF | theater-agent 的 AVR push、KEF 長輪詢事件、每輪完成後等 15 秒補漏 | 事件需核對連動旗標及 AVR 狀態；不能保證 15 秒內完成硬體喚醒 |
