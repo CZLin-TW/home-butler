@@ -17,6 +17,8 @@ v1.39.2 減少語音路徑的額外資料請求：組 prompt 的照明名稱改�
 室溫來自同位置感測器；缺失／過時不偽造數值。關閉模式開關會核對最新模式，避免關掉已切換的空調。
 安装、欄位對應、5 秒快取同步、失敗不重送與復原流程見 [Homebridge 說明](homebridge/README.md)。
 
+系統 v1.43.0／Homebridge 插件 1.2.0：Dashboard 與 Apple Home 可調 0.5°C 目標，回饋啟用時保留半度，未啟用則由後端四捨五入並同步整數。關閉回饋也歸整目標，但不立即送出 IR。IR 指令始終是整數，詳見[回饋說明](docs/ac-temperature-feedback.md)。家電專用語音的溫度參數也接受半度，仍只有設備權限。
+
 ## Dashboard 首頁輕量查詢
 
 `GET /api/dashboard?include_weather=false` 只讀取待辦／庫存並回傳 `{todos, food}`，不呼叫天氣服務。省略參數維持舊版完整回應。
@@ -584,7 +586,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/devices | GET | 列出所有啟用裝置基本資料（Sheet 欄位 + AC 上次指令快照），不含即時讀值 |
 | /api/devices/status | GET | 統一裝置狀態快取，包含空調 last-command、感應器與除濕機狀態，回傳 `{裝置名稱: 狀態}`。無 name 時立即回快取並在背景更新雲端裝置；`?name=` 用於單台命令確認 |
 | /api/devices/options | GET | 各類裝置的可用選項（空調模式/風速、除濕機模式/濕度），供前端動態渲染 |
-| /api/devices/control/ac | POST | 控制空調（power, temperature, mode, fan_speed） |
+| /api/devices/control/ac | POST | 控制空調（power, temperature, mode, fan_speed）；temperature 間隔 0.5°C，回傳 state 為後端實際保存的目標（回饋未啟用時四捨五入） |
 | /api/devices/control/ir | POST | 控制 IR 裝置（device_name, button） |
 | /api/devices/control/dehumidifier | POST | 控制除濕機（power, mode, humidity）。自動模式啟用時拒收外部控制 |
 | /api/devices/sensor | GET | 查詢感測器（device_name） |

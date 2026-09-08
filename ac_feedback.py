@@ -97,7 +97,7 @@ def decide(row, cfg, state, sensors, now):
     if row.get("最後模式") not in ("冷氣", "暖氣"):
         return "waiting_mode", None
     target, sent = temperature(row.get("最後溫度")), temperature(state.get("ir_temperature"))
-    if target is None or sent is None or not (16 <= target <= 30 and 16 <= sent <= 30) or not target.is_integer() or not sent.is_integer():
+    if target is None or sent is None or not (16 <= target <= 30 and 16 <= sent <= 30) or not (target * 2).is_integer() or not sent.is_integer():
         return "needs_manual", None
     measured, sample = sensor_value(cfg, sensors, now)
     if measured is None:
@@ -111,7 +111,7 @@ def decide(row, cfg, state, sensors, now):
         return "stable", None
     # Both cooling and heating: too warm -> lower thermostat setpoint.
     candidate = sent + (-cfg["step"] if error > 0 else cfg["step"])
-    candidate = max(16, target - cfg["max_offset"], min(30, target + cfg["max_offset"], candidate))
+    candidate = max(16, math.ceil(target - cfg["max_offset"]), min(30, math.floor(target + cfg["max_offset"]), candidate))
     # Tightening the bound must not cause a jump larger than one step.
     if abs(candidate - sent) > cfg["step"]:
         return "needs_manual", None
@@ -135,6 +135,7 @@ def _unique(rows, name):
 
 
 def save_config(name, values):
+    from ac_temperature import ir_temperature
     from sheets import get_sheet_records, get_sheet, ensure_columns
     import device_status
     cfg = valid_config(values)
@@ -153,7 +154,10 @@ def save_config(name, values):
         if device_status.snapshot(name).get(name, {}).get("stateUncertain"):
             state["blocked"] = True
         if "ir_temperature" not in state:
-            state["ir_temperature"] = temperature(row.get("最後溫度"))
+            try:
+                state["ir_temperature"] = ir_temperature(row.get("最後溫度"))
+            except ValueError:
+                state["ir_temperature"] = None
             try:
                 last = datetime.fromisoformat(str(row.get("最後更新時間", "")))
                 if last.tzinfo is None:
@@ -161,7 +165,13 @@ def save_config(name, values):
                 state["last_adjusted_at"] = last.timestamp()
             except (ValueError, TypeError, OverflowError):
                 pass
-        _persist(row, {CONFIG_COL: json.dumps(cfg, ensure_ascii=False), STATE_COL: json.dumps(state)})
+        fields = {CONFIG_COL: json.dumps(cfg, ensure_ascii=False), STATE_COL: json.dumps(state)}
+        if not cfg["enabled"] and temperature(row.get("最後溫度")) is not None:
+            try:
+                fields["最後溫度"] = ir_temperature(row["最後溫度"])
+            except ValueError:
+                pass  # Invalid existing state must not prevent disabling automation.
+        _persist(row, fields)
         _evaluated.pop(row["Device ID"], None)
         _runtime.pop(row["Device ID"], None)
         device_status.load_catalog(rows)
@@ -169,10 +179,11 @@ def save_config(name, values):
 
 
 def manual_saved_fields(ctx, power, temp):
+    from ac_temperature import ir_temperature
     state = dict(ctx._feedback_state)
     state.update(blocked=False, last_adjusted_at=time.time(), last_sample_at=0)
     if power == "on" and temp is not None:
-        state["ir_temperature"] = temp
+        state["ir_temperature"] = ir_temperature(temp)
     return {STATE_COL: json.dumps(state)}
 
 

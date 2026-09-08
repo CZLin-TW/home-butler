@@ -49,9 +49,10 @@ class AcAccessory {
     });
     for (const type of [C.CoolingThresholdTemperature, C.HeatingThresholdTemperature]) {
       this.service.getCharacteristic(type)
-        .updateValue(16).setProps({ minValue: 16, maxValue: 30, minStep: 1 });
+        .updateValue(16).setProps({ minValue: 16, maxValue: 30, minStep: 0.5 });
       this.bind(type, () => {
-        if (!Number.isInteger(this.state.temperature)) throw this.error();
+        if (!Number.isFinite(this.state.temperature) || !Number.isInteger(this.state.temperature * 2)
+          || this.state.temperature < 16 || this.state.temperature > 30) throw this.error();
         return this.state.temperature;
       }, value => ({ temperature: value }));
     }

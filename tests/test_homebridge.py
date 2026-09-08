@@ -121,12 +121,17 @@ class HomebridgeTests(unittest.TestCase):
         self.ctx.load.assert_called_once_with(["智能居家", "排程指令"])
 
     def test_invalid_fields_types_ranges_and_off_combinations(self):
-        for data in [{}, {"temperature": 26.5}, {"temperature": "26"}, {"temperature": True},
+        for data in [{}, {"temperature": 26.2}, {"temperature": "26"}, {"temperature": True},
                      {"temperature": 31}, {"temperature": None}, {"power": "toggle"},
                      {"power": "off", "mode": "cool"}, {"antimold_final": True},
                      {"user_id": "owner"}, {"mode": "unexpected"}, {"fan_speed": "turbo"}]:
             self.assertEqual(self.post(data).status_code, 422, data)
         self.control.assert_not_called()
+
+    def test_half_degree_target_is_not_truncated_in_commands_or_projection(self):
+        self.assertEqual(self.post({"temperature": 26.5}).json()["device"]["temperature"], 26.5)
+        self.assertEqual(self.control.call_args.args[0]["temperature"], 26.5)
+        self.assertEqual(self.post({"fan_speed": "high"}).json()["device"]["temperature"], 26.5)
 
     def test_temperature_only_does_not_turn_on_off_or_unknown_ac(self):
         for power in ["off", ""]:

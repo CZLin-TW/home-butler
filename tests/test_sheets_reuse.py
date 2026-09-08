@@ -145,14 +145,14 @@ class SheetsReuseTests(unittest.TestCase):
         save, status = self.saver(write)
         ctx = SimpleNamespace(get=lambda _: [{'Device ID': 'target'}],
             _feedback_state={'blocked': True, 'ir_temperature': 24})
-        save(ctx, 'target', 'on', 27, 2, 2)
+        save(ctx, 'target', 'on', 26.5, 2, 2)
         self.assertTrue(ctx._ac_state_saved)
         writes = ss.values_batch_update.call_args.args[0]['data']
-        self.assertEqual(next(w for w in writes if w['range'].endswith('D2'))['values'], [[27]])
+        self.assertEqual(next(w for w in writes if w['range'].endswith('D2'))['values'], [[26.5]])
         saved = json.loads(next(w for w in writes if w['range'].endswith('H2'))['values'][0][0])
         self.assertEqual(saved['ir_temperature'], 27)
         self.assertFalse(saved['blocked'])
-        self.assertEqual(status.update.call_args.kwargs['fields']['lastTemperature'], 27)
+        self.assertEqual(status.update.call_args.kwargs['fields']['lastTemperature'], 26.5)
 
     def saver(self, write):
         status = SimpleNamespace(update=Mock())

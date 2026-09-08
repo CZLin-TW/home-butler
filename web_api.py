@@ -311,7 +311,7 @@ def api_get_device_status(name: str = ""):
 class AcControlRequest(BaseModel):
     device_name: Optional[str] = ""
     power: str = "on"
-    temperature: Optional[int] = None
+    temperature: Optional[float] = Field(default=None, ge=16, le=30, multiple_of=0.5, strict=True, allow_inf_nan=False)
     mode: Optional[str] = None
     fan_speed: Optional[str] = None
 
@@ -324,9 +324,13 @@ def api_control_ac(req: AcControlRequest):
     if req.temperature is not None: data["temperature"] = req.temperature
     if req.mode is not None: data["mode"] = req.mode
     if req.fan_speed is not None: data["fan_speed"] = req.fan_speed
+    ctx._ac_state_saved = False
     result = control_ac_result(data, ctx)
     if result.status != "success": raise HTTPException(status_code=400, detail=result.message)
-    return {"message": result.message}
+    if not ctx._ac_state_saved:
+        raise HTTPException(status_code=503, detail="空調指令已送出但保存未確認，請重新讀取；不要自動重送")
+    # Return the accepted comfort target, which may be rounded by the backend.
+    return {"message": result.message, "state": ctx._ac_saved_state}
 
 
 class IrControlRequest(BaseModel):

@@ -120,7 +120,7 @@ class AcPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID
     power: Literal["on", "off"] | None = None
-    temperature: int | None = Field(default=None, ge=16, le=30, strict=True)
+    temperature: float | None = Field(default=None, ge=16, le=30, multiple_of=0.5, strict=True, allow_inf_nan=False)
     mode: Literal["auto", "cool", "dry", "fan", "heat"] | None = None
     fan_speed: Literal["auto", "low", "medium", "high"] | None = None
     off_if_mode: list[Literal["dry", "fan"]] | None = Field(default=None, min_length=1, max_length=2)
@@ -154,10 +154,10 @@ def merge_command(req, row):
     temperature = patch.get("temperature", previous["temperature"])
     fan = patch.get("fan_speed", previous["fan_speed"])
     # Never silently reset omitted parameters to the legacy handler defaults.
-    if mode is None or temperature is None or fan is None or int(temperature) != temperature:
+    if mode is None or temperature is None or fan is None or not (temperature * 2).is_integer():
         raise HTTPException(409, "AC settings are unknown; set a complete state in Dashboard first")
     return {"device_name": row["名稱"], "power": "on", "mode": mode,
-            "temperature": int(temperature), "fan_speed": fan}
+            "temperature": temperature, "fan_speed": fan}
 
 
 @router.post("/devices/{device_id}/ac")

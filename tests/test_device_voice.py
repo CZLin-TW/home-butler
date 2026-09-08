@@ -49,11 +49,11 @@ class PolicyTests(unittest.TestCase):
     def test_allowed_commands_are_typed_and_fan_alias_is_resolved(self):
         prepared = voice.validate_actions(payload(
             action(device_name="主臥電風扇", button="開"),
-            action("control_ac", device_name="主臥冷氣", temperature="26", fan_speed="low"),
+            action("control_ac", device_name="主臥冷氣", temperature="26.5", fan_speed="low"),
             action("control_dehumidifier", device_name="客廳除濕機", humidity="55", mode="智慧除濕"),
             action("query_sensor", device_name="主臥溫濕度")), ROWS)
         self.assertEqual(prepared[0][1]["device_name"], "主臥電扇")
-        self.assertEqual(prepared[1][1]["temperature"], 26)
+        self.assertEqual(prepared[1][1]["temperature"], 26.5)
         self.assertEqual(prepared[2][1]["humidity"], 55)
 
     def test_only_device_catalog_reaches_model_no_private_pages_or_history(self):
@@ -107,7 +107,7 @@ class PolicyTests(unittest.TestCase):
             action("control_ac", device_name="主臥電扇", power="on"),
             action("control_ac", device_name="主臥冷氣", antimold_final="true", power="off"),
             action("control_ac", device_name="主臥冷氣", temperature="31"),
-            action("control_ac", device_name="主臥冷氣", temperature="26.5"),
+            action("control_ac", device_name="主臥冷氣", temperature="26.2"),
             action("control_ac", device_name="主臥冷氣", power="toggle"),
             action("control_ac", device_name="主臥冷氣", power="off", temperature="26"),
             action("control_ac", device_name="客房冷氣", power="on"),

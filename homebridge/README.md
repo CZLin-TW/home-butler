@@ -2,13 +2,15 @@
 
 Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBot。
 此目錄是 Node.js 插件，與 Windows Python PC agent 分開執行；只安裝在 Homebridge 主機。
-支援允許清單中的紅外線空調：開關、冷氣／暖氣與 16–30°C 整數目標溫度，
+支援允許清單中的紅外線空調：開關、冷氣／暖氣與 16–30°C、間隔 0.5°C 的目標溫度，
 除濕／送風則使用同一配件內的模式開關。實際可執行的功能仍以空調機型為準。
 不呼叫 Claude，不提供待辦、食品、身分或任意 action 入口。
 
+插件 1.2.0 的冷／暖目標皆以半度調整。回饋啟用時保留 26.5°C 舒適目標，IR 仍下發整數；未啟用時後端將 26.5°C 四捨五入為 27°C，插件在 SET 完成後套用後端結果，Apple Home 會回到 27°C。停用回饋時目標也歸整，但不立即發 IR。詳見[溫度回饋說明](../docs/ac-temperature-feedback.md)。實際 iPhone 控制項呈現需實機確認。
+
 ## 部署順序
 
-1. 先部署包含新版 `homebridge_api.py` 的 home-butler，再更新插件；1.1.0 的模式關閉需要
+1. 先部署系統 v1.43.0 的 home-butler，再更新 1.2.0 插件以使用半度目標。1.1.0 的模式關閉需要
    後端支援 `off_if_mode`。舊後端會拒絕這項新增欄位，不會退回無條件關機。
 2. 在 Render 設定以下環境變數，儲存並等候重新部署：
 
@@ -29,7 +31,7 @@ Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBo
 git clone https://github.com/CZLin-TW/home-butler.git ~/home-butler-bridge
 cd ~/home-butler-bridge/homebridge
 npm pack --ignore-scripts
-npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.1.0.tgz"
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.2.0.tgz"
 ```
 
 官方 VM 的插件目錄是 `/var/lib/homebridge/node_modules`，以上指令明確安裝到該位置。
@@ -53,7 +55,7 @@ cd ~/home-butler-bridge
 git pull --ff-only
 cd homebridge
 npm pack --ignore-scripts
-npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.1.0.tgz"
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.2.0.tgz"
 ```
 
 重啟 Homebridge 並重新整理管理網頁後，再開插件設定。不需要重新配對主橋接器。

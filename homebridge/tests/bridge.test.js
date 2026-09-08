@@ -218,8 +218,9 @@ test('real HAP heating and cooling SET combine mode and target temperature', asy
     sent.push(patch);
     return { status: 'success', device: { ...d.state, ...patch } };
   };
-  for (const [target, mode, type, temperature] of [[1, 'heat', C.HeatingThresholdTemperature, 24],
-    [2, 'cool', C.CoolingThresholdTemperature, 26]]) {
+  for (const [target, mode, type, temperature] of [[1, 'heat', C.HeatingThresholdTemperature, 24.5],
+    [2, 'cool', C.CoolingThresholdTemperature, 26.5]]) {
+    assert.equal(d.service.getCharacteristic(type).props.minStep, 0.5);
     await Promise.all([d.service.getCharacteristic(C.TargetHeaterCoolerState).handleSetRequest(target),
       d.service.getCharacteristic(type).handleSetRequest(temperature)]);
     await tick();
@@ -228,6 +229,22 @@ test('real HAP heating and cooling SET combine mode and target temperature', asy
     assert.equal(d.service.getCharacteristic(C.CoolingThresholdTemperature).value, temperature);
     assert.equal(modeOn(d, 'dry').value, false);
   }
+  p.api.emit('shutdown');
+});
+
+test('backend rounded target replaces HomeKit optimistic half-degree SET', async () => {
+  const p = platform(); const d = device(p); d.apply(state);
+  const C = hap.Characteristic;
+  const sent = [];
+  p.client.command = async (_id, patch) => {
+    sent.push(patch);
+    return { status: 'success', device: { ...state, temperature: 27 } };
+  };
+  await d.service.getCharacteristic(C.CoolingThresholdTemperature).handleSetRequest(26.5);
+  await tick();
+  assert.deepEqual(sent, [{ temperature: 26.5 }]);
+  assert.equal(d.service.getCharacteristic(C.CoolingThresholdTemperature).value, 27);
+  assert.equal(d.service.getCharacteristic(C.HeatingThresholdTemperature).value, 27);
   p.api.emit('shutdown');
 });
 

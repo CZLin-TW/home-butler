@@ -118,6 +118,20 @@ class FeedbackTests(unittest.TestCase):
         feedback.tick()
         self.api.ac_set_all.assert_not_called()
 
+    def test_half_target_uses_integer_bounds_and_disabling_rounds_without_ir(self):
+        row = {**ROW, "最後溫度": 26.5}
+        for measured, sent, expected in [(29, 27, 26), (29, 24, None), (24, 29, None)]:
+            self.sensor["室溫"]["current"]["temp"] = measured
+            result = feedback.decide(row, CFG, {**STATE, "ir_temperature": sent}, self.sensor, NOW)
+            self.assertEqual(result[1], expected)
+        self.rows[0] = row
+        self.rows[0][feedback.STATE_COL] = json.dumps({**STATE, "ir_temperature": 24})
+        feedback.save_config("空調", {**CFG, "enabled": False})
+        self.assertEqual(self.rows[0]["最後溫度"], 27)
+        self.assertEqual(json.loads(self.rows[0][feedback.STATE_COL])["ir_temperature"], 24)
+        self.assertEqual(self.status.load_catalog.call_args.args[0][0]["最後溫度"], 27)
+        self.api.ac_set_all.assert_not_called()
+
     def test_settings_never_send_ir_and_preserve_unknown_block(self):
         self.rows[0][feedback.STATE_COL] = json.dumps({**STATE, "blocked": True})
         feedback.save_config("空調", {**CFG, "enabled": False})

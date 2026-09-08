@@ -110,14 +110,16 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
         for cached in ctx.get("智能居家"):
             if str(cached.get("Device ID", "")) == str(device_id):
                 cached.update(applied)
-        device_status.update(device_name=rec.get("名稱", ""), fields={
+        saved_state = {
             "lastPower": rec.get("最後電源", ""),
             "lastTemperature": rec.get("最後溫度", ""),
             "lastMode": rec.get("最後模式", ""),
             "lastFanSpeed": rec.get("最後風速", ""),
             "lastUpdatedAt": rec.get("最後更新時間", ""),
             "stateUncertain": False,
-        })
+        }
+        device_status.update(device_name=rec.get("名稱", ""), fields=saved_state)
+        ctx._ac_saved_state = saved_state
         ctx._ac_state_saved = True
     except Exception as e:
         print(f"[AC STATE SAVE ERROR] device={device_id}: {e}")
@@ -365,6 +367,7 @@ def handle_control_ac(data, ctx, from_auto_schedule=False):
 
 def control_ac_result(data, ctx, from_auto_schedule=False):
     from request_timing import timed_call
+    from ac_temperature import target_for, ir_temperature
 
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name, ctx)
@@ -397,9 +400,12 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
         # antimold_final 是防黴收尾排程自己觸發的那次關機 → 不再攔截，直接關（防遞迴）。
         _now = now_taipei()
         if not data.get("antimold_final") and _should_antimold(prior_row, _now):
-            temp_keep = _parse_int_safe(prior_row.get("最後溫度")) or 27
+            try:
+                temp_keep = target_for(prior_row.get("最後溫度") or 27, prior_row)
+            except ValueError:
+                return CommandResult.failed("❌ 空調目標溫度無效，請先設定有效溫度")
             fan_minutes = _antimold_fan_minutes(prior_row)
-            fan_result = switchbot_api.ac_set_all(device_id, temp_keep, 4, 1, "on")  # mode 4=送風, fan 1=自動
+            fan_result = switchbot_api.ac_set_all(device_id, ir_temperature(temp_keep), 4, 1, "on")  # mode 4=送風, fan 1=自動
             if fan_result.get("success"):
                 # 先抓「防黴前」的模式/溫度/風速，交給收尾關機時還原（下面 _save_ac_last_state
                 # 寫送風會把 prior_row 改成送風，所以要在寫入前先讀）。
@@ -424,11 +430,14 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
         result = switchbot_api.ac_turn_off(device_id)
     else:
         mode_str = data.get("mode", "cool")
-        temperature = int(data.get("temperature", 24 if mode_str == "heat" else 27))
+        try:
+            temperature = target_for(data.get("temperature", 24 if mode_str == "heat" else 27), prior_row)
+        except ValueError as error:
+            return CommandResult.failed(str(error))
         fan_str = data.get("fan_speed", "auto")
         mode = switchbot_api.AC_MODE_MAP.get(mode_str, 2)
         fan = switchbot_api.AC_FAN_MAP.get(fan_str, 1)
-        result = switchbot_api.ac_set_all(device_id, temperature, mode, fan, "on")
+        result = switchbot_api.ac_set_all(device_id, ir_temperature(temperature), mode, fan, "on")
 
     if result.get("success"):
         transitioned = (power == "on") and not prior_power_on
@@ -442,7 +451,7 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
             if data.get("restore_mode"):
                 restore["最後模式"] = data["restore_mode"]
             if data.get("restore_temp") not in (None, ""):
-                restore["最後溫度"] = data["restore_temp"]
+                restore["最後溫度"] = target_for(data["restore_temp"], prior_row)
             if data.get("restore_fan"):
                 restore["最後風速"] = data["restore_fan"]
             restore = restore or None

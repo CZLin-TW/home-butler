@@ -56,7 +56,7 @@ SYSTEM = """你是中文家電指令解析器。只輸出符合 schema 的 JSON�
 每次獨立解析，沒有上一句；最多四個動作。原樣保留使用者指定的設備名稱和房間，
 不要把不存在的名稱改成目錄裡另一個房間；電風扇與電扇是相同名詞。
 query_devices 不帶參數。其他動作必須有 device_name。
-control_ac: power=on/off, temperature=16至30的整數,
+control_ac: power=on/off, temperature=16至30、間隔0.5度；回饋啟用時保留半度，未啟用由後端四捨五入為整數,
 mode=cool/heat/dry/fan/auto, fan_speed=auto/low/medium/high。
 只說開冷氣預設 mode=cool；只調溫度或模式預設 power=on。
 control_ir: button=開/關，其他只能使用該設備目錄的實際按鈕。
@@ -159,7 +159,13 @@ def validate_actions(payload, rows):
             raise VoicePolicyError(CLARIFY)
         if data.get("power") == "off" and set(data) - {"device_name", "power"}:
             raise VoicePolicyError("關機和調整設定請分開說。")
-        for key, allowed in (("temperature", range(16, 31)), ("humidity", range(40, 71, 5))):
+        if "temperature" in data:
+            from ac_temperature import comfort_temperature
+            try:
+                data["temperature"] = comfort_temperature(data["temperature"])
+            except ValueError:
+                raise VoicePolicyError("溫度需介於 16 至 30 度，間隔 0.5 度。") from None
+        for key, allowed in (("humidity", range(40, 71, 5)),):
             if key in data:
                 if not re.fullmatch(r"[0-9]+", data[key]) or int(data[key]) not in allowed:
                     raise VoicePolicyError("設定值超出支援範圍，請重新說明。")
