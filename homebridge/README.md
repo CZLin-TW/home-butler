@@ -6,11 +6,11 @@ Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBo
 除濕／送風則使用同一配件內的模式開關。實際可執行的功能仍以空調機型為準。
 不呼叫 Claude，不提供待辦、食品、身分或任意 action 入口。
 
-插件 1.2.0 的冷／暖目標皆以半度調整。回饋啟用時保留 26.5°C 舒適目標，IR 仍下發整數；未啟用時後端將 26.5°C 四捨五入為 27°C，插件在 SET 完成後套用後端結果，Apple Home 會回到 27°C。停用回饋時目標也歸整，但不立即發 IR。詳見[溫度回饋說明](../docs/ac-temperature-feedback.md)。實際 iPhone 控制項呈現需實機確認。
+插件 1.2.0 的冷／暖目標皆以半度調整。回饋啟用時保留 26.5°C 舒適目標，IR 仍下發整數；未啟用時後端將 26.5°C 四捨五入為 27°C，插件在 SET 完成後套用後端結果，Apple Home 會回到 27°C。停用回饋時目標也歸整，但不立即發 IR。詳見[溫度回饋說明](../docs/ac-temperature-feedback.md)。2026-09-09 使用者實測：Dashboard／Siri 可設定半度，Apple Home 能顯示半度，但其調溫按鈕仍跳 1°C。這不代表協定不能接受半度，也尚不能確定是 Apple Home 介面或舊步幅快取；下方診斷可用新配件比較。
 
 ## 部署順序
 
-1. 先部署系統 v1.43.0 的 home-butler，再更新 1.2.0 插件以使用半度目標。1.1.0 的模式關閉需要
+1. 半度目標需系統 v1.43.0 的 home-butler；目前插件 1.3.0 另提供純本機診斷配件，已部署半度後端者不需新增 Render 設定。1.1.0 的模式關閉需要
    後端支援 `off_if_mode`。舊後端會拒絕這項新增欄位，不會退回無條件關機。
 2. 在 Render 設定以下環境變數，儲存並等候重新部署：
 
@@ -31,7 +31,7 @@ Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBo
 git clone https://github.com/CZLin-TW/home-butler.git ~/home-butler-bridge
 cd ~/home-butler-bridge/homebridge
 npm pack --ignore-scripts
-npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.2.0.tgz"
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.3.0.tgz"
 ```
 
 官方 VM 的插件目錄是 `/var/lib/homebridge/node_modules`，以上指令明確安裝到該位置。
@@ -55,7 +55,7 @@ cd ~/home-butler-bridge
 git pull --ff-only
 cd homebridge
 npm pack --ignore-scripts
-npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.2.0.tgz"
+npm --prefix /var/lib/homebridge install --save --omit=dev --ignore-scripts "$(pwd)/homebridge-home-butler-1.3.0.tgz"
 ```
 
 重啟 Homebridge 並重新整理管理網頁後，再開插件設定。不需要重新配對主橋接器。
@@ -120,6 +120,19 @@ Windows Hyper-V 設定自動啟動／正常關閉客體，Windows 不睡眠。�
   不提供與既有 LINE／Dashboard／排程／外部 Sheets 編輯的跨入口交易保證。仍只部署一個 worker。
 - 後端中斷或允許清單撤除時保留配件但標無回應，避免誤刪房間／自動化設定。
   需要永久移除時再從 Homebridge 管理 cached accessories。憑證不寫 log；API錯誤只回通用訊息。
+
+## 半度步幅診斷（插件 1.3.0）
+
+更新並重啟後，在插件設定頂端「診斷工具」勾選 **啟用半度測試空調（純模擬）**，保存並再次重啟。JSON 對應 `"halfDegreeTest": true`，預設關閉。Apple Home 會新增「半度測試空調」，可能位於橋接器所在房間；不需改 Sheet、Render 名稱清單或配對。
+
+測試配件使用與真實空調相同的 HeaterCooler 服務及冷／暖、除濕／送風介面，但使用完全獨立的本機模擬控制器。第一次註冊前即宣告 16–30°C、`minStep: 0.5`，初始冷氣 ON、目標 26°C、室溫固定 26.8°C。重啟會重設測試數值；沒有冷氣反應、回饋補償或定時器。
+
+1. 打開「半度測試空調」，從 26°C 按一次加號（或原本用來調溫的手勢）。記下變成 26.5 還是 27，並提供 iOS 版本。
+2. Homebridge Log 搜尋 `[半度測試]`，例如 `收到 {"temperature":26.5}`。這是經短暫合併後的控制請求，請單次操作並稍候，不要快速連按。
+3. 若新配件可以半度、舊配件不行，支持既有配件設定／快取差異；若兩者都跳整度，更支持 Apple Home 對這類配件的介面行為。這是排查依據，不是所有 iOS 的通用結論。
+4. 完成後取消勾選並保存、重啟，插件只移除此測試配件，真實空調的 UUID、房間及設定不變。不要先手動刪除主橋接器。
+
+測試指令不呼叫後端、SwitchBot、Sheets 或 AI；既有真實空調仍維持原本背景同步。此配件不加入真實設備清單、不受後端離線影響。勿用它建立正式自動化。
 
 ## API 契約
 

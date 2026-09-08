@@ -10,6 +10,7 @@
       "backendUrl": {"title": "HomeButler HTTPS 後端網址（Render）", "type": "string", "required": true},
       "apiKey": {"title": "HOMEBRIDGE_API_KEY", "type": "string", "required": true, "minLength": 32},
       "pollSeconds": {"title": "狀態同步間隔（秒）", "type": "integer", "default": 5, "minimum": 5, "maximum": 30},
+      "halfDegreeTest": {"title": "啟用半度測試空調（純模擬）", "type": "boolean", "default": false, "description": "保存並重啟後新增半度測試空調；僅測試 Apple Home 的 0.5°C 步幅，不發送家電指令。取消勾選並重啟只移除此測試配件。"},
       "devices": {"title": "室溫來源（同房間多個感測器時必填）", "type": "array", "items": {
         "type": "object", "properties": {
           "name": {"title": "冷氣設備名稱", "type": "string", "required": true},
@@ -19,6 +20,7 @@
     }
   },
   "layout": [
+    {"type": "section", "title": "診斷工具", "items": ["halfDegreeTest"]},
     {
       "type": "section",
       "title": "連線設定（可收合）",

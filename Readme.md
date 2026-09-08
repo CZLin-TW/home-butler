@@ -8,6 +8,8 @@ v1.39.2 減少語音路徑的額外資料請求：組 prompt 的照明名稱改�
 
 ## Apple「家庭」與 Homebridge
 
+插件 1.3.0／系統 v1.43.1 新增可選的「半度測試空調」：本機模擬配件用於比較 Apple Home 新舊配件步幅，不發送真實設備指令。啟用／移除方式見 [Homebridge 診斷說明](homebridge/README.md#半度步幅診斷插件-130)。
+
 `homebridge/` 提供 HomeButler 專用插件，將允許清單中的冷氣呈現在 Apple「家庭」，
 透過明確 API 控制，無需 Claude。沿用後端防黴／排程與狀態保存；LINE、Dashboard、
 捷徑與排程的已保存狀態也由插件讀取同步。紅外線狀態仍是最後指令，沒有實體讀回。
@@ -17,7 +19,7 @@ v1.39.2 減少語音路徑的額外資料請求：組 prompt 的照明名稱改�
 室溫來自同位置感測器；缺失／過時不偽造數值。關閉模式開關會核對最新模式，避免關掉已切換的空調。
 安装、欄位對應、5 秒快取同步、失敗不重送與復原流程見 [Homebridge 說明](homebridge/README.md)。
 
-系統 v1.43.0／Homebridge 插件 1.2.0：Dashboard 與 Apple Home 可調 0.5°C 目標，回饋啟用時保留半度，未啟用則由後端四捨五入並同步整數。關閉回饋也歸整目標，但不立即送出 IR。IR 指令始終是整數，詳見[回饋說明](docs/ac-temperature-feedback.md)。家電專用語音的溫度參數也接受半度，仍只有設備權限。
+系統 v1.43.0／Homebridge 插件 1.2.0：Dashboard 與 HomeKit 控制路徑接受 0.5°C 目標（Apple Home 按鈕步幅不保證），回饋啟用時保留半度，未啟用則由後端四捨五入並同步整數。關閉回饋也歸整目標，但不立即送出 IR。IR 指令始終是整數，詳見[回饋說明](docs/ac-temperature-feedback.md)。家電專用語音的溫度參數也接受半度，仍只有設備權限。
 
 ## Dashboard 首頁輕量查詢
 

@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+插件 1.3.0／系統 v1.43.1：`halfDegreeTest` 必須嚴格為 true 才建立 `diagnostic.js` 的純本機配件。與正式空調共用 HAP 介面，但模擬 adapter 不可取得真實 ButlerClient、不可進入 devices map；cached 診斷 UUID 在一般還原前分流，停用僅 unregister 診斷配件。冷暖 minStep 必須在首次 register 前設為 0.5，測試狀態重啟歸 26°C。使用者已確認 Siri 可半度、Apple Home 可顯示，但按鈕仍整度，勿再將協定支援當成 iPhone UI 已通過；驗證見 homebridge/tests/diagnostic.test.js。
+
 v1.43.0 半度目標：`ac_temperature.py` 是 16–30°C、0.5°C 步進和 half-up 捨入的共用規則。回饋啟用保留半度 `最後溫度`，實際 IR 仍為整數；停用時目標歸整但不發 IR、保留 IR 狀態。補償上下界必須 ceil／floor 向內取整。`_ac_saved_state` 是該次保存結果，Dashboard 用它確認後端接受的目標，不能和原始半度請求硬比；語音／排程的 ARG_KEY_TYPES.temperature 使用 num，不能先截斷。Homebridge 1.2.0 需更新並保留配件 UUID／設定。
 
 v1.42.1 回饋 API 的 `evaluate_now: true` 可在保存後立即評估；省略 config 時只讀現有設定，不寫回舊設定。明確評估略過背景週期／啟動等待，仍保留上次命令的間隔、持久化樣本與待確認檢查；不可把它實作成強制 IR 或清除 blocked。純 config POST 保持不送指令的相容契約。

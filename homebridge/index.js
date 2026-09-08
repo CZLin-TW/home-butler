@@ -1,5 +1,6 @@
 'use strict';
 const { ButlerClient, CommandQueue } = require('./client');
+const { syncDiagnostic } = require('./diagnostic');
 const PLUGIN = 'homebridge-home-butler';
 const PLATFORM = 'HomeButler';
 
@@ -131,6 +132,7 @@ class HomeButlerPlatform {
     try { this.client = new ButlerClient(config.backendUrl, config.apiKey); }
     catch { log.error('請設定 HomeButler HTTPS 後端網址與獨立橋接金鑰。'); }
     api.on('didFinishLaunching', () => {
+      this.diagnostic = syncDiagnostic(this, AcAccessory, PLUGIN, PLATFORM);
       // Restore handlers immediately, before the first network request, so a
       // backend outage cannot expose cached HomeKit values as live state.
       for (const accessory of this.cached.values()) {
@@ -143,6 +145,7 @@ class HomeButlerPlatform {
     api.on('shutdown', () => {
       this.stopped = true;
       clearTimeout(this.timer);
+      this.diagnostic?.queue.close();
       for (const device of this.devices.values()) device.queue.close();
     });
   }
