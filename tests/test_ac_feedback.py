@@ -181,7 +181,7 @@ class FeedbackTests(unittest.TestCase):
             self.assertEqual(feedback.describe(self.rows[0], self.sensor)["status"], "unconfirmed")
         self.api.ac_set_all.assert_not_called()
 
-    def test_api_rejects_bridge_voice_and_anonymous_keys_before_read_or_write(self):
+    def api_client(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from test_homebridge import load, OWNER, VOICE, BRIDGE
@@ -190,7 +190,11 @@ class FeedbackTests(unittest.TestCase):
         with patch.dict("sys.modules", {"auth": auth}):
             api = load("feedback_test_api", "ac_feedback_api.py")
         app = FastAPI(); app.include_router(api.router)
-        client = TestClient(app)
+        return TestClient(app)
+
+    def test_api_rejects_bridge_voice_and_anonymous_keys_before_read_or_write(self):
+        from test_homebridge import OWNER, VOICE, BRIDGE
+        client = self.api_client()
         for key in ["", "invalid", BRIDGE, VOICE]:
             headers = {"X-API-Key": key}
             self.assertEqual(client.get("/api/ac/feedback", headers=headers).status_code, 401)
@@ -205,6 +209,77 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(client.post("/api/ac/feedback", headers=headers,
             json={"device_name": "空調", "config": {**CFG, "step": 3}}).status_code, 422)
         self.api.ac_set_all.assert_not_called()
+
+    def test_save_and_immediate_evaluation_skip_poll_delay_and_startup_grace(self):
+        from test_homebridge import OWNER
+        self.rows[0].pop(feedback.STATE_COL)
+        self.rows[0].pop(feedback.CONFIG_COL)
+        feedback._evaluated["ac-id"] = NOW
+        client = self.api_client()
+        with patch.object(feedback, "_started", NOW):
+            response = client.post("/api/ac/feedback", headers={"X-API-Key": OWNER},
+                json={"device_name": "空調", "config": CFG, "evaluate_now": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["evaluation"]["status"], "compensating")
+        self.api.ac_set_all.assert_called_once_with("ac-id", 25, 2, 2, "on")
+        self.assertEqual(self.rows[0]["最後溫度"], 26)
+        self.assertIn(feedback.CONFIG_COL, self.writes[0])
+        # Repeated clicks and even restart cannot send twice for the same sample.
+        for _ in range(2):
+            feedback._evaluated.clear(); feedback._samples.clear(); feedback._runtime.clear()
+            self.assertEqual(feedback.evaluate_now("空調")["status"], "waiting_sample")
+        self.api.ac_set_all.assert_called_once()
+
+    def test_evaluate_only_does_not_write_configuration_or_evaluate_other_devices(self):
+        from test_homebridge import OWNER
+        second = {**ROW, "名稱": "第二台", "Device ID": "other-id"}
+        self.rows.append(second)
+        response = self.api_client().post("/api/ac/feedback", headers={"X-API-Key": OWNER},
+            json={"device_name": "空調", "evaluate_now": True})
+        self.assertEqual(response.json()["evaluation"]["status"], "compensating")
+        self.assertNotIn("config", response.json())
+        self.assertTrue(all(set(write) == {feedback.STATE_COL} for write in self.writes))
+        self.api.ac_set_all.assert_called_once_with("ac-id", 25, 2, 2, "on")
+        self.assertEqual(second[feedback.STATE_COL], ROW[feedback.STATE_COL])
+
+    def test_immediate_evaluation_retains_guards_and_actual_command_interval(self):
+        cases = [({"最後電源": "off"}, "waiting_power"), ({"最後模式": "送風"}, "waiting_mode"),
+                 ({"最後模式": "除濕"}, "waiting_mode"),
+                 ({feedback.STATE_COL: json.dumps({**STATE, "blocked": True})}, "unconfirmed"),
+                 ({feedback.STATE_COL: json.dumps({**STATE, "last_adjusted_at": NOW - 30})}, "settling")]
+        for change, expected in cases:
+            self.rows[0] = {**ROW, **change}
+            feedback.save_config("空調", CFG)
+            self.assertEqual(feedback.evaluate_now("空調")["status"], expected)
+        self.rows[0] = copy.deepcopy(ROW)
+        self.sensor["室溫"]["current"]["temp"] = 26.2
+        self.assertEqual(feedback.evaluate_now("空調")["status"], "stable")
+        self.sensor["室溫"]["last_polled_at"] = NOW - 700
+        self.assertEqual(feedback.evaluate_now("空調")["status"], "sensor_stale")
+        self.api.ac_set_all.assert_not_called()
+
+    def test_first_configuration_respects_recent_manual_command_before_opt_in(self):
+        from datetime import datetime, timedelta, timezone
+        self.rows[0].pop(feedback.STATE_COL)
+        self.rows[0]["最後更新時間"] = datetime.fromtimestamp(NOW - 30, timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        feedback.save_config("空調", CFG)
+        self.assertEqual(feedback.evaluate_now("空調")["status"], "settling")
+        self.api.ac_set_all.assert_not_called()
+
+    def test_save_failure_does_not_evaluate_and_unknown_send_is_not_retried(self):
+        from test_homebridge import OWNER
+        client = self.api_client()
+        original = self.sheets.update_device_state_fields.side_effect
+        self.sheets.update_device_state_fields.side_effect = TimeoutError()
+        response = client.post("/api/ac/feedback", headers={"X-API-Key": OWNER},
+            json={"device_name": "空調", "config": CFG, "evaluate_now": True})
+        self.assertEqual(response.status_code, 503)
+        self.api.ac_set_all.assert_not_called()
+        self.sheets.update_device_state_fields.side_effect = original
+        self.api.ac_set_all.return_value = {"success": False, "uncertain": True}
+        for _ in range(2):
+            self.assertEqual(feedback.evaluate_now("空調")["status"], "unconfirmed")
+        self.api.ac_set_all.assert_called_once()
 
 
 if __name__ == "__main__": unittest.main()

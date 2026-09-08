@@ -1,6 +1,6 @@
 """Dashboard configuration; restricted voice/bridge keys are excluded."""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool
 from auth import verify_api_key
 import ac_feedback
 
@@ -10,7 +10,8 @@ router = APIRouter(prefix="/api/ac/feedback", dependencies=[Depends(verify_api_k
 class FeedbackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device_name: str
-    config: dict
+    config: dict | None = None
+    evaluate_now: StrictBool = False
 
 
 @router.get("")
@@ -36,9 +37,16 @@ def get_feedback():
 @router.post("")
 def set_feedback(req: FeedbackRequest):
     try:
-        cfg = ac_feedback.save_config(req.device_name, req.config)
-        return {"config": cfg}
+        if req.config is None and not req.evaluate_now:
+            raise ValueError("請提供設定或要求立即評估")
+        with ac_feedback.CONTROL_LOCK:
+            result = {}
+            if req.config is not None:
+                result["config"] = ac_feedback.save_config(req.device_name, req.config)
+            if req.evaluate_now:
+                result["evaluation"] = ac_feedback.evaluate_now(req.device_name)
+            return result
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     except Exception:
-        raise HTTPException(503, "設定保存未確認，請重新讀取後再操作") from None
+        raise HTTPException(503, "保存或評估結果未確認，請重新讀取後再操作；不要自動重送") from None

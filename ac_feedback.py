@@ -8,6 +8,7 @@ send; unknown outcomes require a new successful manual command, never a retry.
 import json
 import math
 import time
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from threading import RLock
 
@@ -145,17 +146,23 @@ def save_config(name, values):
             if len(sensors) != 1 or not row.get("位置") or sensors[0].get("位置") != row.get("位置"):
                 raise ValueError("請選擇同位置且唯一啟用的感測器")
         ensure_columns(get_sheet("智能居家"), [CONFIG_COL, STATE_COL])
-        # Configuration writes never send IR. Preserve unknown-command block and
-        # the actual previous IR temperature when disabling or changing settings.
+        # Saving alone never sends IR. The caller may explicitly evaluate after
+        # persistence, without resetting the interval since the actual command.
         old = state_for(row)
-        state = {**old, "last_adjusted_at": time.time()}
+        state = dict(old)
         if device_status.snapshot(name).get(name, {}).get("stateUncertain"):
             state["blocked"] = True
         if "ir_temperature" not in state:
             state["ir_temperature"] = temperature(row.get("最後溫度"))
+            try:
+                last = datetime.fromisoformat(str(row.get("最後更新時間", "")))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone(timedelta(hours=8)))
+                state["last_adjusted_at"] = last.timestamp()
+            except (ValueError, TypeError, OverflowError):
+                pass
         _persist(row, {CONFIG_COL: json.dumps(cfg, ensure_ascii=False), STATE_COL: json.dumps(state)})
         _evaluated.pop(row["Device ID"], None)
-        _samples.pop(row["Device ID"], None)
         _runtime.pop(row["Device ID"], None)
         device_status.load_catalog(rows)
         return cfg
@@ -217,18 +224,28 @@ def manual_control(fn):
     return call
 
 
-def tick():
+def evaluate_now(name):
+    """An explicit Dashboard request, serialized with settings and AC commands."""
+    from sheets import get_sheet_records
+    with CONTROL_LOCK:
+        row = _unique(get_sheet_records("智能居家"), name)
+        tick(candidates=[row], immediate=True)
+        return {"status": _runtime.get(row["Device ID"], {}).get("status", "unconfirmed")}
+
+
+def tick(*, candidates=None, immediate=False):
     from sheets import get_sheet_records
     import device_status
     import sensor_state
     import switchbot_api
     # No extra Sheets request for homes that have not enabled this feature.
-    candidates = [r for r in device_status.catalog_rows() if r.get("類型") == "空調" and config_for(r)["enabled"]]
+    if candidates is None:
+        candidates = [r for r in device_status.catalog_rows() if r.get("類型") == "空調" and config_for(r)["enabled"]]
     for candidate in candidates:
         id = candidate.get("Device ID")
         cfg = config_for(candidate)
         now = time.time()
-        if now - _evaluated.get(id, 0) < cfg["interval_min"] * 60:
+        if not immediate and now - _evaluated.get(id, 0) < cfg["interval_min"] * 60:
             continue
         if not CONTROL_LOCK.acquire(blocking=False):
             continue
@@ -236,11 +253,15 @@ def tick():
             rows = get_sheet_records("智能居家")
             row = _unique(rows, candidate["名稱"])
             if row["Device ID"] != id:
+                _runtime[id] = {"status": "needs_manual", "evaluated_at": now}
                 continue
             cfg, state = config_for(row), state_for(row)
             # Restart grace: no burst from old measurements/timers after deployment.
-            state["last_adjusted_at"] = max(state.get("last_adjusted_at", _started), _started)
-            state["last_sample_at"] = max(state.get("last_sample_at", 0), _samples.get(id, 0))
+            if not immediate:
+                state["last_adjusted_at"] = max(state.get("last_adjusted_at", _started), _started)
+                state["last_sample_at"] = max(state.get("last_sample_at", 0), _samples.get(id, 0))
+            # Explicit evaluation can reconsider a previously skipped sample,
+            # but persisted command times/sample IDs and blocked state still apply.
             sensors = sensor_state.snapshot(include_history=False)
             status, target = decide(row, cfg, state, sensors, now)
             _evaluated[id] = now

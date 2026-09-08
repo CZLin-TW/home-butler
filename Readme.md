@@ -590,7 +590,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/devices/sensor | GET | 查詢感測器（device_name） |
 | /api/sensors/status | GET | 所有感測器當下讀值 + 24h history（溫度 / 濕度 / CO2），給 Dashboard chart 用 |
 | /api/ac/status | GET | 所有空調當下狀態 + 24h history snapshot，給 Dashboard chart 背景畫 AC on 區段用 |
-| /api/ac/feedback | GET / POST | owner Key 專用：讀取／保存空調室溫補償設定與分離的 IR 狀態；Dashboard 另需成員 Session，不接受 Homebridge／家電語音 Key；保存設定不發 IR |
+| /api/ac/feedback | GET / POST | owner Key 專用：读取／保存空調補償；`evaluate_now: true` 可要求立即評估，省略 config 則只評估現有設定。符合條件才發 IR。Dashboard 另需成員 Session，不接受 Homebridge／家電語音 Key |
 | /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state，並回傳後端計算的 `humidity_on_threshold` / `humidity_off_threshold`，供 Dashboard 共用同一組 hysteresis |
 | /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
 | /api/todos | GET | 依可信 `X-Dashboard-User` 過濾私人事項；無此 header 的 API-key 系統呼叫維持家庭級權限 |
