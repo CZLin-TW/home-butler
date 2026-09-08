@@ -55,7 +55,7 @@ LINE 仍依序處理訊息，同步 SDK 改在工作執行緒執行。照明的 
 | 待辦事項管理 | 新增、查詢、完成、修改（名稱/日期/時間/負責人/類型），支援私人/公開、指定負責人、指派通知 |
 | 週期性待辦 | 每天 / 每週幾 / 每月 N 號 / 每季 / 半年 / 每年（後三者以起始日期錨定、每 3/6/12 個月同一天，月底 clamp）/ 間隔 N 天的重複提醒，模板與實例分離。每條啟用規則**永遠只掛一筆「下一次要做的」普通待辦**（日期可能在未來）；完成或刪除那筆之後才補下一筆，漏掉沒清的過去格子會逐筆補上（間隔天則從完成當下起算 +N 天）。停止整個週期可再啟用，LINE 與 Dashboard 共用。受環境變數 RECURRING_TODO_ENABLED 控制生成（預設關） |
 | 外部行事曆整合 | Notion 行事曆整合，自動同步到待辦 Sheet 並標記屬性（唯讀/讀寫），支援 Sheet 自訂篩選條件 |
-| 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用 |
+| 空調控制 | 開關、溫度、模式、風速（SwitchBot Hub IR），記錄最後狀態供 Dashboard 顯示與下次相對調整使用；可選[外部室溫補償](docs/ac-temperature-feedback.md)，面板保留舒適目標，僅在已開機的冷／暖房模式微調 IR 設定 |
 | 除濕機控制 | 開關、模式、目標濕度。支援 Panasonic（Smart App API）與 LG（ThinQ Connect API），多台並存，依「智能居家」品牌欄分流 |
 | 除濕機自動模式 | 依綁定感測器的濕度條件式 ON/OFF：獨立的濕度門檻 + 可選立即或持續 T 時間 + hysteresis 防抖動；自動模式期間排他鎖住手動 / LINE / 排程控制，機器跑持續除濕（Panasonic 連續除濕 / LG 智慧除濕，機體目標壓低 10%）並由外部 sensor 完全掌控。Panasonic、LG 皆支援（品牌無關狀態機 + driver 分流） |
 | DIY IR 設備 | 電風扇等紅外線家電的開關與自訂按鈕 |
@@ -286,6 +286,7 @@ git push
 - Auth 欄：僅 Panasonic 除濕機需要填寫
 - 控制類型值：`command`（標準指令，例如 turnOn/turnOff、setAll）／`customize`（DIY IR 自訂按鈕）。對應 SwitchBot API 的 commandType；空白時 IR 開/關按鈕走 command、其他按鈕走 customize
 - 最後電源／最後溫度／最後模式／最後風速／最後更新時間：**僅空調設備使用**，由程式自動寫入，不需手動填。Dashboard 用來顯示最後狀態，LINE bot 用來支援「調低 1 度」這類相對指令。手動建 sheet 時這 5 欄保持空白即可
+- 空調溫度回饋設定／空調溫度回饋狀態：首次於 Dashboard 保存補償設定時自動補上 JSON 欄位；`最後溫度` 仍是舒適目標，實際 IR 下發溫度及待確認標記另存於回饋狀態。預設不啟用，詳見[補償說明](docs/ac-temperature-feedback.md)。
 - 溫度補償／濕度補償：**僅感應器設備使用**。填入數字（正或負），程式讀取 sensor 數值後自動加上此補償值。例如 Hub 2 貼牆導致濕度偏高 5%，填 `-5`。空白 = 不補償。濕度補償後會自動限制在 0~100% 範圍
 - 自動關機小時數：**僅空調設備使用**。填入整數，系統會在空調開啟後 N 小時自動加一筆 off 排程。例如填 `8` → 開空調後最晚 8 小時關。空白或 0 = 停用此功能。使用者每次對該空調發送「從關→開」的命令會重置計時；純調整溫度/模式/風速不會重置。如果使用者自己設了 off 排程，系統會清掉自動排程讓使用者的決定優先
 - SwitchBot Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
@@ -589,6 +590,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/devices/sensor | GET | 查詢感測器（device_name） |
 | /api/sensors/status | GET | 所有感測器當下讀值 + 24h history（溫度 / 濕度 / CO2），給 Dashboard chart 用 |
 | /api/ac/status | GET | 所有空調當下狀態 + 24h history snapshot，給 Dashboard chart 背景畫 AC on 區段用 |
+| /api/ac/feedback | GET / POST | owner Key 專用：讀取／保存空調室溫補償設定與分離的 IR 狀態；Dashboard 另需成員 Session，不接受 Homebridge／家電語音 Key；保存設定不發 IR |
 | /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state，並回傳後端計算的 `humidity_on_threshold` / `humidity_off_threshold`，供 Dashboard 共用同一組 hysteresis |
 | /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
 | /api/todos | GET | 依可信 `X-Dashboard-User` 過濾私人事項；無此 header 的 API-key 系統呼叫維持家庭級權限 |

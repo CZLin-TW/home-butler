@@ -99,7 +99,12 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
                 new_values.update(restore_on_off)
         # power == "off" 一般情況仍保留先前的溫度/模式/風速，方便下次重新開機時沿用
 
-        rec, applied = update_device_state_fields(device_id, new_values)
+        if hasattr(ctx, "_feedback_state"):
+            from ac_feedback import manual_saved_fields
+            new_values.update(manual_saved_fields(ctx, power, temperature))
+            rec, applied = update_device_state_fields(device_id, new_values, required_fields=new_values.keys())
+        else:
+            rec, applied = update_device_state_fields(device_id, new_values)
         # Keep this request's subsequent actions in sync only after persistence.
         # Match stable ID, since the fresh Sheet row may have moved or been renamed.
         for cached in ctx.get("智能居家"):
@@ -452,6 +457,11 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
         return CommandResult.success(f"✅ {device_name} 指令已送出")
     else:
         return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
+
+
+# All AC entry points share the feedback lock; no action parameter bypasses it.
+from ac_feedback import manual_control
+control_ac_result = manual_control(control_ac_result)
 
 
 def handle_control_ir(data, ctx):

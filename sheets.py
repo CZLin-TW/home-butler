@@ -243,7 +243,7 @@ def _get_spreadsheet():
         return _spreadsheet
 
 
-def update_device_state_fields(device_id, fields):
+def update_device_state_fields(device_id, fields, required_fields=()):
     """Fresh header + stable-ID lookup, then one RAW batch write; no write retry.
 
     Avoid worksheet metadata and stale request row indexes. Direct external edits
@@ -265,8 +265,11 @@ def update_device_state_fields(device_id, fields):
         raise ValueError("Missing or ambiguous device ID")
     row_number, row = matches[0]
     # Preserve legacy behavior: write only state columns already configured.
-    state_columns = {"最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間", "最後開機時間"}
+    state_columns = {"最後電源", "最後溫度", "最後模式", "最後風速", "最後更新時間", "最後開機時間",
+                     "空調溫度回饋設定", "空調溫度回饋狀態"}
     applied = {key: value for key, value in fields.items() if key in headers and key in state_columns}
+    if set(required_fields) - set(applied):
+        raise ValueError("Required device state columns are missing")
     if not applied:
         raise ValueError("No device state columns configured")
     updates = [{"range": "'智能居家'!" + rowcol_to_a1(row_number, headers.index(key) + 1),

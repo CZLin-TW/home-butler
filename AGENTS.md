@@ -10,6 +10,8 @@ Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` �
 
 # 版本管理
 
+空調室溫回饋（v1.42.0）見 [docs/ac-temperature-feedback.md](docs/ac-temperature-feedback.md)：`最後溫度` 永遠保留舒適目標，IR 補償另存 JSON。設定僅 Dashboard 成員／owner Key 可操作，預設關閉；背景工作不可開關機、重置計時或呼叫一般 handler。所有 AC 命令共用 `ac_feedback.CONTROL_LOCK`，發送前持久化待確認、未知不重送；手動成功保存才解除。修改時同步 controller／API／Dashboard demo 與文件，不把補償 IR 值投影成 HomeKit 目標。
+
 Homebridge 見 [homebridge/README.md](homebridge/README.md)。`homebridge_api.py` 獨立 router 與
 `HOMEBRIDGE_API_KEY`，只允許 JSON `HOMEBRIDGE_DEVICE_NAMES` 的唯一啟用 AC；不得把此 Key 加入
 owner／device-voice verifier。GET 僅既有快取，POST 重新驗證 Sheet，ctx 限定精確 ID 後才呼叫原 handler。

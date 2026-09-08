@@ -9,7 +9,7 @@ import math
 import secrets
 import time
 from collections import OrderedDict
-from threading import Lock
+from ac_feedback import CONTROL_LOCK
 from typing import Literal
 from uuid import UUID
 
@@ -33,7 +33,7 @@ def verify_homebridge_key(x_api_key: str = Header(default="")):
 
 
 router = APIRouter(prefix="/api/homebridge", dependencies=[Depends(verify_homebridge_key)])
-_command_lock = Lock()
+_command_lock = CONTROL_LOCK
 _results = OrderedDict()
 MODE = {"自動": "auto", "冷氣": "cool", "除濕": "dry", "送風": "fan", "暖氣": "heat"}
 FAN = {"自動": "auto", "低": "low", "中": "medium", "高": "high"}

@@ -94,6 +94,7 @@ class HomebridgeTests(unittest.TestCase):
         self.control.assert_not_called()
 
     def test_projection_no_sheet_io_and_state_updates(self):
+        self.status.load_catalog([{**ROW, "空調溫度回饋狀態": '{"ir_temperature":24}'}])
         response = self.get()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["devices"][0]["temperature"], 27)

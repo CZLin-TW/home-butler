@@ -130,6 +130,30 @@ class SheetsReuseTests(unittest.TestCase):
             write('target', {'最後電源': 'on'})
         ss.values_batch_update.assert_called_once()
 
+    def test_feedback_marker_missing_column_prevents_partial_state_write(self):
+        write, ss = self.writer([['Device ID', '最後電源'], ['target', 'off']])
+        fields = {'最後電源': 'on', '空調溫度回饋狀態': '{}'}
+        with self.assertRaises(ValueError):
+            write('target', fields, required_fields=fields.keys())
+        ss.values_batch_update.assert_not_called()
+
+    def test_manual_state_save_atomically_restores_comfort_and_ir_temperatures(self):
+        import json
+        grid = [['Device ID', '名稱', '最後電源', '最後溫度', '最後模式', '最後風速',
+                 '最後更新時間', '空調溫度回饋狀態'], ['target', '主臥', 'on', 26, '冷氣', '低', '', '{}']]
+        write, ss = self.writer(grid)
+        save, status = self.saver(write)
+        ctx = SimpleNamespace(get=lambda _: [{'Device ID': 'target'}],
+            _feedback_state={'blocked': True, 'ir_temperature': 24})
+        save(ctx, 'target', 'on', 27, 2, 2)
+        self.assertTrue(ctx._ac_state_saved)
+        writes = ss.values_batch_update.call_args.args[0]['data']
+        self.assertEqual(next(w for w in writes if w['range'].endswith('D2'))['values'], [[27]])
+        saved = json.loads(next(w for w in writes if w['range'].endswith('H2'))['values'][0][0])
+        self.assertEqual(saved['ir_temperature'], 27)
+        self.assertFalse(saved['blocked'])
+        self.assertEqual(status.update.call_args.kwargs['fields']['lastTemperature'], 27)
+
     def saver(self, write):
         status = SimpleNamespace(update=Mock())
         save = endpoint('handlers/device.py', '_save_ac_last_state', {

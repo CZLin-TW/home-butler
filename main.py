@@ -1,4 +1,5 @@
 from job_runner import jobs
+import ac_feedback
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -31,6 +32,8 @@ app.include_router(notify_router)
 # Web Dashboard REST API
 from web_api import router as web_api_router
 app.include_router(web_api_router)
+from ac_feedback_api import router as ac_feedback_router
+app.include_router(ac_feedback_router)
 
 # A separate router prevents the restricted key from entering the owner API.
 from device_voice_api import router as device_voice_router
@@ -240,6 +243,7 @@ def _on_startup():
         callback(ctx)
 
     jobs.add("sensors", 300, _sensor_tick)
+    jobs.add("ac-temperature-feedback", 60, ac_feedback.tick)
     jobs.add("lighting", 300, lighting_auto.tick)
     jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
     jobs.add("notion", 300, lambda: _with_context(notify.sync_external_events, ["家庭成員"]))
