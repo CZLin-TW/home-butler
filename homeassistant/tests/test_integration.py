@@ -1,5 +1,4 @@
 """Run with the real HA Core framework on Linux, with only backend I/O mocked."""
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -74,7 +73,10 @@ async def test_config_flow_setup_options_and_unload(hass):
     assert entry.data["sources"][0]["id"] == sensor.id
     # Exercise the real setup/unload lifecycle separately from flow auto-setup.
     from custom_components.home_butler import async_setup_entry, async_unload_entry
-    with patch("custom_components.home_butler.validate_connection", new=AsyncMock()), +         patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock(side_effect=lambda: None)):
+    with (
+        patch("custom_components.home_butler.validate_connection", new=AsyncMock()),
+        patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock()),
+    ):
         assert await async_setup_entry(hass, entry)
         assert await async_unload_entry(hass, entry)
 
@@ -85,6 +87,19 @@ async def test_auth_and_connection_failure_are_distinct(hass):
             result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER},
                 data={"url": "https://example.invalid", "api_key": "x" * 40, "export_entities": []})
         assert result["errors"]["base"] == expected
+        hass.config_entries.flow.async_abort(result["flow_id"])
     for url in ("http://example.com", "https://user:key@example.com", "https://example.com/path"):
         with pytest.raises(ValueError):
             normalize_url(url)
+
+
+async def test_options_can_stop_sharing(hass):
+    sensor = add_sensor(hass)
+    entry = MockConfigEntry(domain=DOMAIN, data={"url": "https://example.invalid",
+        "api_key": "x" * 40, "sources": select_sources(hass, [sensor.entity_id])})
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == "form"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"export_entities": []})
+    assert result["type"] == "create_entry"
+    assert entry.options["sources"] == []
