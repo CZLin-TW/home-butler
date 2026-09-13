@@ -39,7 +39,7 @@ async def test_live_sensor_and_native_changes_publish_without_commands(hass):
     initial = hass.states.get(entity.entity_id)
     assert initial.attributes["current_temperature"] == 26.7
     assert initial.attributes["temperature"] == 28
-    with patch.object(hass.services, "async_call", new=AsyncMock()) as calls:
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
         hass.states.async_set(sensor.entity_id, "0", {"device_class": "temperature", "unit_of_measurement": "°C"})
         state = hass.states.get(ac.entity_id)
         hass.states.async_set(ac.entity_id, "heat", {**state.attributes, "temperature": 27})
@@ -68,7 +68,7 @@ async def test_unavailable_nan_wrong_units_and_registry_removal_never_display_21
 
 async def test_commands_only_relay_to_native_id_without_optimistic_state_or_retry(hass):
     ac, sensor, entry, entity = await setup_pair(hass)
-    with patch.object(hass.services, "async_call", new=AsyncMock()) as calls:
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
         await entity.async_set_temperature(temperature=26.5, hvac_mode="heat")
         assert calls.call_args.args == ("climate", "set_temperature", {"entity_id": ac.entity_id, "temperature": 27, "hvac_mode": "heat"})
         assert entity.target_temperature == 28 and entity.hvac_mode == "cool"
@@ -99,7 +99,7 @@ async def test_sensor_options_preserve_identity_and_do_not_control_ac(hass):
     old_id = entity.entity_id
     new = er.async_get(hass).async_get_or_create("sensor", "test", "second_room_sensor")
     hass.states.async_set(new.entity_id, "25.3", {"device_class": "temperature", "unit_of_measurement": "°C"})
-    with patch.object(hass.services, "async_call", new=AsyncMock()) as calls:
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
         flow = await hass.config_entries.options.async_init(entry.entry_id)
         result = await hass.config_entries.options.async_configure(flow["flow_id"], {"temperature_sensor": new.entity_id})
         assert result["type"] == "create_entry"
@@ -116,7 +116,7 @@ async def test_registry_rename_follows_same_source_and_never_a_replacement(hass)
     registry.async_update_entity(ac.entity_id, new_entity_id="climate.renamed_native")
     hass.states.async_set("climate.renamed_native", "cool", dict(old.attributes))
     await hass.async_block_till_done()
-    with patch.object(hass.services, "async_call", new=AsyncMock()) as calls:
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
         await entity.async_turn_off()
         assert calls.call_args.args[2]["entity_id"] == "climate.renamed_native"
         registry.async_remove("climate.renamed_native")
