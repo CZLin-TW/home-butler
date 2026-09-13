@@ -3,7 +3,12 @@
 2026-09-14 v1.50.0：Hub 2 Webhook 提示經既有 HA WSS，喚醒原生 API 驗證讀取。
 本機 205 項後端測試通過，涵蓋真實 WSS 選取／斷線／重連、不轉送外來光照值、格式／重播拒絕與突發通知合併。
 HA 框架測試新增正式 coordinator 讀取更新、外來值不可覆蓋、連續通知最後一筆不遺失與卸載清理。
-HA CI 與實機驗證待完成；未建立夜燈自動化。
+[72bf293 CI](https://github.com/CZLin-TW/home-butler/actions/runs/34769253232) 全部通過：28 項 HA 框架測試、205 項後端測試及 Homebridge 測試。
+家庭 HA 於 00:42 重啟完成，安裝同 SHA 的 home_butler 1.3.0 與 switchbot_hub_light 1.1.0。
+Render UI 已確認該 SHA Live，既有 Webhook 註冊成功，HA WSS 已重連。
+主臥光照實體在 00:43:49 收到真實推送，00:43:50 更新請求完成，API 光照從 11 降到 10；
+未用模擬 webhook 或自行開關燈驗收。使用者隨後實際關閉主臥一般照明，確認 HA 光照「有反應」；未量測關燈到更新的精確秒數。
+Dashboard 1.50.0 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34769397248) 通過。未建立夜燈自動化。
 
 2026-09-13 v1.49.0：新增 switchbot_hub_light 1.0.0，從原生 Cloud coordinator 讀 Hub 2 lightLevel。
 新增 HA 框架測試涵蓋光照單獨更新、缺失／非法值未知、連線失敗、native reload／來源改名／移除、
