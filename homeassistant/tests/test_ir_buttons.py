@@ -19,7 +19,8 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 async def setup_fan(hass):
     native = MockConfigEntry(domain="switchbot_cloud", title="SwitchBot", data={})
     native.add_to_hass(hass)
-    native.async_set_state(hass, ConfigEntryState.LOADED)
+    with patch("homeassistant.components.switchbot_cloud.async_setup_entry", return_value=True):
+        assert await hass.config_entries.async_setup(native.entry_id)
     remote = Remote(deviceId="remote123", deviceName="Fan", remoteType="DIY Fan", hubDeviceId="hub123")
     api = SimpleNamespace(send_command=AsyncMock())
     native.runtime_data = SimpleNamespace(api=api, devices=SimpleNamespace(switches=[
