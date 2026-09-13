@@ -23,7 +23,7 @@ async def setup_hub(hass):
     native = MockConfigEntry(domain="switchbot_cloud", data={}, state=ConfigEntryState.LOADED)
     native.add_to_hass(hass)
     hass.config.components.add("switchbot_cloud")
-    coordinator = DataUpdateCoordinator(hass, getLogger(__name__), name="hub", update_method=AsyncMock())
+    coordinator = DataUpdateCoordinator(hass, getLogger(__name__), name="hub", config_entry=native, update_method=AsyncMock())
     coordinator.async_set_updated_data({"temperature": 28, "lightLevel": 8})
     native.runtime_data = SimpleNamespace(devices=SimpleNamespace(sensors=[
         (SimpleNamespace(device_type="Hub 2", device_id="hub123"), coordinator)]))
@@ -80,7 +80,7 @@ async def test_reload_rebinds_coordinator_rename_and_removal(hass):
     native.mock_state(hass, ConfigEntryState.NOT_LOADED)
     await hass.async_block_till_done()
     assert hass.states.get(own.entity_id).state == "unavailable"
-    replacement = DataUpdateCoordinator(hass, getLogger(__name__), name="replacement")
+    replacement = DataUpdateCoordinator(hass, getLogger(__name__), name="replacement", config_entry=native)
     replacement.async_set_updated_data({"lightLevel": 17})
     native.runtime_data.devices.sensors[0] = (native.runtime_data.devices.sensors[0][0], replacement)
     native.mock_state(hass, ConfigEntryState.LOADED)
