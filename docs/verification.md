@@ -6,8 +6,12 @@
 [55a2659 CI](https://github.com/CZLin-TW/home-butler/actions/runs/34749437363) 的 HA、後端及 Homebridge 工作全部通過。
 Render 已部署 55a2659；家庭 HA 已安裝整合 1.1.0、重啟並保存三台原生空調，保留兩個 FP2 來源。
 既有 HA HomeKit Bridge 已加入 Climate 類群、三台均選加熱冷卻器，保留原 Sensor／Binary Sensor 類群及配對。
-已確認三台原生 SwitchBot Cloud 空調可見及模式清單；尚未設定 HOME_ASSISTANT_AC_NAMES，
-因此後端控制权尚未切換。使用者的 HA 實體命令確認、新 Apple Home 配件驗收與旧 Homebridge 清理仍待完成。
+使用者已確認 HA 控制實際正常。2026-09-13 晚間已設定 HOME_ASSISTANT_AC_NAMES 為三台空調，
+Render 494d01e 的設定部署成功，後端控制權已切換。正式 Dashboard 三台均顯示「由 HA 管理」，
+客廳冷氣 28°C／自動風速與 HA 一致（舊 Sheet 為低風速）；回饋與舊排程編輯已退出。
+從正式 Dashboard 對客廳送出一次相同的冷氣 28°C／自動設定，完成 HA 確認並解除送出狀態，未自動重送。
+次臥仍回報初次匯入的送風 21°C，不能推論為實體狀態；由使用者在 HA 設定所需狀態。
+新 Apple Home 配件實機驗收與舊 Homebridge 清理仍待完成，尚未刪除原配件。
 FP2 前階段已實機確認觀測同步、停用顯示未知及重新啟用恢復。
 
 2026-09-13 HA 第一階段（v1.45.0，已推送 main）：本機 186 項後端測試通過，
