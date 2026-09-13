@@ -271,6 +271,11 @@ def get_current_todo(ctx):
 def _format_ac_last_state(r):
     """空調最後一次透過 Home Butler 送出的指令。讓 Claude 在收到「調低1度」這類
     相對指令時能據此推算絕對溫度。若從未操作過則回傳空字串。"""
+    import ha_climate
+    if ha_climate.managed(r.get("名稱", "")):
+        r = ha_climate.overlay_row(r)
+        if not r.get("最後電源"):
+            return "，HA 狀態未知，不可據舊設定推算相對溫度"
     power = str(r.get("最後電源", "")).strip()
     if not power:
         return ""

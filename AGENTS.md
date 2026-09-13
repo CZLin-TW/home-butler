@@ -1,10 +1,15 @@
 # 接手入口
 
 HA 架構以 [docs/local-hub-architecture.md](docs/local-hub-architecture.md) 為準。
-第一階段 `home_assistant_api.py` 與 `homeassistant/` 只處理選定存在／亮度觀測，
-不可加入 owner key 相容、HA service call、未授權下行命令或 HB→HA→HB 循環。
-斷線／90 秒過期必須未知；registry ID 與實體可用性保留，重連只讀新快照。
-HA Core 框架測試使用獨立 Linux CI，不以 backend fake tests 代替實際 HA 載入。
+v1.46.0：`HOME_ASSISTANT_AC_NAMES` 明確決定逐台控制權；設定錯誤或 HA 失聯不可 fallback 到直接 IR。
+`ha_climate.py` 在原 handler／回饋 wrapper 前分流；HA 管理空調不寫 Sheet last-state，
+不跑補償、防黴、自動关機與 HB 排程。使用者已取消半度與回饋，溫度為整數。
+原生 SwitchBot Cloud climate 是唯一控制實體，禁止將 Homebridge 匯入實體再導回 HB。
+HA `climates.py` 僅接受本機明確選取的 registry ID + 穩定名稱、固定 climate 動作與參數。
+命令有效期 15 秒、無離線佇列；預驗證失敗與送出後未知分開，未知不自動重送。
+狀態由 HA 快照投影到 Dashboard／prompt／Homebridge；IR 仍無實體回讀。
+遷移後 Apple Home 應使用 HA HomeKit Bridge 的原生 climate；舊 Homebridge 不列入相容驗收（HA 關機時無模式，舊插件可能顯示無回應）。先加入新配件並驗收，再移除舊配件。
+FP2 觀測仍為斷線／90 秒過期未知；HA key 不可當 owner key，Framework 測試使用 Linux CI。
 
 先讀 [README](Readme.md)、[系統導覽](docs/system-overview.md) 與 [驗證紀錄](docs/verification.md)。下列歷史事故用來解釋設計；目前背景週期以 `main.py` 的 `jobs.add` 為準。更新行為時同步修正舊段落、API 表格與註解，避免只追加版本章節。
 

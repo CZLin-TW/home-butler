@@ -66,6 +66,9 @@ def handle_add_schedule(data, user_name, ctx):
         else:
             return "❌ 請指定設備名稱"
 
+    from ha_climate import managed
+    if target_action == "control_ac" and managed(device_name):
+        return "❌ 空調已交由 HA 管理，請在 HA 設定空調排程"
     new_row = {
         "設備名稱": device_name,
         "動作": target_action,
@@ -136,6 +139,9 @@ def handle_modify_schedule(data, user_name, ctx):
         return "❌ 找不到符合條件的排程"
 
     old_action = target_row.get("動作", "")
+    from ha_climate import managed
+    if ((new_action or old_action) == "control_ac" and managed(new_device or device_name)):
+        return "❌ 空調已交由 HA 管理，請在 HA 設定空調排程"
 
     # 寫入前即時定位列號，不信任快取的 target_idx+2（背景 tick 增刪排程列會位移）。
     live = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, False)

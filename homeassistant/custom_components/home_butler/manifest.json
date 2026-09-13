@@ -1,7 +1,7 @@
 {
   "domain": "home_butler",
   "name": "Home Butler",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "codeowners": ["@CZLin-TW"],
   "config_flow": true,
   "documentation": "https://github.com/CZLin-TW/home-butler/blob/main/homeassistant/README.md",

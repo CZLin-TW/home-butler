@@ -1,11 +1,20 @@
 # 家庭 AI 管家系統
 
-## Home Assistant 家庭中樞（v1.45.0，第一階段）
+## HA 空調遷移（v1.46.0／整合 1.1.0）
+
+使用者決定取消半度舒適目標與回饋補償；已遷移空調採整數溫度，
+防黴、HB 自動關機與 HB 空調排程不再執行，之後按需要在 HA 重建。
+控制路徑為 Dashboard／LINE → HB → 主動連接的 HA → 原生 SwitchBot Cloud → IR。
+HA 的本地自動化直接操作原生 climate；SwitchBot Cloud 本身仍需要網際網路。
+IR 狀態是 HA 整合記錄的最後設定，不是實體回讀。Theater、Hue、除濕機未隨本次變更移轉。
+安裝與逐台切換見 [HA 遷移步驟](homeassistant/README.md#空調遷移)。
+
+## Home Assistant 家庭中樞（v1.45.0，感測同步）
 
 FP2 透過 HA 的 HomeKit Device 本地整合，再經 HomeKit Bridge 回到 Apple Home。
 新增 Home Butler 自訂整合，讓 HA 主動向 Render 同步選定的存在／亮度感測器，
 Dashboard 裝置頁顯示空間感測；失聯／過時顯示未知。此路徑不需 Aqara 雲端開發者帳號。
-現有家電控制、空調回饋與 Theater Agent 維持目前路徑，尚未遷入 HA。
+已遷移空調以 HA 為控制與狀態來源；其餘設備維持既有路徑。
 詳見 [整體架構與階段](docs/local-hub-architecture.md)、[HA 安裝與驗收](homeassistant/README.md)。
 
 > 💡 **配套網頁端**：[Smart Home Dashboard](https://github.com/CZLin-TW/Dashboard) — Next.js + TypeScript 視覺化操作介面，跟本 repo 的 LINE Bot 互補（自然語言 vs 按鈕表格）。Dashboard 依賴本後端；LINE Bot 可獨立使用。劇院設備另由私人 theater-agent repo 執行。

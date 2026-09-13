@@ -87,8 +87,14 @@ def snapshot(device_name: str = "") -> dict:
     with _lock:
         if device_name:
             status = _statuses.get(device_name)
-            return {device_name: dict(status)} if status is not None else {}
-        return {name: dict(status) for name, status in _statuses.items()}
+            result = {device_name: dict(status)} if status is not None else {}
+        else:
+            result = {name: dict(status) for name, status in _statuses.items()}
+    import ha_climate
+    for name, state in result.items():
+        if state.get("type") == "空調" and ha_climate.managed(name):
+            state.update(ha_climate.status(name))
+    return result
 
 
 def try_begin_refresh(min_interval_s: float = 45.0) -> bool:

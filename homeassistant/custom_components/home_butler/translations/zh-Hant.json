@@ -31,15 +31,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "同步感測器",
-        "description": "只同步勾選的感測器。清空清單可停止同步讀值。",
+        "title": "同步感測器與空調",
+        "description": "勾選空調即允許 HomeButler 控制該原生 SwitchBot Cloud 實體。先將 HA 空調名稱設為 Sheet 中的設備名稱，再勾選。Render 也須設定 HOME_ASSISTANT_AC_NAMES；之後改名不會變更既有對應。",
         "data": {
-          "export_entities": "要同步的感測器"
+          "export_entities": "要同步的感測器",
+          "climate_entities": "交由 HA 管理、允許管家操作的空調"
         }
       }
     },
     "error": {
-      "invalid_input": "請選取已註冊的存在或 lx 亮度感測器，最多 128 個。"
+      "invalid_input": "請選取有效感測器或名稱唯一的 SwitchBot Cloud 空調，並使用攝氏溫度。"
     }
   }
 }

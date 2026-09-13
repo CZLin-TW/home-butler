@@ -1,4 +1,4 @@
-"""Phase 1 exposes observations only; adding commands requires new authorization."""
+"""Observation protocol with opt-in climate_control capability."""
 DOMAIN = "home_butler"
 CONF_URL = "url"
 CONF_KEY = "api_key"

@@ -202,6 +202,8 @@ def _on_startup():
                     if "error" not in result:
                         sensor_state.record_history(name)
                 elif dtype == "空調":
+                    from ha_climate import overlay_row
+                    d = overlay_row(d)
                     power = str(d.get("最後電源", "")).strip()
                     if not power:
                         continue  # 從未操作過、skip 不 record

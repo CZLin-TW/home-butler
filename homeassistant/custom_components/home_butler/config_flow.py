@@ -9,6 +9,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
 from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
+from .climates import select_climates
 
 
 def export_selector():
@@ -80,10 +81,14 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             try:
                 sources = select_sources(self.hass, user_input.get(CONF_EXPORT, []))
-                return self.async_create_entry(title="", data={CONF_SOURCES: sources})
+                climates = select_climates(self.hass, user_input.get("climate_entities", []), entry.options.get("climates", []))
+                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates})
             except ValueError:
                 errors["base"] = "invalid_input"
         sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
             vol.Optional(CONF_EXPORT, default=current_entity_ids(self.hass, sources)): export_selector(),
+            vol.Optional("climate_entities", default=current_entity_ids(self.hass, entry.options.get("climates", []))):
+                selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
+                    {"domain": "climate", "integration": "switchbot_cloud"}])),
         }), errors=errors)

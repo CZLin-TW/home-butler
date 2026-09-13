@@ -31,15 +31,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Shared sensors",
-        "description": "Only selected sensors are sent. Clear the list to stop sharing observations.",
+        "title": "Shared sensors and ACs",
+        "description": "Selected native SwitchBot Cloud ACs may be controlled by HomeButler. Before selecting, name each HA AC exactly as its Sheet device. Also configure HOME_ASSISTANT_AC_NAMES on Render. Later renames preserve the mapping.",
         "data": {
-          "export_entities": "Sensors to share"
+          "export_entities": "Sensors to share",
+          "climate_entities": "Native ACs HomeButler may control"
         }
       }
     },
     "error": {
-      "invalid_input": "Select registered occupancy / lux sensors (up to 128)."
+      "invalid_input": "Select valid sensors or uniquely named native SwitchBot Cloud ACs; Celsius is required."
     }
   }
 }

@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import patch
 
 import aiohttp
+import pytest
 
 from custom_components.home_butler.transport import OutboundLink
 
@@ -55,3 +56,39 @@ async def test_reconnect_reads_current_snapshot_and_resets_sequence():
     assert [frame["sequence"] for frame in snapshots] == [1, 1]
     assert [frame["observations"][0]["value"] for frame in snapshots] == [True, False]
     assert link.connected is False
+
+
+async def test_climate_link_receives_command_between_snapshots_and_cancels_on_disconnect():
+    from unittest.mock import AsyncMock
+    from custom_components.home_butler.transport import LinkError
+    incoming = asyncio.Queue()
+    sent = asyncio.Queue()
+    class Socket:
+        async def send_json(self, frame):
+            await sent.put(frame)
+        async def receive_json(self):
+            frame = await incoming.get()
+            if isinstance(frame, Exception):
+                raise frame
+            return frame
+    commands = AsyncMock()
+    commands.execute.return_value = {"type": "climate_result", "status": "success"}
+    link = OutboundLink(None, "https://example.invalid", "x" * 40, lambda: [], lambda: [{"name": "AC"}], commands)
+    task = asyncio.create_task(link._serve_climates(Socket()))
+    try:
+        first = await asyncio.wait_for(sent.get(), 2)
+        assert first["type"] == "snapshot" and first["climates"] == [{"name": "AC"}]
+        await incoming.put({"type": "snapshot_ack", "sequence": 1, "accepted": True})
+        frame = {"type": "climate_command", "request_id": "a" * 32}
+        await incoming.put(frame)
+        result = await asyncio.wait_for(sent.get(), 2)
+        assert result["type"] == "climate_result"
+        commands.execute.assert_awaited_once_with(frame)
+        second = await asyncio.wait_for(sent.get(), 2)
+        assert second["sequence"] == 2
+        await incoming.put(LinkError("Disconnected"))
+        with pytest.raises(LinkError):
+            await asyncio.wait_for(task, 2)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

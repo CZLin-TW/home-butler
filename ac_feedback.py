@@ -51,6 +51,9 @@ def valid_config(value):
 
 
 def config_for(row):
+    from ha_climate import managed
+    if managed(row.get("名稱", "")):
+        return dict(DEFAULTS)
     try:
         return valid_config(decode(row.get(CONFIG_COL)))
     except ValueError:
@@ -135,6 +138,9 @@ def _unique(rows, name):
 
 
 def save_config(name, values):
+    from ha_climate import managed
+    if managed(name):
+        raise ValueError("空調已交由 HA 管理，已取消溫度回饋功能")
     from ac_temperature import ir_temperature
     from sheets import get_sheet_records, get_sheet, ensure_columns
     import device_status
@@ -191,6 +197,12 @@ def manual_control(fn):
     """Wrap every legacy caller without accepting an internal bypass parameter."""
     @wraps(fn)
     def call(data, ctx, *args, **kwargs):
+        import ha_climate
+        if ha_climate.managed(data.get("device_name", "")):
+            if kwargs.get("from_auto_schedule"):
+                from command_result import CommandResult
+                return CommandResult.failed("空調已交由 HA 管理，舊自動關機不再執行")
+            return ha_climate.control(data, ctx)
         from sheets import get_sheet_records, get_device_id_by_name
         from command_result import CommandResult
         import device_status
@@ -201,6 +213,10 @@ def manual_control(fn):
             if row is None:
                 acs = [r for r in rows if r.get("類型") == "空調" and r.get("狀態") == "啟用"]
                 row = acs[0] if len(acs) == 1 else None
+            if row and ha_climate.managed(row.get("名稱", "")):
+                if kwargs.get("from_auto_schedule"):
+                    return CommandResult.failed("空調已交由 HA 管理，舊自動關機不再執行")
+                return ha_climate.control({**data, "device_name": row["名稱"]}, ctx)
             # Unconfigured installations retain their existing I/O cost.
             configured = row and (row.get(CONFIG_COL) or any(
                 r.get("Device ID") == row.get("Device ID") and r.get(CONFIG_COL)
@@ -253,6 +269,9 @@ def tick(*, candidates=None, immediate=False):
     if candidates is None:
         candidates = [r for r in device_status.catalog_rows() if r.get("類型") == "空調" and config_for(r)["enabled"]]
     for candidate in candidates:
+        from ha_climate import managed
+        if managed(candidate.get("名稱", "")):
+            continue
         id = candidate.get("Device ID")
         cfg = config_for(candidate)
         now = time.time()

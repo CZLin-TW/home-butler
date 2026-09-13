@@ -178,6 +178,9 @@ def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
     transitioned_to_on=True 時視為開機事件（清掉舊 auto、加新 auto）
     transitioned_to_on=False 時視為調整/重新評估（有舊 auto 就保留、沒舊 auto 就按需補）
     """
+    from ha_climate import managed
+    if managed(device_name):
+        return
     try:
         devices = ctx.get("智能居家")
         device_row = next(
@@ -382,6 +385,13 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
             return CommandResult.failed(f"❌ 有多台空調（{names}），請指定要控制哪一台")
         else:
             return CommandResult.failed("❌ 找不到空調設備，請先在「智能居家」分頁設定")
+
+    # Guard the legacy single-device resolution as well as exact-name calls.
+    import ha_climate
+    if ha_climate.managed(device_name):
+        if from_auto_schedule:
+            return CommandResult.failed("空調已交由 HA 管理，舊自動關機不再執行")
+        return ha_climate.control({**data, "device_name": device_name}, ctx)
 
     # 命令前的狀態快照：判斷「關→開」transition（auto-schedule timer 是否重置）+ 防黴判斷
     prior_row = next(

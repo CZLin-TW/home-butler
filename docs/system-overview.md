@@ -2,7 +2,7 @@
 
 2026-09-13 起依 [家庭中樞架構](local-hub-architecture.md) 分階段移轉：
 HA 承接本地設備／即時自動化與 HomeKit，HB 保留家庭應用與 AI。
-第一階段只加入 HA 選定存在／亮度的向外同步與 Dashboard 顯示；設備控制仍以以下既有路徑為準。
+空調遷移由 HOME_ASSISTANT_AC_NAMES 逐台啟用：Dashboard／LINE → HB → HA → SwitchBot Cloud；Apple Home → HA HomeKit Bridge → 原生 climate。未遷移設備保留下列既有路徑。HA 空調使用整數目標、不執行 HB 回饋、防黴、自動關機或空調排程。
 
 本頁記錄目前的責任與接手入口；設備位址、配對資料與憑證以各部署端設定為準，不複製到公開文件。
 
@@ -27,7 +27,7 @@ Apple 家庭／Siri → 家中 Homebridge ──→ home-butler（獨立設備�
 
 Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
 
-Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API；既有設備 handler 的防黴及自動關機仍運作。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
+Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API；未遷移空調的防黴及自動關機仍運作，HA 管理空調不執行。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
 
 ## 週期與事件的責任
 

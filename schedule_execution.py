@@ -52,6 +52,11 @@ def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, an
             if match is None: continue
             row_number, row = match
             device_name = row.get("設備名稱", "")
+            from ha_climate import managed
+            if row.get("動作") == "control_ac" and managed(device_name):
+                update_fields(sheet, row_number, {"狀態": "已取消", RESULT_COLUMN: "空調已移轉 HA；舊排程不再執行，請在 HA 重新設定"})
+                processed.add(device_name)
+                continue
             if (now - trigger).total_seconds() > 7200 and row.get("來源") != antimold_source:
                 update_fields(sheet, row_number, {"狀態": "已過期"})
                 processed.add(device_name)

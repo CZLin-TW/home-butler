@@ -1,4 +1,4 @@
-"""Outbound-only link; no HA service calls or replayable command queue."""
+"""HA-initiated link with selected AC commands; no offline command replay."""
 import asyncio
 import json
 import logging
@@ -44,13 +44,74 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
         self.changed = asyncio.Event()
         self.closed = False
         self.connected = False
+        self.climates, self.commands = climates, commands
+
+    async def _serve_climates(self, ws):
+        """Receive commands while waiting for the next sensor heartbeat."""
+        acknowledgements = asyncio.Queue(maxsize=2)
+        command_task = None
+
+        async def execute(frame):
+            response = await self.commands.execute(frame)
+            await ws.send_json(response)
+            self.notify()
+
+        async def receive():
+            nonlocal command_task
+            while not self.closed:
+                frame = await ws.receive_json()
+                if not isinstance(frame, dict):
+                    raise LinkError("Invalid frame")
+                if frame.get("type") == "snapshot_ack":
+                    if acknowledgements.full():
+                        raise LinkError("Unexpected acknowledgement")
+                    acknowledgements.put_nowait(frame)
+                elif frame.get("type") == "climate_command":
+                    if command_task and not command_task.done():
+                        raise LinkError("Concurrent command rejected")
+                    if command_task:
+                        command_task.result()
+                    command_task = asyncio.create_task(execute(frame))
+                else:
+                    raise LinkError("Unsupported frame")
+
+        async def send():
+            sequence = 0
+            self.changed.set()
+            while not self.closed:
+                try:
+                    await asyncio.wait_for(self.changed.wait(), HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    pass
+                self.changed.clear()
+                await asyncio.sleep(0.2)
+                sequence += 1
+                frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot(),
+                         "climates": self.climates()}
+                if len(json.dumps(frame).encode("utf-8")) > 131072:
+                    raise LinkError("Snapshot too large")
+                await ws.send_json(frame)
+                ack = await asyncio.wait_for(acknowledgements.get(), 20)
+                if ack.get("sequence") != sequence or ack.get("accepted") is not True:
+                    raise LinkError("Invalid acknowledgement")
+        tasks = [asyncio.create_task(receive()), asyncio.create_task(send())]
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            if command_task:
+                tasks.append(command_task)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def notify(self):
         self.changed.set()
@@ -62,7 +123,8 @@ class OutboundLink:
             try:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
-                    await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key})
+                    await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
+                                        "climate_control": self.commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
@@ -70,6 +132,11 @@ class OutboundLink:
                     if failed:
                         _LOGGER.info("HomeButler local link recovered")
                     failed = False
+                    if self.commands is not None:
+                        if "climate_control" not in hello.get("capabilities", []):
+                            raise LinkError("Backend upgrade required")
+                        await self._serve_climates(ws)
+                        continue
                     sequence = 0
                     self.changed.set()  # Fresh full snapshot on every new session.
                     while not self.closed:

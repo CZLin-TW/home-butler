@@ -120,6 +120,12 @@ def _visible_todos(ctx, request):
 
 # ── 首頁彙整 ──
 
+def _ha_ac_fields(row):
+    import ha_climate
+    if row.get("類型") == "空調" and ha_climate.managed(row.get("名稱", "")):
+        return ha_climate.status(row["名稱"])
+    return {}
+
 @router.get("/dashboard")
 def api_dashboard(include_weather: bool = True, request: Request = None):
     """首頁彙整 API：一次回傳天氣、裝置、待辦、庫存（減少往返次數）
@@ -153,6 +159,7 @@ def api_dashboard(include_weather: bool = True, request: Request = None):
             "lastMode": d.get("最後模式", ""),
             "lastFanSpeed": d.get("最後風速", ""),
             "lastUpdatedAt": d.get("最後更新時間", ""),
+            **_ha_ac_fields(d),
         }
         for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
     ]
@@ -267,6 +274,7 @@ def api_get_devices():
             "lastMode": d.get("最後模式", ""),
             "lastFanSpeed": d.get("最後風速", ""),
             "lastUpdatedAt": d.get("最後更新時間", ""),
+            **_ha_ac_fields(d),
         }
         for d in ctx.get("智能居家") if d.get("狀態") == "啟用"
     ]
@@ -306,7 +314,11 @@ class AcControlRequest(BaseModel):
 @router.post("/devices/control/ac")
 def api_control_ac(req: AcControlRequest):
     ctx = RequestContext()
-    ctx.load()
+    import ha_climate
+    if ha_climate.managed(req.device_name):
+        ctx.load(["智能居家"])
+    else:
+        ctx.load()
     data = {"device_name": req.device_name, "power": req.power}
     if req.temperature is not None: data["temperature"] = req.temperature
     if req.mode is not None: data["mode"] = req.mode

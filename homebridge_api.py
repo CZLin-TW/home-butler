@@ -81,6 +81,9 @@ def number(value, minimum, maximum):
 
 def project(row, cached=None):
     cached = cached or {}
+    import ha_climate
+    if ha_climate.managed(row.get("名稱", "")):
+        cached = ha_climate.status(row["名稱"])
     def value(cache_key, sheet_key):
         return cached.get(cache_key, row.get(sheet_key, ""))
     power = value("lastPower", "最後電源")
@@ -92,7 +95,7 @@ def project(row, cached=None):
         "fan_speed": FAN.get(value("lastFanSpeed", "最後風速")),
         "updated_at": value("lastUpdatedAt", "最後更新時間"),
         "uncertain": bool(cached.get("stateUncertain", False)),
-        "state_source": "last_command",
+        "state_source": cached.get("stateSource", "last_command"),
     }
 
 
@@ -133,6 +136,16 @@ def merge_command(req, row):
     conditional = patch.pop("off_if_mode", None)
     if conditional is not None and patch != {"power": "off"}:
         raise HTTPException(422, "Mode condition is only valid with power off")
+    import ha_climate
+    if ha_climate.managed(row.get("名稱", "")):
+        current = project(row)
+        if current["uncertain"]:
+            raise HTTPException(409, "HA AC state is unavailable")
+        if conditional is not None and (current["power"] == "off" or current["mode"] not in conditional):
+            return None
+        if patch.get("power") == "off" and patch != {"power": "off"}:
+            raise HTTPException(422, "Power off cannot be combined with other settings")
+        return {"device_name": row["名稱"], **patch}
     if patch.get("power") == "off":
         if len(patch) != 1:
             raise HTTPException(422, "Power off cannot be combined with other settings")

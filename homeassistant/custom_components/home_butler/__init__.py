@@ -1,4 +1,4 @@
-"""Phase 1 connector. It does not control devices or change FP2 pairing."""
+"""Selected observations and opt-in native AC control; FP2 pairing is unchanged."""
 import asyncio
 
 from homeassistant.core import callback
@@ -8,6 +8,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
 from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
+from .climates import ClimateCommands, snapshot as climate_snapshot
 
 
 async def async_setup_entry(hass, entry):
@@ -19,7 +20,10 @@ async def async_setup_entry(hass, entry):
     except LinkError as err:
         raise ConfigEntryNotReady(str(err)) from None
     sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
-    link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources))
+    climates = entry.options.get("climates", [])
+    link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
+                        climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
+                        commands=ClimateCommands(hass, climates) if climates else None)
 
     @callback
     def changed(event):
@@ -29,7 +33,7 @@ async def async_setup_entry(hass, entry):
             link.notify()
             return
         from .observations import current_entity_ids
-        if event.data.get("entity_id") in current_entity_ids(hass, sources):
+        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates):
             link.notify()
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):

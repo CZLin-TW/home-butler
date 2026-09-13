@@ -1,6 +1,7 @@
-"""Dedicated outbound HA link, phase 1: selected observations only.
+"""Dedicated HA link: observations and explicitly selected native AC control.
 
-The HA key never grants owner, PC-agent, assistant or device-control access.
+The HA key never grants owner, PC-agent or assistant access. AC commands originate
+from authorized HB callers and target an independently configured name allowlist.
 One authenticated HA connection owns the snapshot. Reconnects start unknown;
 old sockets cannot overwrite or disconnect their replacement. No Sheets I/O.
 """
@@ -9,6 +10,7 @@ import json
 import secrets
 import threading
 import time
+from uuid import uuid4
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect
@@ -43,7 +45,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations"]}
+    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control"]}
 
 
 class Observation(BaseModel):
@@ -55,7 +57,7 @@ class Observation(BaseModel):
     kind: Literal["occupancy", "illuminance"]
     value: bool | float | None
     available: bool = Field(strict=True)
-    source_updated_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    source_updated_at: float | None = Field(default=None, ge=0, le=253402214400, allow_inf_nan=False)
 
     @model_validator(mode="before")
     @classmethod
@@ -80,11 +82,32 @@ class Observation(BaseModel):
         return data
 
 
+class ClimateState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    entity_id: str = Field(pattern=r"^climate\.[a-z0-9_]+$", max_length=160)
+    name: str = Field(min_length=1, max_length=160)
+    available: bool = Field(strict=True)
+    hvac_mode: Literal["off", "cool", "heat", "dry", "fan_only", "auto", "heat_cool"] | None = None
+    temperature: float | None = Field(default=None, ge=5, le=40, allow_inf_nan=False)
+    fan_mode: str | None = Field(default=None, max_length=40)
+    source_updated_at: float | None = Field(default=None, ge=0, le=253402214400, allow_inf_nan=False)
+
+
+class ClimateResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["climate_result"]
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    status: Literal["success", "failed", "unknown"]
+    state: ClimateState | None = None
+
+
 class Snapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["snapshot"]
     sequence: int = Field(strict=True, ge=1, le=2**53 - 1)
     observations: list[Observation] = Field(max_length=128)
+    climates: list[ClimateState] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def unique_entities(self):
@@ -92,6 +115,10 @@ class Snapshot(BaseModel):
             values = [getattr(item, key) for item in self.observations]
             if len(values) != len(set(values)):
                 raise ValueError("Duplicate observations")
+        for key in ("id", "entity_id", "name"):
+            values = [getattr(item, key) for item in self.climates]
+            if len(values) != len(set(values)):
+                raise ValueError("Duplicate climates")
         return self
 
 
@@ -104,12 +131,23 @@ class LinkState:
         self.received_at = None
         self.received_mono = None
         self.observations = []
+        self.climates = []
+        self.loop = None
+        self.pending = {}
+        self.climate_capable = False
+        self.uncertain = set()
 
-    def connect(self, socket):
+    def connect(self, socket, climate_capable=False):
         with self.lock:
+            self._fail_pending()
             previous = self.socket
             self.socket, self.sequence = socket, 0
             self.received_at = self.received_mono = None
+            self.climate_capable = climate_capable
+            try:
+                self.loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self.loop = None
             # Retain names for the unavailable UI, never their live values.
             return previous
 
@@ -117,6 +155,13 @@ class LinkState:
         with self.lock:
             if self.socket is socket:
                 self.socket = None
+                self._fail_pending()
+
+    def _fail_pending(self):
+        for _, _, future in self.pending.values():
+            if not future.done():
+                future.set_result({"status": "unknown", "message": "HA 連線中斷，指令結果未確認；不會自動重送"})
+        self.pending.clear()
 
     def receive(self, socket, snapshot):
         with self.lock:
@@ -125,7 +170,87 @@ class LinkState:
             self.sequence = snapshot.sequence
             self.received_at, self.received_mono = time.time(), time.monotonic()
             self.observations = [item.model_dump() for item in snapshot.observations]
+            previous = {s["id"]: s for s in self.climates}
+            fresh = []
+            for item in snapshot.climates:
+                state = item.model_dump()
+                old = previous.get(item.id)
+                # A poll sampled before command completion cannot overwrite the
+                # newer state included with that command's acknowledgement.
+                if old and state["available"] and old.get("source_updated_at", 0) and (
+                        (state.get("source_updated_at") or 0) < old["source_updated_at"]):
+                    state = old
+                if old and state.get("source_updated_at") != old.get("source_updated_at") and not any(
+                        pending[1]["name"] == item.name for pending in self.pending.values()):
+                    self.uncertain.discard(item.name)
+                fresh.append(state)
+            self.climates = fresh
             return True
+
+    def climate_state(self, name):
+        with self.lock:
+            found = [s for s in self.climates if s["name"] == name]
+            if len(found) != 1:
+                return None
+            state = dict(found[0])
+            state["available"] = bool(self.snapshot()["online"] and self.climate_capable
+                                      and state["available"]
+                                      and state["hvac_mode"] is not None)
+            state["uncertain"] = name in self.uncertain
+            return state
+
+    async def command(self, name, patch):
+        import ha_climate
+        with self.lock:
+            # Repeat validation at dispatch, never execute an offline queue later.
+            try:
+                allowed = name in ha_climate.names()
+                configured_key()
+            except (ValueError, TypeError, HTTPException):
+                allowed = False
+            state = self.climate_state(name)
+            if not allowed or not state or not self.snapshot()["online"] or not self.climate_capable:
+                return {"status": "failed", "message": "HA 空調未就緒，未送出指令"}
+            if not any(s["id"] == state["id"] and s["available"] for s in self.climates):
+                return {"status": "failed", "message": "HA 空調目前無法使用"}
+            if self.pending:
+                return {"status": "failed", "message": "HA 正在處理空調指令，請稍後操作"}
+            socket = self.socket
+            request_id = uuid4().hex
+            future = asyncio.get_running_loop().create_future()
+            self.pending[request_id] = (socket, state, future)
+            self.uncertain.add(name)
+        try:
+            await socket.send_json({"type": "climate_command", "request_id": request_id,
+                                    "id": state["id"], "name": name, "patch": patch,
+                                    "expires_at": time.time() + 15})
+            return await asyncio.wait_for(future, 25)
+        except (Exception, asyncio.CancelledError):
+            return {"status": "unknown", "message": "HA 指令結果未確認；不會自動重送"}
+        finally:
+            with self.lock:
+                self.pending.pop(request_id, None)
+
+    def command_result(self, socket, result):
+        with self.lock:
+            pending = self.pending.get(result.request_id)
+            if socket is not self.socket or not pending or pending[0] is not socket:
+                return
+            _, original, future = pending
+            if future.done():
+                return
+            state = result.state
+            success = (result.status == "success" and state is not None and state.available and state.hvac_mode is not None
+                       and state.id == original["id"] and state.name == original["name"])
+            if success:
+                self.climates = [state.model_dump() if s["id"] == state.id else s for s in self.climates]
+                self.uncertain.discard(state.name)
+            elif result.status == "failed" and not original.get("uncertain"):
+                self.uncertain.discard(original["name"])  # HA rejected before any side effect.
+            status = "success" if success else "failed" if result.status == "failed" else "unknown"
+            future.set_result({"status": status, "message": {
+                "success": "HA 已執行", "failed": "HA 拒絕空調指令，請確認模式與設備設定",
+                "unknown": "HA 指令結果未確認；不會自動重送"}[status]})
 
     def snapshot(self):
         with self.lock:
@@ -167,7 +292,7 @@ async def ha_websocket(websocket: WebSocket):
                 or not isinstance(token, str) or len(token) > 512):
             raise ValueError("Invalid hello")
         verify_ha_key(token)
-        previous = link.connect(websocket)
+        previous = link.connect(websocket, hello.get("climate_control") is True)
         registered = True
         if previous is not None and previous is not websocket:
             try:
@@ -175,11 +300,14 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations"]})
+                                   "capabilities": ["observations", "climate_control"]})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.
             verify_ha_key(token)
+            if frame.get("type") == "climate_result" and link.climate_capable:
+                link.command_result(websocket, ClimateResult.model_validate(frame))
+                continue
             snapshot = Snapshot.model_validate(frame)
             accepted = link.receive(websocket, snapshot)
             await websocket.send_json({"type": "snapshot_ack", "sequence": snapshot.sequence,
