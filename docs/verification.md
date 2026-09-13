@@ -1,7 +1,14 @@
 # 驗證方式與範圍
 
 2026-09-13 v1.47.0 室溫配對：新增 HA 平台、設定流程、sensor 替換、原生 registry 改名／刪除、
-缺值／NaN／單位轉換與控制轉送測試。Python 編譯通過，實際 HA 框架 CI 與家庭安裝待確認。
+缺值／NaN／單位轉換與控制轉送測試。Python 編譯與安裝腳本語法檢查通過。
+[6025591 CI](https://github.com/CZLin-TW/home-butler/actions/runs/34759469355) 全部通過，包含 HA Core 2026.9.2 的 17 項框架測試（室溫配對新增 6 項）、後端及 Homebridge 測試。
+家庭 HA 已安裝 ac_room_temperature 1.0.0（6025591）並重啟成功。三台配對均選同房間 Hub 2 溫度；
+HA 實體面板確認客廳室溫 27.8°C／冷氣目標 28°C、主臥 27.8°C／冷氣目標 27°C、次臥 28.8°C／關閉（目標 21°C）。
+「更換室溫感測器」選項頁已在家庭 HA 開啟確認；換來源保留 identity／不發命令由框架測試驗證。
+原 HASS Bridge:21064 保留 bridge／exclude、Binary Sensor／Sensor／Climate 類群，排除三個原生 climate，
+改匯出三個 `*_shi_wen` 配對 climate，全部選加熱冷卻器，介面確認選項已儲存。
+未修改 Home Butler 的原生空調 allowlist，未為本次設定發送實體冷氣命令。Apple Home 手機顯示、房間／場景設定仍待使用者確認。
 本次未恢復回饋補償，未修改後端空調控制來源。Apple Home 全部改用 HA 原生配件已由使用者確認可用。
 
 2026-09-13 HA 空調遷移（v1.46.0／HA 整合 1.1.0）：本機 195 項後端離線測試通過，

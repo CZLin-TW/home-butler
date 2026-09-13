@@ -33,6 +33,10 @@ HA → 設定 → 裝置與服務 →「空調室溫配對」→ 對應空調的
 保存後自動重載，不需修改程式、重新啟動 HA 或重新配對 Apple Home；保存及感測事件不發送空調指令。
 這只改 Apple Home／配對 climate 的室溫來源，不改 Dashboard 的環境感測卡片或 HB 空調控制目標。
 
+2026-09-13 家庭設定已完成：客廳、主臥、次臥均搭配同房間的 Hub 2「溫度」。配對實體分別為
+`climate.ke_ting_kong_diao_shi_wen`、`climate.zhu_wo_kong_diao_shi_wen`、`climate.ci_wo_kong_diao_shi_wen`。
+HomeKit Bridge 已改匯出這三個實體；三個原生空調僅從橋接排除，仍供 HA 自動化與 Home Butler 使用。
+
 ## 可用性與維護
 
 - 以 registry ID 固定來源；改 entity ID 仍追蹤同一來源，刪除後建立同名實體不會自動接管。
