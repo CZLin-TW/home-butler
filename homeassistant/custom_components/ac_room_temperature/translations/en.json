@@ -1,0 +1,35 @@
+{
+  "title": "AC Room Temperature",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pair AC with room thermometer",
+        "description": "Choose a native SwitchBot Cloud AC and a temperature sensor. This creates a local presentation entity; it never adjusts the AC automatically. Export this paired entity to HomeKit and exclude the original AC. A missing sensor makes this entity unavailable instead of displaying a default room temperature.",
+        "data": {
+          "climate_entity": "Native air conditioner",
+          "temperature_sensor": "Room temperature sensor"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select a registered native SwitchBot Cloud AC and a Celsius or Fahrenheit temperature sensor."
+    },
+    "abort": {
+      "already_configured": "This AC is already paired. Use Configure to change its sensor."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Change room temperature sensor",
+        "description": "Changing the thermometer preserves this AC entity and HomeKit pairing. Saving does not send an AC command. If a sensor is unavailable, this paired entity becomes unavailable; you can still control the native AC directly in HA or Dashboard.",
+        "data": {
+          "temperature_sensor": "Room temperature sensor"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select a registered temperature sensor with Celsius or Fahrenheit units."
+    }
+  }
+}

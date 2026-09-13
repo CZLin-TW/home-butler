@@ -1,0 +1,35 @@
+{
+  "title": "空調室溫配對",
+  "config": {
+    "step": {
+      "user": {
+        "title": "空調室溫配對",
+        "description": "選擇原生 SwitchBot Cloud 空調與室溫感測器。這只建立顯示配對，不會自動調溫或開關機。HomeKit Bridge 請匯出此配對空調並排除原生空調。感測器離線時會顯示無法使用，不拿預設值假裝室溫。",
+        "data": {
+          "climate_entity": "原生空調",
+          "temperature_sensor": "室溫感測器"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "請選擇已登記的原生 SwitchBot Cloud 空調，以及攝氏或華氏溫度感測器。"
+    },
+    "abort": {
+      "already_configured": "此空調已配對，請在設定中更換感測器。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "更換室溫感測器",
+        "description": "更換感測器會保留空調實體與 Apple Home 配對。保存不會送出空調指令。感測器離線時，此配對空調會顯示無法使用；原生空調仍可從 HA 或 Dashboard 控制。",
+        "data": {
+          "temperature_sensor": "室溫感測器"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "請選擇已登記且單位為攝氏或華氏的溫度感測器。"
+    }
+  }
+}

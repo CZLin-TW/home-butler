@@ -1,5 +1,12 @@
 # 接手入口
 
+v1.47.0 室溫配對：`homeassistant/custom_components/ac_room_temperature` 為獨立本機整合，
+不依賴 Render／home_butler setup；每台原生 SwitchBot climate 配一個溫度 sensor。
+registry ID 固定來源與唯一實體；options 只換 sensor、不換空調 ID、不發指令。
+Apple Home 匯出配對 climate、排除原生 climate；HB 仍只選原生 SwitchBot 平台。
+感測事件只更新室溫，禁止控制迴圈、改 native state 或 monkey patch；失聯配對實體 unavailable。
+安裝、更換與限制見 [室溫配對](homeassistant/room-temperature.md)，驗證使用 HA CI。
+
 HA 架構以 [docs/local-hub-architecture.md](docs/local-hub-architecture.md) 為準。
 v1.46.0：`HOME_ASSISTANT_AC_NAMES` 明確決定逐台控制權；設定錯誤或 HA 失聯不可 fallback 到直接 IR。
 `ha_climate.py` 在原 handler／回饋 wrapper 前分流；HA 管理空調不寫 Sheet last-state，

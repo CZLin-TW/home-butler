@@ -1,5 +1,8 @@
 # Home Butler：HA 主動連接 HomeButler
 
+若 Apple Home 的空調室溫固定 21°C，使用獨立本機整合 [空調室溫配對](room-temperature.md)
+補入可手動更換的溫度感測器。它不依賴本頁的 Render 連線，也不恢復回饋補償。
+
 同步選定存在／亮度感測器；1.1.0 可額外允許 HomeButler 操作已遷移的原生 SwitchBot Cloud 空調。
 適用 HA OS；開發目標 Core 2026.9.2，實機驗證狀態見 [驗證紀錄](../docs/verification.md)。
 不需要 Aqara 開發者帳號、不需要把 HA 的 8123 port 對外開放，也不用重新配對 FP2。

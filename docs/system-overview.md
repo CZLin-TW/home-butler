@@ -2,6 +2,8 @@
 
 2026-09-13 起依 [家庭中樞架構](local-hub-architecture.md) 分階段移轉：
 HA 承接本地設備／即時自動化與 HomeKit，HB 保留家庭應用與 AI。
+v1.47.0 Apple Home 可透過 HA 本機 `ac_room_temperature` 合併室溫 sensor，再將指令轉至原生空調；
+HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見 [設定方式](../homeassistant/room-temperature.md)。
 空調遷移由 HOME_ASSISTANT_AC_NAMES 逐台啟用：Dashboard／LINE → HB → HA → SwitchBot Cloud；Apple Home → HA HomeKit Bridge → 原生 climate。未遷移設備保留下列既有路徑。HA 空調使用整數目標、不執行 HB 回饋、防黴、自動關機或空調排程。
 
 本頁記錄目前的責任與接手入口；設備位址、配對資料與憑證以各部署端設定為準，不複製到公開文件。
