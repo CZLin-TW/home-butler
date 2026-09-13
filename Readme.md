@@ -8,6 +8,7 @@ v1.47.0：[空調室溫配對](homeassistant/room-temperature.md) 為 Apple Home
 使用者決定取消半度舒適目標與回饋補償；已遷移空調採整數溫度，
 防黴、HB 自動關機與 HB 空調排程不再執行，之後按需要在 HA 重建。
 控制路徑為 Dashboard／LINE → HB → 主動連接的 HA → 原生 SwitchBot Cloud → IR。
+v1.47.1 修正 Dashboard 中文模式／風速在 HA 分流被拒絕的問題；後端先轉為 HA 值，回傳狀態仍保留中文標籤。無需重裝 HA 整合。
 HA 的本地自動化直接操作原生 climate；SwitchBot Cloud 本身仍需要網際網路。
 IR 狀態是 HA 整合記錄的最後設定，不是實體回讀。Theater、Hue、除濕機未隨本次變更移轉。
 安裝與逐台切換見 [HA 遷移步驟](homeassistant/README.md#空調遷移)。
