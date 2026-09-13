@@ -45,7 +45,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control"]}
+    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control"]}
 
 
 class Observation(BaseModel):
@@ -102,12 +102,29 @@ class ClimateResult(BaseModel):
     state: ClimateState | None = None
 
 
+class IRButtonState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    entity_id: str = Field(pattern=r"^button\.[a-z0-9_]+$", max_length=160)
+    name: str = Field(min_length=1, max_length=160)
+    button: str = Field(min_length=1, max_length=60)
+    available: bool = Field(strict=True)
+
+
+class IRResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["ir_result"]
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    status: Literal["success", "failed", "unknown"]
+
+
 class Snapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["snapshot"]
     sequence: int = Field(strict=True, ge=1, le=2**53 - 1)
     observations: list[Observation] = Field(max_length=128)
     climates: list[ClimateState] = Field(default_factory=list, max_length=20)
+    ir_buttons: list[IRButtonState] = Field(default_factory=list, max_length=120)
 
     @model_validator(mode="after")
     def unique_entities(self):
@@ -119,6 +136,12 @@ class Snapshot(BaseModel):
             values = [getattr(item, key) for item in self.climates]
             if len(values) != len(set(values)):
                 raise ValueError("Duplicate climates")
+        for key in ("id", "entity_id"):
+            values = [getattr(item, key) for item in self.ir_buttons]
+            if len(set(values)) != len(values):
+                raise ValueError("Duplicate IR buttons")
+        if len({(s.name, s.button) for s in self.ir_buttons}) != len(self.ir_buttons):
+            raise ValueError("Ambiguous IR buttons")
         return self
 
 
@@ -135,15 +158,18 @@ class LinkState:
         self.loop = None
         self.pending = {}
         self.climate_capable = False
+        self.ir_capable = False
+        self.ir_buttons = []
         self.uncertain = set()
 
-    def connect(self, socket, climate_capable=False):
+    def connect(self, socket, climate_capable=False, ir_capable=False):
         with self.lock:
             self._fail_pending()
             previous = self.socket
             self.socket, self.sequence = socket, 0
             self.received_at = self.received_mono = None
             self.climate_capable = climate_capable
+            self.ir_capable = ir_capable
             try:
                 self.loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -185,6 +211,7 @@ class LinkState:
                     self.uncertain.discard(item.name)
                 fresh.append(state)
             self.climates = fresh
+            self.ir_buttons = [s.model_dump() for s in snapshot.ir_buttons]
             return True
 
     def climate_state(self, name):
@@ -231,10 +258,48 @@ class LinkState:
             with self.lock:
                 self.pending.pop(request_id, None)
 
+    async def ir_command(self, name, button):
+        import ha_ir
+        with self.lock:
+            try:
+                allowed = name in ha_ir.names()
+                configured_key()
+            except (ValueError, TypeError, HTTPException):
+                allowed = False
+            matches = [s for s in self.ir_buttons if s["name"] == name and s["button"] == button and s["available"]]
+            if not allowed or not self.ir_capable or not self.snapshot()["online"] or len(matches) != 1:
+                return {"status": "failed", "message": "HA 遙控按鈕未就緒，未送出指令"}
+            if self.pending:
+                return {"status": "failed", "message": "HA 指令處理中，請稍後操作"}
+            socket, state = self.socket, matches[0]
+            request_id = uuid4().hex
+            future = asyncio.get_running_loop().create_future()
+            self.pending[request_id] = (socket, state, future)
+        try:
+            await socket.send_json({"type": "ir_command", "request_id": request_id, "id": state["id"],
+                                    "name": name, "button": button, "expires_at": time.time() + 15})
+            return await asyncio.wait_for(future, 25)
+        except (Exception, asyncio.CancelledError):
+            return {"status": "unknown", "message": "HA 遙控指令結果未確認，不會自動重送"}
+        finally:
+            with self.lock:
+                self.pending.pop(request_id, None)
+
+    def ir_result(self, socket, result):
+        with self.lock:
+            pending = self.pending.get(result.request_id)
+            if socket is not self.socket or not pending or pending[0] is not socket or "button" not in pending[1]:
+                return
+            future = pending[2]
+            if not future.done():
+                future.set_result({"status": result.status, "message": {
+                    "success": "HA 已送出遙控指令", "failed": "HA 拒絕遙控指令，未送出",
+                    "unknown": "HA 遙控指令結果未確認，不會自動重送"}[result.status]})
+
     def command_result(self, socket, result):
         with self.lock:
             pending = self.pending.get(result.request_id)
-            if socket is not self.socket or not pending or pending[0] is not socket:
+            if socket is not self.socket or not pending or pending[0] is not socket or "button" in pending[1]:
                 return
             _, original, future = pending
             if future.done():
@@ -292,7 +357,7 @@ async def ha_websocket(websocket: WebSocket):
                 or not isinstance(token, str) or len(token) > 512):
             raise ValueError("Invalid hello")
         verify_ha_key(token)
-        previous = link.connect(websocket, hello.get("climate_control") is True)
+        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True)
         registered = True
         if previous is not None and previous is not websocket:
             try:
@@ -300,13 +365,16 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations", "climate_control"]})
+                                   "capabilities": ["observations", "climate_control", "ir_control"]})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.
             verify_ha_key(token)
             if frame.get("type") == "climate_result" and link.climate_capable:
                 link.command_result(websocket, ClimateResult.model_validate(frame))
+                continue
+            if frame.get("type") == "ir_result" and link.ir_capable:
+                link.ir_result(websocket, IRResult.model_validate(frame))
                 continue
             snapshot = Snapshot.model_validate(frame)
             accepted = link.receive(websocket, snapshot)

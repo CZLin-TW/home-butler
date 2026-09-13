@@ -499,6 +499,10 @@ def control_ir_result(data, ctx):
     if not button:
         return CommandResult.failed("❌ 請指定要按哪個按鈕")
 
+    import ha_ir
+    if ha_ir.managed(device_name):
+        return ha_ir.control(device, button)
+
     result = switchbot_api.ir_control(device_id, button)
     if result.get("success"):
         return CommandResult.success(f"✅ {device_name}「{button}」指令已送出")

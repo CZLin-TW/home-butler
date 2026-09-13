@@ -9,6 +9,7 @@ from .const import CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
 from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
 from .climates import ClimateCommands, snapshot as climate_snapshot
+from .ir_buttons import IRCommands, snapshot as ir_snapshot
 
 
 async def async_setup_entry(hass, entry):
@@ -21,9 +22,12 @@ async def async_setup_entry(hass, entry):
         raise ConfigEntryNotReady(str(err)) from None
     sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
     climates = entry.options.get("climates", [])
+    buttons = entry.options.get("ir_buttons", [])
     link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
-                        commands=ClimateCommands(hass, climates) if climates else None)
+                        commands=ClimateCommands(hass, climates) if climates or buttons else None,
+                        ir_buttons=(lambda: ir_snapshot(hass, buttons)) if buttons else None,
+                        ir_commands=IRCommands(hass, buttons) if buttons else None)
 
     @callback
     def changed(event):
@@ -33,7 +37,7 @@ async def async_setup_entry(hass, entry):
             link.notify()
             return
         from .observations import current_entity_ids
-        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates):
+        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates + buttons):
             link.notify()
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):

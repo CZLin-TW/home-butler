@@ -32,10 +32,11 @@
     "step": {
       "init": {
         "title": "Shared sensors and ACs",
-        "description": "Selected native SwitchBot Cloud ACs may be controlled by HomeButler. Before selecting, name each HA AC exactly as its Sheet device. Also configure HOME_ASSISTANT_AC_NAMES on Render. Later renames preserve the mapping.",
+        "description": "Selected native SwitchBot Cloud ACs may be controlled by HomeButler. Before selecting, name each HA AC exactly as its Sheet device. Also configure HOME_ASSISTANT_AC_NAMES on Render. Later renames preserve the mapping. Create SwitchBot IR Buttons first, select them here, and set HOME_ASSISTANT_IR_NAMES on Render.",
         "data": {
           "export_entities": "Sensors to share",
-          "climate_entities": "Native ACs HomeButler may control"
+          "climate_entities": "Native ACs HomeButler may control",
+          "ir_entities": "IR buttons HomeButler may press"
         }
       }
     },

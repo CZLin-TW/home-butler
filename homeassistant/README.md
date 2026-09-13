@@ -4,6 +4,7 @@
 補入可手動更換的溫度感測器。它不依賴本頁的 Render 連線，也不恢復回饋補償。
 
 同步選定存在／亮度感測器；1.1.0 可額外允許 HomeButler 操作已遷移的原生 SwitchBot Cloud 空調。
+1.2.0 可額外勾選 [IR 電扇按鈕](ir-buttons.md)，只接受 switchbot_ir_buttons 平台的明確選取。
 適用 HA OS；開發目標 Core 2026.9.2，實機驗證狀態見 [驗證紀錄](../docs/verification.md)。
 不需要 Aqara 開發者帳號、不需要把 HA 的 8123 port 對外開放，也不用重新配對 FP2。
 
@@ -56,7 +57,7 @@
 | 入口 | 權限 | 用途 |
 | --- | --- | --- |
 | GET /api/home-assistant/health | 專用 HA key | 協定版本／能力 |
-| WSS /api/home-assistant/ws | 首個 hello frame 的專用 HA key | HA 主動連入，同步選定觀測／空調狀態並接收限定空調命令 |
+| WSS /api/home-assistant/ws | 首個 hello frame 的專用 HA key | HA 主動連入，同步選定觀測／空調／IR 按鈕可用性並接收限定命令 |
 | GET /api/home-assistant/observations | HB owner key（Dashboard 伺服器持有） | 最新可用性與選定觀測 |
 
 快照每 30 秒更新、90 秒過期；斷線立即未知。狀態改變約 0.2 秒合併後推送。

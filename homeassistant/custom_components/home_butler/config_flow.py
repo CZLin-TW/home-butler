@@ -10,6 +10,7 @@ from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
 from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
 from .climates import select_climates
+from .ir_buttons import select_buttons
 
 
 def export_selector():
@@ -82,7 +83,8 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
             try:
                 sources = select_sources(self.hass, user_input.get(CONF_EXPORT, []))
                 climates = select_climates(self.hass, user_input.get("climate_entities", []), entry.options.get("climates", []))
-                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates})
+                buttons = select_buttons(self.hass, user_input.get("ir_entities", []))
+                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons})
             except ValueError:
                 errors["base"] = "invalid_input"
         sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
@@ -91,4 +93,7 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
             vol.Optional("climate_entities", default=current_entity_ids(self.hass, entry.options.get("climates", []))):
                 selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
                     {"domain": "climate", "integration": "switchbot_cloud"}])),
+            vol.Optional("ir_entities", default=current_entity_ids(self.hass, entry.options.get("ir_buttons", []))):
+                selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
+                    {"domain": "button", "integration": "switchbot_ir_buttons"}])),
         }), errors=errors)

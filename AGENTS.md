@@ -1,5 +1,11 @@
 # 接手入口
 
+v1.48.0：IR 電扇按鈕見 [HA IR 按鈕](homeassistant/ir-buttons.md)。獨立 switchbot_ir_buttons 本地整合
+只沿用明確選取的原生 SwitchBot Remote 連線，建立 momentary button，不推測 fan／power 狀態。
+home_butler 1.2.0 的 ir_control 能力只接受本機勾選的該平台 button；HB HOME_ASSISTANT_IR_NAMES
+逐台分流共用 IR handler，離線／錯誤不得 fallback 直接 IR。相對按鍵未知結果不重送；registry ID、
+命令期限、去重與真假來源測試必須保留。Theater／除濕機不隨電扇遷移。
+
 v1.47.1：Dashboard AC mode／fan_speed 送中文顯示值，HA 分流必須在嚴格驗證前正規化為 HA 值；
 `ha_climate.MODE_INPUTS/FAN_INPUTS` 同時支援既有中英文別名，不可對未知值套預設。回傳 lastMode／lastFanSpeed 仍為中文以供 UI 確認。
 回歸測試需用實際 Dashboard 中文 payload 經 handler → WebSocket → 確認狀態，不能只測英文或對已相同狀態送出。

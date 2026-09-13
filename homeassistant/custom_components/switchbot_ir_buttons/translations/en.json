@@ -1,0 +1,22 @@
+{
+  "title": "SwitchBot IR Buttons",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add IR remote buttons",
+        "description": "Select a native SwitchBot IR switch. Use the Sheet device name and exact comma-separated SwitchBot button names. Power is a remote key, not observed state.",
+        "data": {
+          "remote_entity": "Native SwitchBot IR switch",
+          "name": "HomeButler device name (same as Sheet)",
+          "buttons": "Button names (comma separated)"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select a loaded native IR remote, a unique device name and distinct buttons."
+    },
+    "abort": {
+      "already_configured": "Remote already configured."
+    }
+  }
+}

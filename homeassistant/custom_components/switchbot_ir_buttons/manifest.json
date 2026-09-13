@@ -1,0 +1,15 @@
+{
+  "domain": "switchbot_ir_buttons",
+  "name": "SwitchBot IR Buttons",
+  "version": "1.0.0",
+  "codeowners": [
+    "@CZLin-TW"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/CZLin-TW/home-butler/blob/main/homeassistant/ir-buttons.md",
+  "iot_class": "cloud_push",
+  "dependencies": [
+    "switchbot_cloud"
+  ],
+  "requirements": []
+}

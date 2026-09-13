@@ -44,7 +44,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
@@ -52,6 +52,7 @@ class OutboundLink:
         self.closed = False
         self.connected = False
         self.climates, self.commands = climates, commands
+        self.ir_buttons, self.ir_commands = ir_buttons, ir_commands
 
     async def _serve_climates(self, ws):
         """Receive commands while waiting for the next sensor heartbeat."""
@@ -59,7 +60,8 @@ class OutboundLink:
         command_task = None
 
         async def execute(frame):
-            response = await self.commands.execute(frame)
+            controller = self.ir_commands if frame.get("type") == "ir_command" else self.commands
+            response = await controller.execute(frame)
             await ws.send_json(response)
             self.notify()
 
@@ -73,7 +75,7 @@ class OutboundLink:
                     if acknowledgements.full():
                         raise LinkError("Unexpected acknowledgement")
                     acknowledgements.put_nowait(frame)
-                elif frame.get("type") == "climate_command":
+                elif frame.get("type") == "climate_command" or (frame.get("type") == "ir_command" and self.ir_commands):
                     if command_task and not command_task.done():
                         raise LinkError("Concurrent command rejected")
                     if command_task:
@@ -94,7 +96,9 @@ class OutboundLink:
                 await asyncio.sleep(0.2)
                 sequence += 1
                 frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot(),
-                         "climates": self.climates()}
+                         "climates": self.climates() if self.climates else []}
+                if self.ir_buttons:
+                    frame["ir_buttons"] = self.ir_buttons()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
                     raise LinkError("Snapshot too large")
                 await ws.send_json(frame)
@@ -124,7 +128,7 @@ class OutboundLink:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
-                                        "climate_control": self.commands is not None})
+                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
@@ -135,6 +139,8 @@ class OutboundLink:
                     if self.commands is not None:
                         if "climate_control" not in hello.get("capabilities", []):
                             raise LinkError("Backend upgrade required")
+                        if self.ir_commands and "ir_control" not in hello.get("capabilities", []):
+                            raise LinkError("Backend IR upgrade required")
                         await self._serve_climates(ws)
                         continue
                     sequence = 0

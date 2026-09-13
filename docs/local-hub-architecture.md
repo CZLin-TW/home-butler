@@ -14,6 +14,8 @@
 長期一般設備的控制方向為「Dashboard／LINE → HB → HA → 設備」與
 「Apple Home／HA 自動化 → HA → 設備」。SwitchBot 最底層走本地或雲端，不改此分工。
 v1.46.0 增加逐台空調移轉；以 Render HOME_ASSISTANT_AC_NAMES 與 HA 實際選取為準。SwitchBot Cloud 仍走雲端，不能稱為全本地。
+v1.48.0 增加逐台 IR 按鈕移轉；HOME_ASSISTANT_IR_NAMES 決定控制權，HA 本機按鈕與下行白名單
+獨立於雲端連線。未知指令不重送、不猜風量或電源狀態，見 [IR 按鈕](../homeassistant/ir-buttons.md)。
 
 ## 第一階段：FP2 觀測
 

@@ -1,5 +1,8 @@
 # 家庭 AI 管家系統
 
+v1.48.0：[電扇遙控按鈕](homeassistant/ir-buttons.md) 可在 HA 操作電源／風速＋／風速－，
+並將 Dashboard／LINE 的選定電扇改走 HA。沿用原生 SwitchBot 連線，不新增金鑰；IR 無實體狀態回讀。
+
 v1.47.0：[空調室溫配對](homeassistant/room-temperature.md) 為 Apple Home 空調補入可更換的 HA 溫度感測器。
 只合併顯示與轉送原生控制，不做回饋補償；HA 本機整合無 Render 依賴。
 

@@ -1,0 +1,22 @@
+{
+  "title": "SwitchBot IR Buttons",
+  "config": {
+    "step": {
+      "user": {
+        "title": "加入電扇遙控按鈕",
+        "description": "選取原生 SwitchBot 紅外線開關。管家名稱填 Sheet 名稱；按鈕以半形逗號分隔，須與 SwitchBot App 完全相同。電源是遙控按鍵，不代表已知開關狀態。",
+        "data": {
+          "remote_entity": "原生 SwitchBot 遙控器",
+          "name": "管家設備名稱（與 Sheet 相同）",
+          "buttons": "遙控按鈕（半形逗號分隔）"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "請確認原生紅外線設備已載入、名稱唯一且按鈕不重複。"
+    },
+    "abort": {
+      "already_configured": "此遙控器已設定。"
+    }
+  }
+}
