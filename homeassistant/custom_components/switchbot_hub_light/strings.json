@@ -1,0 +1,34 @@
+{
+  "title": "SwitchBot Hub 2 Light",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Hub 2 light levels",
+        "description": "Select native Hub 2 temperature entities to identify the devices. Reuses existing SwitchBot Cloud samples with no additional API requests. Light is a 1–20 level, not lux; missing data stays unknown.",
+        "data": {
+          "hub_sensors": "Hub 2 temperature entities"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices."
+    },
+    "abort": {
+      "already_configured": "Already configured. Use options to change the selected hubs."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Select Hub 2 devices",
+        "description": "Select hubs to expose their light levels. Existing temperature, humidity and AC entities are unchanged.",
+        "data": {
+          "hub_sensors": "Hub 2 temperature entities"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices."
+    }
+  }
+}

@@ -1,5 +1,10 @@
 # 接手入口
 
+v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
+switchbot_hub_light 1.0.0 僅共享原生 SwitchBot Cloud coordinator 的 lightLevel，不新增 I/O、
+不讀金鑰、不 monkey patch 核心。1–20 級不得標成 lux 或匯入現有 illuminance 通道。
+保留 native reload／registry identity／缺值未知／單獨光照更新及卸載 listener 清理測試。
+
 v1.48.0：IR 電扇按鈕見 [HA IR 按鈕](homeassistant/ir-buttons.md)。獨立 switchbot_ir_buttons 本地整合
 只沿用明確選取的原生 SwitchBot Remote 連線，建立 momentary button，不推測 fan／power 狀態。
 home_butler 1.2.0 的 ir_control 能力只接受本機勾選的該平台 button；HB HOME_ASSISTANT_IR_NAMES

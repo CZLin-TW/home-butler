@@ -1,5 +1,9 @@
 # 驗證方式與範圍
 
+2026-09-13 v1.49.0：新增 switchbot_hub_light 1.0.0，從原生 Cloud coordinator 讀 Hub 2 lightLevel。
+新增 HA 框架測試涵蓋光照單獨更新、缺失／非法值未知、連線失敗、native reload／來源改名／移除、
+設定篩選與卸載 listener 清理。CI 與家庭實際讀值驗收待完成；不可把文件支援等同設備已回傳資料。
+
 2026-09-13 v1.48.0：新增 HA IR Buttons 1.0.0 與 Home Butler 1.2.0 的選取式 IR 控制。
 201 項後端離線測試通過，含真實 IR handler／WebSocket、名稱解析、結果分類、斷線不補送、
 白名單與歧義拒絕。HA 真實框架測試新增按鈕平台至 SDK、來源身分／選取／去重／未知案例。

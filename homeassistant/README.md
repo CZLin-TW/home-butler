@@ -1,5 +1,8 @@
 # Home Butler：HA 主動連接 HomeButler
 
+Hub 2 光照可透過獨立 [光照等級整合](hub-light.md) 補入 HA；其 1～20 級不是 lux，
+目前不加入本整合的 illuminance 同步通道。
+
 若 Apple Home 的空調室溫固定 21°C，使用獨立本機整合 [空調室溫配對](room-temperature.md)
 補入可手動更換的溫度感測器。它不依賴本頁的 Render 連線，也不恢復回饋補償。
 
