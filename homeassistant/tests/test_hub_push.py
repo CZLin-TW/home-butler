@@ -42,11 +42,10 @@ async def test_push_uses_authenticated_read_not_payload_and_ignores_unknown_stal
 
 
 async def test_last_hint_during_refresh_is_not_lost_and_unload_cancels(hass, monkeypatch):
-    native, source, entry, coordinator, own = await setup_hub(hass)
+    native, source, entry, coordinator, own = await setup_hub(
+        hass, Debouncer(hass, getLogger(__name__), cooldown=0, immediate=True))
     manager = hass.data["switchbot_hub_light"][entry.entry_id]
     monkeypatch.setattr("custom_components.switchbot_hub_light.push.MIN_REFRESH_SECONDS", 0)
-    coordinator._debounced_refresh = Debouncer(hass, getLogger(__name__), cooldown=0, immediate=True,
-                                              function=coordinator.async_refresh)
     started, release = asyncio.Event(), asyncio.Event()
     reads = 0
     async def read():

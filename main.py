@@ -470,7 +470,8 @@ async def switchbot_webhook(request: Request):
     SwitchBot 不對請求簽名，這個端點無法驗證來源；payload 只拿來跟已設定規則的
     sensor_device_id 比對，不匹配就忽略——偽造流量最多只能在啟用時段內觸發一次
     既有夜燈規則的重新評估，無法控制其他任何設備。
-    評估丟背景 thread 跑（含 agent WS 往返），立刻回 200 讓 SwitchBot 不重送。"""
+    另向 HA 已選 Hub 2 轉送有時間限制的更新提示；不轉送感測值。
+    HA 以原生 API 憑證驗證讀取。舊夜燈評估在背景執行，HA 提示合併後非同步轉送。"""
     try:
         body = await request.json()
     except Exception:

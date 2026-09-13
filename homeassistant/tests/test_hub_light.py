@@ -19,11 +19,12 @@ async def cleanup_provider(hass):
         entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
 
 
-async def setup_hub(hass):
+async def setup_hub(hass, debouncer=None):
     native = MockConfigEntry(domain="switchbot_cloud", data={}, state=ConfigEntryState.LOADED)
     native.add_to_hass(hass)
     hass.config.components.add("switchbot_cloud")
-    coordinator = DataUpdateCoordinator(hass, getLogger(__name__), name="hub", config_entry=native, update_method=AsyncMock())
+    coordinator = DataUpdateCoordinator(hass, getLogger(__name__), name="hub", config_entry=native, update_method=AsyncMock(),
+                                        request_refresh_debouncer=debouncer)
     coordinator.async_set_updated_data({"temperature": 28, "lightLevel": 8})
     native.runtime_data = SimpleNamespace(devices=SimpleNamespace(sensors=[
         (SimpleNamespace(device_type="Hub 2", device_id="AABBCCDDEEFF"), coordinator)]))
