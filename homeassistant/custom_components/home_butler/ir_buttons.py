@@ -1,5 +1,6 @@
 """Only locally selected switchbot_ir_buttons entities may be pressed."""
 import asyncio
+import hashlib
 import re
 import time
 from homeassistant.helpers import entity_registry as er
@@ -13,9 +14,13 @@ def identity(hass, entity_id):
     state = hass.states.get(item.entity_id)
     if not config or not state:
         raise ValueError("Button unavailable")
-    label = state.attributes.get("ir_button")
-    if label not in config.data.get("buttons", []):
+    # HA omits custom attributes while an entity is unavailable. Resolve the
+    # immutable local configuration/registry identity instead of live attributes.
+    labels = [label for label in config.data.get("buttons", []) if item.unique_id ==
+              config.data["source_id"] + "_" + hashlib.sha256(label.encode()).hexdigest()[:16]]
+    if len(labels) != 1:
         raise ValueError("Unconfigured button")
+    label = labels[0]
     return {"id": item.id, "entity_id": item.entity_id,
             "name": config.data["name"], "button": label}
 

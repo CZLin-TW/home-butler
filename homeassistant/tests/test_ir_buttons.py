@@ -16,6 +16,15 @@ from custom_components.home_butler.ir_buttons import IRCommands, select_buttons,
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
+@pytest.fixture(autouse=True)
+async def cleanup_fake_provider(hass):
+    yield
+    # The native provider is a test double, so there is no real cloud lifecycle
+    # to unload. Allow HA to unload our actual button platform normally.
+    for entry in hass.config_entries.async_entries("switchbot_cloud"):
+        entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
+
+
 async def setup_fan(hass):
     # Model the already-loaded native provider; its network discovery is outside
     # this component. Our new button platform and HA services still run for real.
