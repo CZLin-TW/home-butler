@@ -5,6 +5,8 @@ Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 
 無簽章 payload 不能寫進 HA 狀態；值只能來自 native authenticated refresh，新增事件 I/O 是明確需求。
 保留訂閱白名單、事件時間驗證、合併最後一筆、舊版 capability 相容、卸載與斷線清理測試。
 既有 HB 夜燈本來就走 Webhook；不搶占 URL、不新增 HA 夜燈規則。
+家庭 HA 另有「Hub 2 每分鐘更新感測資料」自動化（1789319755253），每台只刷新一個原生溫度實體。
+它保留 Push，整合預設仍 10 分鐘；勿再新增重複輪詢工作。設定與還原見同一份光照文件。
 
 v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
 原 switchbot_hub_light 1.0.0 僅共享原生 SwitchBot Cloud coordinator 的 lightLevel，不新增 I/O、
