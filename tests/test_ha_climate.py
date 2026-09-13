@@ -87,6 +87,39 @@ class HaClimateTests(unittest.TestCase):
         for value in (True, float("nan"), 31):
             self.assertEqual(ha_climate.control({"device_name": AC["name"], "temperature": value}, ctx).status, "failed")
 
+    def test_dashboard_display_labels_reach_ha_and_return_matching_labels(self):
+        # These are the actual Dashboard option values, not English-only test inputs.
+        with self.client.websocket_connect("/api/home-assistant/ws") as ws:
+            self.connect(ws)
+            for mode, expected_mode, fan, expected_fan in [
+                ("冷氣", "cool", "低", "low"), ("除濕", "dry", "中", "medium"),
+                ("送風", "fan_only", "高", "high"), ("暖氣", "heat", "自動", "auto"),
+                ("自動", "heat_cool", "自動", "auto"),
+            ]:
+                with self.subTest(mode=mode, fan=fan), ThreadPoolExecutor() as pool:
+                    row = {"名稱": AC["name"], "類型": "空調", "狀態": "啟用"}
+                    ctx = SimpleNamespace(get=lambda name: [row])
+                    pending = pool.submit(ha_climate.control, {"device_name": AC["name"],
+                        "power": "on", "temperature": 29, "mode": mode, "fan_speed": fan}, ctx)
+                    frame = ws.receive_json()
+                    self.assertEqual(frame["patch"], {"power": "on", "temperature": 29,
+                        "mode": expected_mode, "fan_speed": expected_fan})
+                    ws.send_json({"type": "climate_result", "request_id": frame["request_id"],
+                        "status": "success", "state": {**AC, "temperature": 29,
+                        "hvac_mode": expected_mode, "fan_mode": expected_fan}})
+                    self.assertEqual(pending.result(3).status, "success")
+                    self.assertEqual(ctx._ac_saved_state["lastMode"], mode)
+                    self.assertEqual(ctx._ac_saved_state["lastFanSpeed"], fan)
+
+    def test_unknown_labels_are_rejected_without_sending_commands(self):
+        ctx = SimpleNamespace(get=lambda name: [{"名稱": AC["name"], "類型": "空調", "狀態": "啟用"}])
+        with patch.object(self.api.link, "command") as command:
+            for field in ("mode", "fan_speed"):
+                for value in ("不支援", "", [], True):
+                    with self.subTest(field=field, value=value):
+                        self.assertEqual(ha_climate.control({"device_name": AC["name"], field: value}, ctx).status, "failed")
+            command.assert_not_called()
+
     def test_disconnect_returns_unknown_and_does_not_replay(self):
         with self.client.websocket_connect("/api/home-assistant/ws") as ws:
             self.connect(ws)

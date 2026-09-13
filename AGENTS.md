@@ -1,5 +1,9 @@
 # 接手入口
 
+v1.47.1：Dashboard AC mode／fan_speed 送中文顯示值，HA 分流必須在嚴格驗證前正規化為 HA 值；
+`ha_climate.MODE_INPUTS/FAN_INPUTS` 同時支援既有中英文別名，不可對未知值套預設。回傳 lastMode／lastFanSpeed 仍為中文以供 UI 確認。
+回歸測試需用實際 Dashboard 中文 payload 經 handler → WebSocket → 確認狀態，不能只測英文或對已相同狀態送出。
+
 v1.47.0 室溫配對：`homeassistant/custom_components/ac_room_temperature` 為獨立本機整合，
 不依賴 Render／home_butler setup；每台原生 SwitchBot climate 配一個溫度 sensor。
 registry ID 固定來源與唯一實體；options 只換 sensor、不換空調 ID、不發指令。

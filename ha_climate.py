@@ -14,6 +14,20 @@ from command_result import CommandResult
 MODE_LABELS = {"cool": "冷氣", "heat": "暖氣", "dry": "除濕", "fan_only": "送風", "heat_cool": "自動", "auto": "自動"}
 FAN_LABELS = {"auto": "自動", "low": "低", "medium": "中", "high": "高"}
 
+# Dashboard sends the same display labels accepted by the legacy AC handler;
+# voice callers also use English or equivalent Chinese names. Normalize before
+# validating/dispatching to HA, but never default an unrecognized value.
+MODE_INPUTS = {
+    "自動": "heat_cool", "auto": "heat_cool",
+    "冷氣": "cool", "制冷": "cool", "cool": "cool", "冷": "cool",
+    "除濕": "dry", "乾燥": "dry", "dry": "dry",
+    "送風": "fan_only", "風扇": "fan_only", "fan": "fan_only",
+    "暖氣": "heat", "制熱": "heat", "heat": "heat", "暖": "heat",
+}
+FAN_INPUTS = {**{label: value for value, label in FAN_LABELS.items()},
+              **{value: value for value in FAN_LABELS},
+              "弱": "low", "小": "low", "強": "high", "大": "high"}
+
 
 def names():
     value = json.loads(os.environ.get("HOME_ASSISTANT_AC_NAMES", "[]"))
@@ -84,11 +98,13 @@ def control(data, ctx):
             except (ValueError, TypeError):
                 return CommandResult.failed("空調溫度需介於 16 至 30 度")
         if "mode" in patch:
-            if patch["mode"] not in ("cool", "heat", "dry", "fan", "auto"):
+            if not isinstance(patch["mode"], str) or patch["mode"] not in MODE_INPUTS:
                 return CommandResult.failed("空調模式無效")
-            patch["mode"] = {"fan": "fan_only", "auto": "heat_cool"}.get(patch["mode"], patch["mode"])
-        if "fan_speed" in patch and patch["fan_speed"] not in FAN_LABELS:
-            return CommandResult.failed("空調風速無效")
+            patch["mode"] = MODE_INPUTS[patch["mode"]]
+        if "fan_speed" in patch:
+            if not isinstance(patch["fan_speed"], str) or patch["fan_speed"] not in FAN_INPUTS:
+                return CommandResult.failed("空調風速無效")
+            patch["fan_speed"] = FAN_INPUTS[patch["fan_speed"]]
     if link.loop is None:
         return CommandResult.failed("HA 空調連線尚未就緒")
     future = asyncio.run_coroutine_threadsafe(link.command(name, patch), link.loop)
