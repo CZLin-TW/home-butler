@@ -17,10 +17,11 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
 async def setup_fan(hass):
-    native = MockConfigEntry(domain="switchbot_cloud", title="SwitchBot", data={})
+    # Model the already-loaded native provider; its network discovery is outside
+    # this component. Our new button platform and HA services still run for real.
+    native = MockConfigEntry(domain="switchbot_cloud", title="SwitchBot", data={}, state=ConfigEntryState.LOADED)
     native.add_to_hass(hass)
-    with patch("homeassistant.components.switchbot_cloud.async_setup_entry", return_value=True):
-        assert await hass.config_entries.async_setup(native.entry_id)
+    hass.config.components.add("switchbot_cloud")
     remote = Remote(deviceId="remote123", deviceName="Fan", remoteType="DIY Fan", hubDeviceId="hub123")
     api = SimpleNamespace(send_command=AsyncMock())
     native.runtime_data = SimpleNamespace(api=api, devices=SimpleNamespace(switches=[
