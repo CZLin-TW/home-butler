@@ -3,7 +3,16 @@
 2026-09-13 v1.48.0：新增 HA IR Buttons 1.0.0 與 Home Butler 1.2.0 的選取式 IR 控制。
 201 項後端離線測試通過，含真實 IR handler／WebSocket、名稱解析、結果分類、斷線不補送、
 白名單與歧義拒絕。HA 真實框架測試新增按鈕平台至 SDK、來源身分／選取／去重／未知案例。
-HA 框架 CI、家庭安裝與實機驗收尚待完成，不能將按鈕建立等同於電扇收到指令。
+[a64456f CI](https://github.com/CZLin-TW/home-butler/actions/runs/34765088624) 全部通過，
+包含 HA Core 2026.9.2 的 21 項框架測試、201 項後端測試及 Homebridge 測試。
+家庭 HA 已從 a64456f 安裝 SwitchBot IR Buttons 1.0.0、Home Butler 1.2.0，重啟成功；
+建立客廳／主臥／次臥電扇各三個按鈕，歸入原生裝置與原房間。Home Butler 已選取九個按鈕，
+保留兩個 FP2 感測器與三台原生空調。Render 已加入三台電扇的 HOME_ASSISTANT_IR_NAMES，
+設定部署 dep-dajc2lfqj5pc73d1gul0 已確認 Live；Dashboard 1.48.0 已上線，既有空調與 FP2 同步恢復。
+家庭驗證只送兩次客廳風速命令：HA 直接按風速+，活動時間 23:30:13；Dashboard 按風速-，
+HA 對應 button.ke_ting_dian_shan_feng_su_2 紀錄 23:32:13，確認 Dashboard 指令確實經 HA。
+兩次介面均結束等待且未見錯誤；未測電源、未操作另外兩台電扇，也未觀察實體轉速。
+按鈕時間只能證明呼叫發生，不能當作紅外線設備的真實狀態或實體收訊證明。
 
 2026-09-13 v1.47.1：修正 HA 分流只接受英文模式／風速、拒絕 Dashboard 中文選項的問題。
 197 項後端離線測試通過；新增 Dashboard 中文模式／風速經真實 WebSocket 邊界的指令與回傳標籤驗證、未知值不送出的回歸案例。
