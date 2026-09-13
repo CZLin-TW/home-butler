@@ -1,5 +1,7 @@
 # 三個 repo 的系統導覽
 
+後續工作與驗收缺口見 [2026-09-14 HA 遷移盤點](ha-migration-audit.md)。
+
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
 HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
 
@@ -22,14 +24,17 @@ HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見
 ## 資料與控制路徑
 
 ```text
-瀏覽器 → Dashboard（Session／API 邊界）→ home-butler → Sheets／設備雲端
-LINE／Siri ─────────────────────────→ home-butler
-Apple 家庭／Siri → 家中 Homebridge ──→ home-butler（獨立設備權限 API）
-                                           │
-                                      PC agent WebSocket
-                                           ├→ Hue Bridge
-                                           └→ 同機 theater-agent → AVR／KEF／Bravia
-                                                   └ Apple TV monitor（獨立程序）
+瀏覽器 → Dashboard（Session／API 邊界）→ home-butler
+LINE／Siri 捷徑 ─────────────────────→ home-butler
+                                       ├→ HA → SwitchBot Cloud（已遷移空調／電扇）
+                                       ├→ Sheets／其他設備雲端（未遷移功能）
+                                       └→ PC agent WebSocket
+                                            ├→ Hue Bridge（待轉 HA）
+                                            └→ 同機 theater-agent → AVR／KEF／Bravia
+                                                     └ Apple TV monitor（獨立程序）
+Apple 家庭／Siri → HA HomeKit Bridge → 已匯出配件
+HA 本地自動化 → HA 裝置整合（Hue、SwitchBot、FP2 等）
+HA 選定觀測／空調狀態 → 主動 WSS → home-butler → Dashboard
 ```
 
 Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
@@ -38,7 +43,8 @@ Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`�
 
 ## 週期與事件的責任
 
-Homebridge 插件位於 home-butler 的 `homebridge/`，與 Windows PC agent 分開部署，
+舊 Homebridge 插件仍保留在 home-butler 的 `homebridge/` 作為歷史相容程式；家庭空調已改由 HA 發布。
+以下為舊插件機制，不代表家庭仍以它控制空調。插件與 Windows PC agent 分開部署，
 不需要第四個 repo。以獨立橋接 Key 和設備名稱清單限制明確 AC 控制；每輪完成後約 5 秒
 重新讀取後端快取，不呼叫 AI、不增加 Sheets 輪詢。冷氣狀態仍為最後指令；室溫來自同房間
 感測器。冷／暖房使用空調控制，除濕／送風使用同配件內的模式開關；關閉模式開關會在後端
