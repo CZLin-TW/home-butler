@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install matching real HA test framework
-        run: pip install "homeassistant==2026.9.2" pytest-homeassistant-custom-component
+        run: pip install "homeassistant==2026.9.2" pytest-homeassistant-custom-component "switchbot-api==2.13.0"
       - name: Test registry, flows and lifecycle without home hardware
         run: pytest -q
         working-directory: homeassistant
