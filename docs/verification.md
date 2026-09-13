@@ -2,7 +2,14 @@
 
 2026-09-13 v1.49.0：新增 switchbot_hub_light 1.0.0，從原生 Cloud coordinator 讀 Hub 2 lightLevel。
 新增 HA 框架測試涵蓋光照單獨更新、缺失／非法值未知、連線失敗、native reload／來源改名／移除、
-設定篩選與卸載 listener 清理。CI 與家庭實際讀值驗收待完成；不可把文件支援等同設備已回傳資料。
+設定篩選與卸載 listener 清理。
+[3238386 CI](https://github.com/CZLin-TW/home-butler/actions/runs/34767328475) 全部通過：
+25 項 HA Core 2026.9.2 框架測試、201 項後端測試及 Homebridge 測試。
+2026-09-14 00:04 起，家庭 HA 已安裝 3238386 的 switchbot_hub_light 1.0.0 並重啟成功，
+選取客廳／主臥／次臥的原生 Hub 2 溫度實體，三個光照感測器皆建立在原裝置與原房間。
+家庭實際頁面確認主臥 10 級、次臥 1 級、客廳 1 級；不是模擬值或 lux。
+未改動燈光／空調自動化、未發送設備命令、未把等級匯入 HomeButler 的 lux 通道。
+Dashboard 1.49.0 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34767180292) 也通過；本次 UI／API 契約未變。
 
 2026-09-13 v1.48.0：新增 HA IR Buttons 1.0.0 與 Home Butler 1.2.0 的選取式 IR 控制。
 201 項後端離線測試通過，含真實 IR handler／WebSocket、名稱解析、結果分類、斷線不補送、
