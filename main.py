@@ -475,6 +475,10 @@ async def switchbot_webhook(request: Request):
         body = await request.json()
     except Exception:
         return {"status": "ignored"}
+    # Forward only a refresh hint to explicitly selected HA Hub 2 devices.
+    # HA verifies sensor values through its own authenticated native API.
+    from home_assistant_api import link as ha_link
+    await ha_link.hub_updates.notify(body)
     context = body.get("context") if isinstance(body, dict) else None
     if not isinstance(context, dict):
         return {"status": "ignored"}

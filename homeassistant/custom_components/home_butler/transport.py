@@ -44,7 +44,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
@@ -53,6 +53,8 @@ class OutboundLink:
         self.connected = False
         self.climates, self.commands = climates, commands
         self.ir_buttons, self.ir_commands = ir_buttons, ir_commands
+        self.hub_devices, self.hub_updates = hub_devices, hub_updates
+        self._hub_enabled = False
 
     async def _serve_climates(self, ws):
         """Receive commands while waiting for the next sensor heartbeat."""
@@ -75,7 +77,9 @@ class OutboundLink:
                     if acknowledgements.full():
                         raise LinkError("Unexpected acknowledgement")
                     acknowledgements.put_nowait(frame)
-                elif frame.get("type") == "climate_command" or (frame.get("type") == "ir_command" and self.ir_commands):
+                elif frame.get("type") == "hub_update" and self._hub_enabled:
+                    self.hub_updates(frame)
+                elif (frame.get("type") == "climate_command" and self.commands) or (frame.get("type") == "ir_command" and self.ir_commands):
                     if command_task and not command_task.done():
                         raise LinkError("Concurrent command rejected")
                     if command_task:
@@ -99,6 +103,8 @@ class OutboundLink:
                          "climates": self.climates() if self.climates else []}
                 if self.ir_buttons:
                     frame["ir_buttons"] = self.ir_buttons()
+                if self._hub_enabled:
+                    frame["hub_devices"] = self.hub_devices()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
                     raise LinkError("Snapshot too large")
                 await ws.send_json(frame)
@@ -128,10 +134,11 @@ class OutboundLink:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
-                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None})
+                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
+                    self._hub_enabled = self.hub_updates is not None and "hub_updates" in hello.get("capabilities", [])
                     self.connected = True
                     if failed:
                         _LOGGER.info("HomeButler local link recovered")
@@ -141,7 +148,9 @@ class OutboundLink:
                             raise LinkError("Backend upgrade required")
                         if self.ir_commands and "ir_control" not in hello.get("capabilities", []):
                             raise LinkError("Backend IR upgrade required")
+                    if self.commands is not None or self._hub_enabled:
                         await self._serve_climates(ws)
+                        delay = 5
                         continue
                     sequence = 0
                     self.changed.set()  # Fresh full snapshot on every new session.

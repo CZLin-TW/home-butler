@@ -3,6 +3,8 @@ from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from .source import light_level, resolve
+from .push import DIAGNOSTIC_SIGNAL
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -41,7 +43,10 @@ class HubLight(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"level_min": 1, "level_max": 20, "source_field": "lightLevel"}
+        attributes = {"level_min": 1, "level_max": 20, "source_field": "lightLevel"}
+        for manager in self.hass.data.get("switchbot_hub_light", {}).values():
+            attributes.update(manager.attributes(self.source_id))
+        return attributes
 
     @callback
     def _bind(self):
@@ -67,6 +72,12 @@ class HubLight(SensorEntity):
         if source and own and source.device_id:
             registry.async_update_entity(self.entity_id, device_id=source.device_id)
         self._bind()
+
+        @callback
+        def diagnostic_changed(source_id):
+            if source_id == self.source_id:
+                self.async_write_ha_state()
+        self.async_on_remove(async_dispatcher_connect(self.hass, DIAGNOSTIC_SIGNAL, diagnostic_changed))
 
         @callback
         def source_changed(event):

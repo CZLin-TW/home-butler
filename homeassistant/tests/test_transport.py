@@ -92,3 +92,36 @@ async def test_climate_link_receives_command_between_snapshots_and_cancels_on_di
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_hub_push_between_acknowledgements_without_control_permissions():
+    from unittest.mock import Mock
+    from custom_components.home_butler.transport import LinkError
+    incoming, sent = asyncio.Queue(), asyncio.Queue()
+    class Socket:
+        async def send_json(self, frame):
+            await sent.put(frame)
+        async def receive_json(self):
+            item = await incoming.get()
+            if isinstance(item, Exception):
+                raise item
+            return item
+    updates = Mock()
+    link = OutboundLink(None, "https://example.invalid", "x" * 40, lambda: [],
+                        hub_devices=lambda: ["AABBCCDDEEFF"], hub_updates=updates)
+    link._hub_enabled = True
+    task = asyncio.create_task(link._serve_climates(Socket()))
+    try:
+        first = await asyncio.wait_for(sent.get(), 2)
+        assert first["hub_devices"] == ["AABBCCDDEEFF"]
+        frame = {"type": "hub_update", "device_id": "AABBCCDDEEFF", "received_at": 1}
+        await incoming.put(frame)
+        await incoming.put({"type": "snapshot_ack", "sequence": 1, "accepted": True})
+        await incoming.put(LinkError("Disconnected"))
+        with pytest.raises(LinkError):
+            await task
+        updates.assert_called_once_with(frame)
+        assert link.commands is None and link.ir_commands is None
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

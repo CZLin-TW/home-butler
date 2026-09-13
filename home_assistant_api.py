@@ -8,6 +8,7 @@ old sockets cannot overwrite or disconnect their replacement. No Sheets I/O.
 import asyncio
 import json
 import secrets
+import re
 import threading
 import time
 from uuid import uuid4
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSoc
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 import config
+from ha_hub_events import HubRelay
 from auth import verify_api_key
 
 PROTOCOL = 1
@@ -45,7 +47,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control"]}
+    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates"]}
 
 
 class Observation(BaseModel):
@@ -126,8 +128,13 @@ class Snapshot(BaseModel):
     climates: list[ClimateState] = Field(default_factory=list, max_length=20)
     ir_buttons: list[IRButtonState] = Field(default_factory=list, max_length=120)
 
+    hub_devices: list[str] = Field(default_factory=list, max_length=20)
+
     @model_validator(mode="after")
     def unique_entities(self):
+        if len(set(self.hub_devices)) != len(self.hub_devices) or any(
+                not re.fullmatch(r"[0-9A-F]{12}", device) for device in self.hub_devices):
+            raise ValueError("Invalid Hub 2 subscriptions")
         for key in ("id", "entity_id"):
             values = [getattr(item, key) for item in self.observations]
             if len(values) != len(set(values)):
@@ -161,8 +168,9 @@ class LinkState:
         self.ir_capable = False
         self.ir_buttons = []
         self.uncertain = set()
+        self.hub_updates = HubRelay(self)
 
-    def connect(self, socket, climate_capable=False, ir_capable=False):
+    def connect(self, socket, climate_capable=False, ir_capable=False, hub_capable=False):
         with self.lock:
             self._fail_pending()
             previous = self.socket
@@ -170,6 +178,7 @@ class LinkState:
             self.received_at = self.received_mono = None
             self.climate_capable = climate_capable
             self.ir_capable = ir_capable
+            self.hub_updates.reset(hub_capable)
             try:
                 self.loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -181,6 +190,7 @@ class LinkState:
         with self.lock:
             if self.socket is socket:
                 self.socket = None
+                self.hub_updates.reset(False)
                 self._fail_pending()
 
     def _fail_pending(self):
@@ -194,6 +204,7 @@ class LinkState:
             if self.socket is not socket or snapshot.sequence <= self.sequence:
                 return False
             self.sequence = snapshot.sequence
+            self.hub_updates.select(snapshot.hub_devices)
             self.received_at, self.received_mono = time.time(), time.monotonic()
             self.observations = [item.model_dump() for item in snapshot.observations]
             previous = {s["id"]: s for s in self.climates}
@@ -357,7 +368,7 @@ async def ha_websocket(websocket: WebSocket):
                 or not isinstance(token, str) or len(token) > 512):
             raise ValueError("Invalid hello")
         verify_ha_key(token)
-        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True)
+        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True, hello.get("hub_updates") is True)
         registered = True
         if previous is not None and previous is not websocket:
             try:
@@ -365,7 +376,7 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations", "climate_control", "ir_control"]})
+                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates"]})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.

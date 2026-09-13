@@ -10,6 +10,8 @@ from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
 from .climates import ClimateCommands, snapshot as climate_snapshot
 from .ir_buttons import IRCommands, snapshot as ir_snapshot
+from . import hub_updates
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
 async def async_setup_entry(hass, entry):
@@ -27,7 +29,9 @@ async def async_setup_entry(hass, entry):
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
                         commands=ClimateCommands(hass, climates) if climates or buttons else None,
                         ir_buttons=(lambda: ir_snapshot(hass, buttons)) if buttons else None,
-                        ir_commands=IRCommands(hass, buttons) if buttons else None)
+                        ir_commands=IRCommands(hass, buttons) if buttons else None,
+                        hub_devices=lambda: hub_updates.devices(hass),
+                        hub_updates=lambda frame: hub_updates.receive(hass, frame))
 
     @callback
     def changed(event):
@@ -42,6 +46,7 @@ async def async_setup_entry(hass, entry):
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):
         entry.async_on_unload(hass.bus.async_listen(event_type, changed))
+    entry.async_on_unload(async_dispatcher_connect(hass, hub_updates.SOURCES_SIGNAL, link.notify))
     task = hass.async_create_background_task(link.run(), "HomeButler outbound link")
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = (link, task)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

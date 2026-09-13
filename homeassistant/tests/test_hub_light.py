@@ -26,10 +26,10 @@ async def setup_hub(hass):
     coordinator = DataUpdateCoordinator(hass, getLogger(__name__), name="hub", config_entry=native, update_method=AsyncMock())
     coordinator.async_set_updated_data({"temperature": 28, "lightLevel": 8})
     native.runtime_data = SimpleNamespace(devices=SimpleNamespace(sensors=[
-        (SimpleNamespace(device_type="Hub 2", device_id="hub123"), coordinator)]))
+        (SimpleNamespace(device_type="Hub 2", device_id="AABBCCDDEEFF"), coordinator)]))
     device = dr.async_get(hass).async_get_or_create(config_entry_id=native.entry_id,
-        identifiers={("switchbot_cloud", "hub123")}, name="客廳 Hub 2")
-    source = er.async_get(hass).async_get_or_create("sensor", "switchbot_cloud", "hub123_temperature",
+        identifiers={("switchbot_cloud", "AABBCCDDEEFF")}, name="客廳 Hub 2")
+    source = er.async_get(hass).async_get_or_create("sensor", "switchbot_cloud", "AABBCCDDEEFF_temperature",
         config_entry=native, device_id=device.id, original_device_class="temperature")
     hass.states.async_set(source.entity_id, "28", {"device_class": "temperature", "unit_of_measurement": "°C"})
     entry = MockConfigEntry(domain="switchbot_hub_light", title="Hub 2", unique_id="switchbot_hub_light",

@@ -1,5 +1,8 @@
 # 三個 repo 的系統導覽
 
+v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
+HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
+
 2026-09-13 起依 [家庭中樞架構](local-hub-architecture.md) 分階段移轉：
 HA 承接本地設備／即時自動化與 HomeKit，HB 保留家庭應用與 AI。
 v1.48.0 HOME_ASSISTANT_IR_NAMES 逐台將 IR 電扇 handler 改走 HA 選定的本地按鈕；HA 自動化直接

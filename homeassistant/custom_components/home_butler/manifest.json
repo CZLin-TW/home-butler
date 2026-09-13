@@ -1,7 +1,7 @@
 {
   "domain": "home_butler",
   "name": "Home Butler",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "codeowners": [
     "@CZLin-TW"
   ],
@@ -11,6 +11,7 @@
   "iot_class": "cloud_push",
   "requirements": [],
   "after_dependencies": [
-    "switchbot_ir_buttons"
+    "switchbot_ir_buttons",
+    "switchbot_hub_light"
   ]
 }

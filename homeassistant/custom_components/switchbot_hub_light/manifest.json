@@ -1,7 +1,7 @@
 {
   "domain": "switchbot_hub_light",
   "name": "SwitchBot Hub 2 Light",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "config_flow": true,
   "documentation": "https://github.com/CZLin-TW/home-butler/blob/main/homeassistant/hub-light.md",
   "dependencies": ["switchbot_cloud"],

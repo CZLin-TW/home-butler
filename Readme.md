@@ -1,7 +1,7 @@
 # 家庭 AI 管家系統
 
-v1.49.0：[Hub 2 光照等級](homeassistant/hub-light.md) 可將既有 SwitchBot Cloud 資料補入 HA，
-用於 HA 自動化。1～20 級不是 lux，不增加 API 查詢。
+v1.50.0：[Hub 2 光照與 Push](homeassistant/hub-light.md) 將既有 SwitchBot Webhook 通知轉送 HA，
+提前觸發原生 API 讀取，溫度／濕度／光照一起更新。1～20 級不是 lux；保留 10 分鐘輪詢備援。
 
 v1.48.0：[電扇遙控按鈕](homeassistant/ir-buttons.md) 可在 HA 操作電源／風速＋／風速－，
 並將 Dashboard／LINE 的選定電扇改走 HA。沿用原生 SwitchBot 連線，不新增金鑰；IR 無實體狀態回讀。

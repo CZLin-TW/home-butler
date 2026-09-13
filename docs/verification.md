@@ -1,5 +1,10 @@
 # 驗證方式與範圍
 
+2026-09-14 v1.50.0：Hub 2 Webhook 提示經既有 HA WSS，喚醒原生 API 驗證讀取。
+本機 205 項後端測試通過，涵蓋真實 WSS 選取／斷線／重連、不轉送外來光照值、格式／重播拒絕與突發通知合併。
+HA 框架測試新增正式 coordinator 讀取更新、外來值不可覆蓋、連續通知最後一筆不遺失與卸載清理。
+HA CI 與實機驗證待完成；未建立夜燈自動化。
+
 2026-09-13 v1.49.0：新增 switchbot_hub_light 1.0.0，從原生 Cloud coordinator 讀 Hub 2 lightLevel。
 新增 HA 框架測試涵蓋光照單獨更新、缺失／非法值未知、連線失敗、native reload／來源改名／移除、
 設定篩選與卸載 listener 清理。
