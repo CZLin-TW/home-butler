@@ -2,8 +2,12 @@
 
 2026-09-13 HA 空調遷移（v1.46.0／HA 整合 1.1.0）：本機 195 項後端離線測試通過，
 涵蓋 HA 狀態優先、斷線未知、指令配對／去重／不補送、整數正規化及 legacy 回饋分流。
-新增真實 HA 框架的原生平台選取、參數預驗證、service 結果與雙向傳輸測試，待 Linux CI。
-已從家庭 HA 確認三台原生 SwitchBot Cloud 空調可見及模式清單；尚未切換控制權或驗證實體命令。
+新增真實 HA 框架的原生平台選取、參數預驗證、service 結果與雙向傳輸測試。
+[55a2659 CI](https://github.com/CZLin-TW/home-butler/actions/runs/34749437363) 的 HA、後端及 Homebridge 工作全部通過。
+Render 已部署 55a2659；家庭 HA 已安裝整合 1.1.0、重啟並保存三台原生空調，保留兩個 FP2 來源。
+既有 HA HomeKit Bridge 已加入 Climate 類群、三台均選加熱冷卻器，保留原 Sensor／Binary Sensor 類群及配對。
+已確認三台原生 SwitchBot Cloud 空調可見及模式清單；尚未設定 HOME_ASSISTANT_AC_NAMES，
+因此後端控制权尚未切換。使用者的 HA 實體命令確認、新 Apple Home 配件驗收與旧 Homebridge 清理仍待完成。
 FP2 前階段已實機確認觀測同步、停用顯示未知及重新啟用恢復。
 
 2026-09-13 HA 第一階段（v1.45.0，已推送 main）：本機 186 項後端測試通過，
