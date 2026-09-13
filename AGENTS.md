@@ -1,5 +1,11 @@
 # 接手入口
 
+HA 架構以 [docs/local-hub-architecture.md](docs/local-hub-architecture.md) 為準。
+第一階段 `home_assistant_api.py` 與 `homeassistant/` 只處理選定存在／亮度觀測，
+不可加入 owner key 相容、HA service call、未授權下行命令或 HB→HA→HB 循環。
+斷線／90 秒過期必須未知；registry ID 與實體可用性保留，重連只讀新快照。
+HA Core 框架測試使用獨立 Linux CI，不以 backend fake tests 代替實際 HA 載入。
+
 先讀 [README](Readme.md)、[系統導覽](docs/system-overview.md) 與 [驗證紀錄](docs/verification.md)。下列歷史事故用來解釋設計；目前背景週期以 `main.py` 的 `jobs.add` 為準。更新行為時同步修正舊段落、API 表格與註解，避免只追加版本章節。
 
 IR 名稱修正見 `device_name_resolution.py` 與 `tests/test_ir_names.py`：完整名稱優先，僅等價化結尾「電風扇／電扇」，保留房間；歧義不送出。只有省略名稱時可用單一設備 fallback，明確錯誤名稱不可改控另一台。Siri 漏字與後端名稱解析分開驗證，勿由裸設備名稱自動補上開／關。

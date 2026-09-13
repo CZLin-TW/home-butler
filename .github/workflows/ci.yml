@@ -6,6 +6,19 @@ on:
   pull_request:
 
 jobs:
+  home-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install matching real HA test framework
+        run: pip install "homeassistant==2026.9.2" pytest-homeassistant-custom-component
+      - name: Test registry, flows and lifecycle without home hardware
+        run: pytest -q
+        working-directory: homeassistant
+
   syntax:
     runs-on: ubuntu-latest
 

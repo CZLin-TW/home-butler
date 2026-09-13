@@ -16,6 +16,8 @@ HOME_BUTLER_API_KEY = os.environ.get("HOME_BUTLER_API_KEY", "")
 DEVICE_VOICE_API_KEY = os.environ.get("DEVICE_VOICE_API_KEY", "")
 HOMEBRIDGE_API_KEY = os.environ.get("HOMEBRIDGE_API_KEY", "")
 HOMEBRIDGE_DEVICE_NAMES = os.environ.get("HOMEBRIDGE_DEVICE_NAMES", "[]")
+# Dedicated HA observation capability; never grants owner or device controls.
+HOME_ASSISTANT_API_KEY = os.environ.get("HOME_ASSISTANT_API_KEY", "")
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "")
 # Siri 捷徑語音入口（/api/assistant）沒帶 user_id 時的「匿名」fallback 身分。
 # 正確用法：每位家人（含自己）的捷徑各自帶自己的 Line User ID，後端才認得出是誰

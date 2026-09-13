@@ -1,0 +1,45 @@
+{
+  "title": "Home Butler",
+  "config": {
+    "step": {
+      "user": {
+        "title": "連接 Home Butler",
+        "description": "將選定的存在、亮度感測器同步到 HomeButler。設備控制與 Apple Home 配對仍由 Home Assistant 管理。",
+        "data": {
+          "url": "HomeButler HTTPS 網址",
+          "api_key": "專用 HOME_ASSISTANT_API_KEY",
+          "export_entities": "要同步的感測器"
+        }
+      },
+      "reauth_confirm": {
+        "title": "更新 HomeButler 金鑰",
+        "data": {
+          "api_key": "專用 HOME_ASSISTANT_API_KEY"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "請確認專用金鑰正確，且至少 32 字元。",
+      "cannot_connect": "無法連接 HomeButler，請確認網址與後端已部署。",
+      "invalid_input": "請使用 HTTPS 網址，並選取已註冊的存在或 lx 亮度感測器。"
+    },
+    "abort": {
+      "already_configured": "已設定 HomeButler。",
+      "reauth_successful": "金鑰已更新。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "同步感測器",
+        "description": "只同步勾選的感測器。清空清單可停止同步讀值。",
+        "data": {
+          "export_entities": "要同步的感測器"
+        }
+      }
+    },
+    "error": {
+      "invalid_input": "請選取已註冊的存在或 lx 亮度感測器，最多 128 個。"
+    }
+  }
+}

@@ -1,0 +1,89 @@
+"""Configure only the backend URL/key and explicitly shared sensors."""
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.core import callback
+from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
+from .observations import current_entity_ids, select_sources
+from .transport import AuthError, LinkError, normalize_url, validate_connection
+
+
+def export_selector():
+    return selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
+        {"domain": "binary_sensor", "device_class": ["occupancy", "presence"]},
+        {"domain": "sensor", "device_class": "illuminance"},
+    ]))
+
+
+def password():
+    return selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD))
+
+
+class HomeButlerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+
+    async def async_step_user(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            try:
+                url = normalize_url(user_input[CONF_URL])
+                sources = select_sources(self.hass, user_input.get(CONF_EXPORT, []))
+                if len(user_input[CONF_KEY]) < 32:
+                    raise AuthError()
+                await self.async_set_unique_id(url)
+                self._abort_if_unique_id_configured()
+                await validate_connection(async_get_clientsession(self.hass), url, user_input[CONF_KEY])
+                return self.async_create_entry(title="Home Butler", data={
+                    CONF_URL: url, CONF_KEY: user_input[CONF_KEY], CONF_SOURCES: sources})
+            except AuthError:
+                errors["base"] = "invalid_auth"
+            except LinkError:
+                errors["base"] = "cannot_connect"
+            except ValueError:
+                errors["base"] = "invalid_input"
+        return self.async_show_form(step_id="user", data_schema=vol.Schema({
+            vol.Required(CONF_URL): str, vol.Required(CONF_KEY): password(),
+            vol.Optional(CONF_EXPORT, default=[]): export_selector(),
+        }), errors=errors)
+
+    async def async_step_reauth(self, entry_data):
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input=None):
+        errors = {}
+        entry = self._get_reauth_entry()
+        if user_input:
+            try:
+                await validate_connection(async_get_clientsession(self.hass), entry.data[CONF_URL], user_input[CONF_KEY])
+                return self.async_update_reload_and_abort(entry, data_updates={CONF_KEY: user_input[CONF_KEY]})
+            except AuthError:
+                errors["base"] = "invalid_auth"
+            except LinkError:
+                errors["base"] = "cannot_connect"
+        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({
+            vol.Required(CONF_KEY): password(),
+        }), errors=errors)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return HomeButlerOptionsFlow()
+
+
+class HomeButlerOptionsFlow(config_entries.OptionsFlow):
+    async def async_step_init(self, user_input=None):
+        errors = {}
+        entry = self.config_entry
+        if user_input is not None:
+            try:
+                sources = select_sources(self.hass, user_input.get(CONF_EXPORT, []))
+                return self.async_create_entry(title="", data={CONF_SOURCES: sources})
+            except ValueError:
+                errors["base"] = "invalid_input"
+        sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
+        return self.async_show_form(step_id="init", data_schema=vol.Schema({
+            vol.Optional(CONF_EXPORT, default=current_entity_ids(self.hass, sources)): export_selector(),
+        }), errors=errors)

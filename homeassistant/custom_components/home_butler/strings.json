@@ -1,0 +1,45 @@
+{
+  "title": "Home Butler",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Home Butler",
+        "description": "Share selected occupancy and illuminance sensors with your HomeButler backend. Device control and HomeKit pairing stay in Home Assistant.",
+        "data": {
+          "url": "HomeButler HTTPS URL",
+          "api_key": "Dedicated HOME_ASSISTANT_API_KEY",
+          "export_entities": "Sensors to share"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update HomeButler key",
+        "data": {
+          "api_key": "Dedicated HOME_ASSISTANT_API_KEY"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Check the dedicated HomeButler key (at least 32 characters).",
+      "cannot_connect": "Unable to reach the HomeButler HA endpoint. Check its URL and deployment.",
+      "invalid_input": "Use an HTTPS origin and registered occupancy / lux sensors."
+    },
+    "abort": {
+      "already_configured": "HomeButler is already configured.",
+      "reauth_successful": "Authentication updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shared sensors",
+        "description": "Only selected sensors are sent. Clear the list to stop sharing observations.",
+        "data": {
+          "export_entities": "Sensors to share"
+        }
+      }
+    },
+    "error": {
+      "invalid_input": "Select registered occupancy / lux sensors (up to 128)."
+    }
+  }
+}

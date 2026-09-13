@@ -41,6 +41,9 @@ app.include_router(device_voice_router)
 
 from homebridge_api import router as homebridge_router
 app.include_router(homebridge_router)
+from home_assistant_api import router as home_assistant_router, owner_router as ha_owner_router
+app.include_router(home_assistant_router)
+app.include_router(ha_owner_router)
 
 # Local PC agent realtime channel
 from agent_ws import router as agent_ws_router
