@@ -173,6 +173,19 @@ class AutoOffTests(unittest.TestCase):
         self.sync(30)
         self.assertEqual(self.active()[0]["狀態"],"已取消")
 
+    def test_detached_job_can_be_edited_back_to_off_as_ordinary_schedule(self):
+        self.sync()
+        modify, _, _ = self.handlers()
+        data = {"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00"}
+        modify({**data,"params_new":{"power":"on"}},"使用者",self.ctx)
+        self.state["lastPower"] = "off"
+        self.sync(30)
+        result = modify({**data,"params_new":{"power":"off"}},"使用者",self.ctx)
+        self.assertTrue(result.startswith("✅"),result)
+        self.assertEqual(self.sheet.rows[0]["來源"],HA_MANUAL_SOURCE)
+        self.assertEqual(auto.metadata(self.sheet.rows[0]),{"power":"off"})
+        self.dispatch(CommandResult.success("off")).assert_called_once()
+
     def test_old_paused_cycle_migrates_without_changing_deadline(self):
         self.sync()
         self.sheet.rows[0].update(狀態="已取消",參數=json.dumps({"power":"off","_auto_hours":3,"_auto_paused":True}))

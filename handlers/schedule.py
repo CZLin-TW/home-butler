@@ -176,8 +176,13 @@ def handle_modify_schedule(data, user_name, ctx):
         params = new_params if new_params is not None else original
         # Clients edit device parameters, never the internal cycle identity.
         params = {k: v for k, v in params.items() if not k.startswith("_auto_")}
-        params.update({k: v for k, v in original.items() if k.startswith("_auto_")})
-        params["_auto_edited"] = True
+        if original.get("_auto_closed"):
+            # The previous run ended and this retained non-off job became
+            # ordinary. Subsequent edits (including back to off) stay ordinary.
+            updates["來源"] = HA_MANUAL_SOURCE if ha_manual else "使用者"
+        else:
+            params.update({k: v for k, v in original.items() if k.startswith("_auto_")})
+            params["_auto_edited"] = True
         updates["參數"] = json.dumps(params, ensure_ascii=False)
     if new_trigger is not None:
         updates["觸發時間"] = _norm_trigger(new_trigger)
