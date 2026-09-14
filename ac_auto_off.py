@@ -7,10 +7,20 @@ No HA automation or device command is created while reconciling settings.
 import json
 from datetime import timedelta
 from threading import RLock
+from functools import wraps
 
 LOCK = RLock()
 HOURS_COLUMN = "自動關機小時數"
 SOURCE = "自動（HA）"
+
+
+def cycle_locked(fn):
+    """Serialize schedule edits/deletes with observation, dispatch and archive."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with LOCK:
+            return fn(*args, **kwargs)
+    return wrapped
 
 
 def hours_for(row):
@@ -39,11 +49,11 @@ def reconcile(ctx, now):
     """Observe HA once per scheduler tick; unknown/offline never means off.
 
 First observation of an already running AC starts at now. Temperature/mode
-changes don't reset it. A changed hours setting starts a new timer at now.
+changes don't reset it. Positive Sheet hours changes apply to the next cycle.
 """
     import ha_climate
     from sheets import append_record, update_row_fields, ensure_columns
-    from schedule_execution import _rows, _identity, HA_MANUAL_SOURCE, RESULT_COLUMN
+    from schedule_execution import _rows, _identity, RESULT_COLUMN
     devices = ctx.get("智能居家")
     changed = set()
     sheet = None
@@ -79,23 +89,28 @@ changes don't reset it. A changed hours setting starts a new timer at now.
         active = []
         for number, row in cycles:
             meta = metadata(row)
-            if not hours or power == "off" or meta.get("_auto_hours") != hours:
+            if power == "off":
                 fields = {"參數": json.dumps({**meta, "_auto_closed": True}, ensure_ascii=False)}
-                if row.get("狀態") == "待執行" or meta.get("_auto_paused"):
-                    fields.update({"狀態": "已取消", RESULT_COLUMN: "已關機、停用或變更自動關機時數"})
+                # If explicitly changed to an on/temperature action, it is no
+                # longer a shutdown and remains a normal future schedule.
+                if (row.get("狀態") == "待執行" or meta.get("_auto_paused")) and meta.get("power") == "off":
+                    fields.update({"狀態": "已取消", RESULT_COLUMN: "本輪空調已關機，取消尚未執行的自動關機排程"})
                 write(row, fields)
                 changed.add(name)
             else:
+                if not hours and (row.get("狀態") == "待執行" or meta.get("_auto_paused")):
+                    write(row, {"參數": json.dumps({**meta, "_auto_deleted": True, "_auto_paused": False}),
+                                "狀態": "已取消", RESULT_COLUMN: "Sheet 已停用自動關機；本輪不再補建"})
+                    changed.add(name)
                 active.append((number, row))
-        if not hours or power != "on":
+        if power != "on":
             continue
         # Never guess which duplicate cycle should execute.
         if len(active) > 1:
             raise ValueError("Duplicate active HA auto-off cycles")
-        user_off = any(r.get("設備名稱") == name and r.get("動作") == "control_ac"
-                       and r.get("狀態") in ("待執行", "待確認", "執行失敗") and r.get("來源") == HA_MANUAL_SOURCE
-                       and metadata(r).get("power") == "off" for _, r in rows)
         if not active:
+            if not hours:
+                continue
             sheet = sheet or ctx.get_worksheet("排程指令")
             if any(r.get("設備名稱") == name and keep_cycle(r) for _, r in _rows(sheet)):
                 raise ValueError("Auto-off cycle already exists")
@@ -103,9 +118,9 @@ changes don't reset it. A changed hours setting starts a new timer at now.
             started = now.strftime("%Y-%m-%d %H:%M")
             row = {"設備名稱": name, "動作": "control_ac", "建立者": "系統", "建立時間": started,
                    "來源": SOURCE, "觸發時間": (now + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M"),
-                   "狀態": "已取消" if user_off else "待執行",
-                   "參數": json.dumps({"power": "off", "_auto_hours": hours, "_auto_paused": user_off}),
-                   RESULT_COLUMN: "手動關機排程優先" if user_off else ""}
+                   "狀態": "待執行",
+                   "參數": json.dumps({"power": "off", "_auto_hours": hours}),
+                   RESULT_COLUMN: ""}
             append_record(sheet, row)
             ctx.get("排程指令").append(row)
             changed.add(name)
@@ -115,11 +130,11 @@ changes don't reset it. A changed hours setting starts a new timer at now.
             # Failed/claimed/completed attempts are terminal for this power cycle.
             if row.get("執行識別碼") or row.get("狀態") not in ("待執行", "已取消"):
                 continue
-            if user_off != bool(meta.get("_auto_paused")):
+            # Upgrade v1.56 paused rows once; never resurrect an explicit delete.
+            if hours and meta.get("_auto_paused") and not meta.get("_auto_deleted"):
                 write(row, {
-                    "參數": json.dumps({**meta, "_auto_paused": user_off}),
-                    "狀態": "已取消" if user_off else "待執行",
-                    RESULT_COLUMN: "手動關機排程優先" if user_off else ""})
+                    "參數": json.dumps({**meta, "_auto_paused": False}),
+                    "狀態": "待執行", RESULT_COLUMN: ""})
                 changed.add(name)
     if sheet is not None:
         ctx.set("排程指令", [r for _, r in _rows(sheet)])
@@ -136,15 +151,12 @@ def dispatch_allowed(row, ctx, schedules=None):
     devices = [d for d in ctx.get("智能居家") if d.get("名稱") == name and d.get("狀態") == "啟用"]
     state = ha_climate.status(name)
     meta = metadata(row)
-    from schedule_execution import HA_MANUAL_SOURCE
-    schedules = ctx.get("排程指令") if schedules is None else schedules
-    if any(r.get("設備名稱") == name and r.get("來源") == HA_MANUAL_SOURCE
-           and r.get("動作") == "control_ac" and r.get("狀態") in ("待執行", "待確認", "執行失敗")
-           and metadata(r).get("power") == "off" for r in schedules):
-        return False
-    return (len(devices) == 1 and hours_for(devices[0]) == meta.get("_auto_hours")
-            and hours_for(devices[0]) > 0 and keep_cycle(row) and not meta.get("_auto_paused")
-            and state.get("available") and not state.get("stateUncertain") and state.get("lastPower") == "on")
+    # An explicitly edited non-off action survives closure as an ordinary job.
+    detached = meta.get("_auto_closed") and meta.get("_auto_edited") and meta.get("power") != "off"
+    return (len(devices) == 1 and not meta.get("_auto_deleted")
+            and (detached or hours_for(devices[0]) > 0 and keep_cycle(row))
+            and state.get("available") and not state.get("stateUncertain")
+            and (detached or state.get("lastPower") == "on"))
 
 
 def describe(device, schedules):

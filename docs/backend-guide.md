@@ -141,7 +141,7 @@ Render／Vercel 設定及服務限制可能變動，選擇能符合自己可用�
 - 最後電源／最後溫度／最後模式／最後風速／最後更新時間：**僅空調設備使用**，由程式自動寫入，不需手動填。Dashboard 用來顯示最後狀態，LINE bot 用來支援「調低 1 度」這類相對指令。手動建 sheet 時這 5 欄保持空白即可
 - 空調溫度回饋設定／空調溫度回饋狀態：首次於 Dashboard 保存補償設定時自動補上 JSON 欄位；`最後溫度` 仍是舒適目標，實際 IR 下發溫度及待確認標記另存於回饋狀態。預設不啟用，詳見[補償說明](ac-temperature-feedback.md)。
 - 溫度補償／濕度補償：**僅感應器設備使用**。填入數字（正或負），程式讀取 sensor 數值後自動加上此補償值。例如 Hub 2 貼牆導致濕度偏高 5%，填 `-5`。空白 = 不補償。濕度補償後會自動限制在 0~100% 範圍
-- 自動關機小時數：**僅空調設備使用**。v1.56.0 Dashboard 可設 0–168 整數小時，HA 空調計時語意見 [自動關機](ac-auto-off.md)；以下是未遷移空調的既有行為。填入整數，系統會在空調開啟後 N 小時自動加一筆 off 排程。例如填 `8` → 開空調後最晚 8 小時關。空白或 0 = 停用此功能。使用者每次對該空調發送「從關→開」的命令會重置計時；純調整溫度/模式/風速不會重置。如果使用者自己設了 off 排程，系統會清掉自動排程讓使用者的決定優先
+- 自動關機小時數：**僅空調設備使用**。v1.57.0 時數僅在 Sheet 設 0–168 整數小時，Dashboard 編輯本輪產生的排程，HA 空調計時語意見 [自動關機](ac-auto-off.md)；以下是未遷移空調的既有行為。填入整數，系統會在空調開啟後 N 小時自動加一筆 off 排程。例如填 `8` → 開空調後最晚 8 小時關。空白或 0 = 停用此功能。使用者每次對該空調發送「從關→開」的命令會重置計時；純調整溫度/模式/風速不會重置。如果使用者自己設了 off 排程，系統會清掉自動排程讓使用者的決定優先
 - SwitchBot Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
 
 **排程指令**
@@ -447,7 +447,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/food | PATCH | 修改食品 |
 | /api/food | DELETE | 消耗（刪除）食品 |
 | /api/schedules | GET | 預設列待執行；`include_attention=true` 加入失敗／待確認紀錄 |
-| /api/ac/auto-off | GET / POST | 查詢／保存自動關機小時數，POST 為 device_name、hours（0–168 整數）；完整 Dashboard 權限，設定不立即控制家電 |
+| /api/ac/auto-off | GET | 完整 key 可查詢計時診斷；舊 POST 回 410，時數只在 Sheet 管理 |
 | /api/schedules | POST | 新增一次性手動排程；HA 空調標記使用者（HA），到期經 HA 執行 |
 | /api/schedules | DELETE | 取消待執行排程，或以 `execution_id` 封存失敗／待確認紀錄，不重送指令 |
 | /api/weather | GET | 查詢天氣（date, location） |

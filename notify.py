@@ -326,9 +326,10 @@ def _archive_processed_schedules(processed_devices, ctx):
     rows_to_archive = []  # list of (sheet_row_number, record)
     for device_name in processed_devices:
         device_records = [r for r in current_records if r.get("設備名稱") == device_name]
-        if any(r.get("狀態") == "待執行" for r in device_records):
-            continue  # 還有排程，這台先不封存
+        has_pending = any(r.get("狀態") == "待執行" for r in device_records)
         for i, r in enumerate(current_records):
+            if has_pending and r.get("來源") != SOURCE:
+                continue  # Closed auto cycles can be cleaned independently.
             eligible = r.get("狀態") in ("已執行", "已過期") or (r.get("來源") == SOURCE and r.get("狀態") == "已取消")
             if r.get("設備名稱") == device_name and eligible and not keep_cycle(r):
                 rows_to_archive.append((i + 2, r))  # +2: header row + 0-index

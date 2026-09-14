@@ -5,6 +5,7 @@ from sheets import get_all_devices_by_type, append_record, update_row_fields, en
 from prompt import _format_schedule_params
 from handlers.device import maintain_ac_auto_schedule
 from schedule_execution import ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN, HA_MANUAL_SOURCE
+from ac_auto_off import cycle_locked
 
 
 def _norm_trigger(s):
@@ -49,6 +50,7 @@ def _locate_schedule_rows(values, device_name, trigger_time, match_all, executio
     return out
 
 
+@cycle_locked
 def handle_add_schedule(data, user_name, ctx):
     sheet = ctx.get_worksheet("排程指令")
     device_name = data.get("device_name", "")
@@ -89,6 +91,7 @@ def handle_add_schedule(data, user_name, ctx):
     return f"✅ 已新增排程：{device_name} {trigger_time}"
 
 
+@cycle_locked
 def handle_modify_schedule(data, user_name, ctx):
     """編輯一筆待執行的排程。
 
@@ -137,23 +140,27 @@ def handle_modify_schedule(data, user_name, ctx):
     if target_row is None:
         return "❌ 找不到符合條件的排程"
 
+    # Read again under the cycle lock: the scheduler may have claimed the row
+    # since the request loaded its context. Ambiguous identities fail closed.
+    live = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, False)
+    if len(live) != 1:
+        return "❌ 找不到唯一的待執行排程，請重新讀取"
+    sheet_row, target_row = live[0]
     old_action = target_row.get("動作", "")
-    from ac_auto_off import keep_cycle
-    if keep_cycle(target_row):
-        return "❌ 請在空調的自動關機設定調整時數或停用"
+    from ac_auto_off import SOURCE, metadata
+    automatic = target_row.get("來源") == SOURCE
+    if automatic and ((new_device is not None and new_device != device_name)
+                      or (new_action is not None and new_action != "control_ac")):
+        return "❌ 本輪自動排程只能編輯原空調，其他設備請另建排程"
     from ha_climate import managed
     ha_manual = (new_action or old_action) == "control_ac" and managed(new_device or device_name)
-    if ha_manual and target_row.get("來源") not in ("使用者", HA_MANUAL_SOURCE):
+    if ha_manual and target_row.get("來源") not in ("使用者", HA_MANUAL_SOURCE, SOURCE):
         return "❌ 舊自動關機／防黴排程已停用，請另外新增手動排程"
 
-    # 寫入前即時定位列號，不信任快取的 target_idx+2（背景 tick 增刪排程列會位移）。
-    live = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, False)
-    if not live:
-        return "❌ 找不到符合條件的排程"
-    sheet_row = live[0][0]
-
     updates = {}
-    if ha_manual:
+    if automatic:
+        updates["來源"] = SOURCE
+    elif ha_manual:
         updates["來源"] = HA_MANUAL_SOURCE
     elif target_row.get("來源") == HA_MANUAL_SOURCE:
         updates["來源"] = "使用者"
@@ -164,10 +171,19 @@ def handle_modify_schedule(data, user_name, ctx):
     if new_params is not None:
         params_str = json.dumps(new_params, ensure_ascii=False)
         updates["參數"] = params_str
+    if automatic:
+        original = metadata(target_row)
+        params = new_params if new_params is not None else original
+        # Clients edit device parameters, never the internal cycle identity.
+        params = {k: v for k, v in params.items() if not k.startswith("_auto_")}
+        params.update({k: v for k, v in original.items() if k.startswith("_auto_")})
+        params["_auto_edited"] = True
+        updates["參數"] = json.dumps(params, ensure_ascii=False)
     if new_trigger is not None:
         updates["觸發時間"] = _norm_trigger(new_trigger)
     update_row_fields(sheet, sheet_row, updates)
     target_row.update(updates)
+    records[target_idx] = target_row
 
     # AC auto 重算：原與新只要任一是 control_ac 就要重算對應裝置。
     # 跨裝置（原 客廳 → 新 主臥）兩台都要算；同台 AC 只改參數呼叫一次。
@@ -185,6 +201,7 @@ def handle_modify_schedule(data, user_name, ctx):
     return f"✅ 已更新「{device_name} {trigger_time}」"
 
 
+@cycle_locked
 def handle_delete_schedule(data, ctx):
     sheet = ctx.get_worksheet("排程指令")
     archive = ctx.get_worksheet("排程封存")
@@ -202,11 +219,21 @@ def handle_delete_schedule(data, ctx):
         return "❌ 找不到符合條件的排程"
 
     any_user_ac_deleted = False
-    from ac_auto_off import keep_cycle
-    if any(keep_cycle(row) for _, row in matches):
-        return "❌ 請在空調的自動關機設定停用；本次計時紀錄不可直接移除"
+    from ac_auto_off import keep_cycle, metadata
+    if not delete_all and len(matches) != 1:
+        return "❌ 找不到唯一的排程，請重新讀取"
     # 倒序刪，避免刪一列後其餘列號位移。封存內容直接用即時讀到的 row。
     for row_number, row in sorted(matches, key=lambda x: x[0], reverse=True):
+        if keep_cycle(row):
+            # A hidden cancellation record prevents a new timer on the next
+            # on snapshot/restart. It is archived after confirmed off.
+            if execution_id:
+                append_record(archive, row)  # retain the original uncertain/failed outcome
+            fields = {"狀態": "已取消", "參數": json.dumps({**metadata(row), "_auto_deleted": True,
+                                                       "_auto_paused": False}, ensure_ascii=False)}
+            update_row_fields(sheet, row_number, fields)
+            row.update(fields)
+            continue
         # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
         if row.get("狀態") == "待執行" and row.get("動作") == "control_ac" and (row.get("來源") or "使用者") == "使用者":
             any_user_ac_deleted = True
@@ -214,13 +241,9 @@ def handle_delete_schedule(data, ctx):
         append_record(archive, {**row, "狀態": row["狀態"] if execution_id else "已取消"})
         sheet.delete_rows(row_number)
 
-    # 同步 request 快取：用內容比對移除（與剛刪掉的 live 條件一致），非索引。
-    def _cache_match(rec):
-        return ((rec.get(ATTEMPT_COLUMN) == execution_id if execution_id else rec.get("狀態") == "待執行")
-                and rec.get("設備名稱") == device_name
-                and (delete_all or not trigger_time
-                     or _norm_trigger(rec.get("觸發時間")) == trigger_time))
-    records[:] = [rec for rec in records if not _cache_match(rec)]
+    # Refresh including hidden cycle tombstones after explicit cancellation.
+    from schedule_execution import _rows
+    records[:] = [row for _, row in _rows(sheet)]
 
     # 只在刪到使用者 AC 排程時重算（避免使用者剛刪掉 auto 又被立刻加回來的困擾）
     if any_user_ac_deleted:

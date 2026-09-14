@@ -64,33 +64,121 @@ class AutoOffTests(unittest.TestCase):
         self.sync(45)
         self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 12:45")
 
-    def test_manual_off_pauses_then_resumes_original_deadline(self):
+    def test_manual_off_does_not_hide_or_reschedule_this_cycle(self):
         self.sync()
-        manual = schedule(**{"來源": HA_MANUAL_SOURCE})
+        manual = schedule(**{"來源": HA_MANUAL_SOURCE, "觸發時間":"2026-09-15 12:00"})
         self.sheet.rows.append(manual)
         self.sync(20)
-        self.assertEqual(self.active()[0]["狀態"], "已取消")
-        self.assertEqual(auto.describe(self.device, self.sheet.rows)["status"], "manual_priority")
-        manual["狀態"] = "待確認"
-        self.sync(30)
-        self.assertEqual(self.active()[0]["狀態"], "已取消")
-        self.sheet.rows.remove(manual)
-        self.sync(40)
         self.assertEqual(self.active()[0]["狀態"], "待執行")
-        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 12:00")
+        self.state["lastPower"] = "off"
+        self.sync(30)
+        self.assertEqual(self.sheet.rows[0]["狀態"], "已取消")
+        self.assertEqual(manual["狀態"], "待執行")
 
-    def test_changed_hours_resets_once_and_zero_disables_even_offline(self):
+    def test_sheet_hours_changes_apply_next_cycle_and_zero_cancels_without_rearm(self):
         self.sync()
         self.device[auto.HOURS_COLUMN] = 2
         self.sync(30)
-        self.sync(40)
-        self.assertEqual(len(self.active()), 1)
-        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 11:30")
+        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 12:00")
         self.state.update(available=False, lastPower="")
         self.device[auto.HOURS_COLUMN] = 0
         self.sync(50)
+        self.assertEqual(self.active()[0]["狀態"], "已取消")
+        self.state.update(available=True,lastPower="on")
+        self.device[auto.HOURS_COLUMN] = 2
+        self.sync(60)
+        self.assertEqual(self.active()[0]["狀態"], "已取消")
+        self.state["lastPower"] = "off"
+        self.sync(70)
+        self.state["lastPower"] = "on"
+        self.sync(80)
+        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 12:20")
+
+    def handlers(self):
+        from schedule_execution import ATTENTION_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
+        archive = Sheet([])
+        self.sheet.delete_rows = lambda n: self.sheet.rows.pop(n-2)
+        self.ctx.get_worksheet = lambda n: archive if n == "排程封存" else self.sheet
+        env = {"json":json,"datetime":datetime,"HA_MANUAL_SOURCE":HA_MANUAL_SOURCE,
+               "ATTENTION_STATES":ATTENTION_STATES,"ATTEMPT_COLUMN":ATTEMPT_COLUMN,"RESULT_COLUMN":RESULT_COLUMN,
+               "update_row_fields":self.update,"append_record":self.append,"ensure_columns":ensure_columns,
+               "maintain_ac_auto_schedule":Mock()}
+        endpoint("handlers/schedule.py","_norm_trigger",env)
+        endpoint("handlers/schedule.py","_locate_schedule_rows",env)
+        return (endpoint("handlers/schedule.py","handle_modify_schedule",env),
+                endpoint("handlers/schedule.py","handle_delete_schedule",env), archive)
+
+    def test_edit_survives_restart_then_off_cleans_only_its_shutdown(self):
+        self.sync()
+        modify, _, _ = self.handlers()
+        result = modify({"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00",
+                         "trigger_time_new":"2026-09-14 13:00",
+                         "params_new":{"power":"off","_auto_closed":True,"_auto_hours":1}},"使用者",self.ctx)
+        self.assertTrue(result.startswith("✅"),result)
+        self.assertEqual(auto.metadata(self.active()[0])["_auto_hours"],3)
+        self.assertNotIn("_auto_closed",auto.metadata(self.active()[0]))
+        self.ctx = Context(self.sheet)
+        self.ctx.data["智能居家"] = [self.device]
+        self.sync(30)
+        self.assertEqual(self.active()[0]["觸發時間"],"2026-09-14 13:00")
+        self.sheet.rows.append(schedule(**{"來源":HA_MANUAL_SOURCE,"觸發時間":"2026-09-15 12:00"}))
+        self.state["lastPower"] = "off"
+        self.sync(40)
+        self.assertEqual(self.sheet.rows[0]["狀態"],"已取消")
+        self.assertEqual(self.sheet.rows[1]["狀態"],"待執行")
+        self.state["lastPower"] = "on"
+        self.sync(50)
+        self.assertEqual(self.active()[0]["觸發時間"],"2026-09-14 12:50")
+
+    def test_delete_is_hidden_and_durable_until_next_off_on(self):
+        self.sync()
+        _, delete, _ = self.handlers()
+        result = delete({"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00"},self.ctx)
+        self.assertTrue(result.startswith("✅"),result)
+        self.ctx = Context(self.sheet)
+        self.ctx.data["智能居家"] = [self.device]
+        self.sync(30)
+        self.assertEqual(len(self.active()),1)
+        self.assertEqual(self.active()[0]["狀態"],"已取消")
+        self.dispatch(CommandResult.success("off")).assert_not_called()
+        self.state["lastPower"] = "off"
+        self.sync(40)
+        self.state["lastPower"] = "on"
+        self.sync(50)
+        self.assertEqual(self.active()[0]["狀態"],"待執行")
+
+    def test_edit_to_on_survives_off_as_normal_schedule(self):
+        self.sync()
+        modify, _, _ = self.handlers()
+        result = modify({"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00",
+                         "params_new":{"power":"on","temperature":28}},"使用者",self.ctx)
+        self.assertTrue(result.startswith("✅"),result)
+        self.state["lastPower"] = "off"
+        self.sync(30)
         self.assertFalse(self.active())
-        self.assertEqual(auto.describe(self.device, self.sheet.rows)["status"], "disabled")
+        self.assertEqual(self.sheet.rows[0]["狀態"],"待執行")
+        handler = self.dispatch(CommandResult.success("on"))
+        handler.assert_called_once_with({"power":"on","temperature":28,"device_name":"測試冷氣"},self.ctx,from_auto_schedule=False)
+
+    def test_claimed_or_ambiguous_row_cannot_be_edited_and_unknown_can_be_removed(self):
+        self.sync()
+        modify, delete, archive = self.handlers()
+        self.sheet.rows[0].update(狀態="待確認",執行識別碼="claim-1",執行結果="unknown")
+        result = modify({"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00",
+                         "trigger_time_new":"2026-09-14 13:00"},"使用者",self.ctx)
+        self.assertTrue(result.startswith("❌"))
+        result = delete({"device_name":"測試冷氣","trigger_time":"2026-09-14 12:00","execution_id":"claim-1"},self.ctx)
+        self.assertTrue(result.startswith("✅"),result)
+        self.assertEqual(archive.rows[0]["狀態"],"待確認")
+        self.sync(30)
+        self.assertEqual(self.active()[0]["狀態"],"已取消")
+
+    def test_old_paused_cycle_migrates_without_changing_deadline(self):
+        self.sync()
+        self.sheet.rows[0].update(狀態="已取消",參數=json.dumps({"power":"off","_auto_hours":3,"_auto_paused":True}))
+        self.sync(30)
+        self.assertEqual(self.active()[0]["狀態"],"待執行")
+        self.assertEqual(self.active()[0]["觸發時間"],"2026-09-14 12:00")
 
     def test_offline_and_uncertain_do_not_clear_or_dispatch(self):
         self.sync()
@@ -131,6 +219,7 @@ class AutoOffTests(unittest.TestCase):
         self.sheet.delete_rows.assert_not_called()
         self.state["lastPower"] = "off"
         self.sync(181)
+        self.sheet.rows.append(schedule(**{"來源": HA_MANUAL_SOURCE, "觸發時間": "2026-09-15 20:00"}))
         fn({"測試冷氣"}, ctx)
         self.sheet.delete_rows.assert_called_once_with(2)
 
@@ -144,42 +233,19 @@ class AutoOffTests(unittest.TestCase):
 
 
 class AutoOffApiTests(unittest.TestCase):
-    def test_valid_save_uses_existing_column_and_never_controls_hardware(self):
+    def test_retired_settings_post_does_not_read_or_write_sheets(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from test_home_assistant import HomeAssistantTests, load, OWNER
-        base = HomeAssistantTests()
-        base.setUp()
-        base.config.now_taipei = lambda: datetime(2026, 9, 14, 9, tzinfo=timezone.utc)
-        device = {"名稱": "測試冷氣", "Device ID": "test-ac", "類型": "空調", "狀態": "啟用", auto.HOURS_COLUMN: 0}
-        devices = Sheet([device]); devices.row_values = lambda _: devices.headers
-        schedules = Sheet([])
-        schedules.headers = list(schedule()) + ["建立者", "建立時間", "執行識別碼", "執行結果"]
-        def context():
-            ctx = Context(schedules)
-            ctx.data["智能居家"] = [dict(device)]
-            ctx.data["排程指令"] = [dict(r) for r in schedules.rows]
-            ctx.load = Mock()
-            ctx.get_worksheet = lambda n: devices if n == "智能居家" else schedules
-            return ctx
-        fake = SimpleNamespace(RequestContext=context, update_row_fields=update_fields,
-                               append_record=lambda sheet, row: sheet.rows.append(dict(row)), ensure_columns=ensure_columns)
-        with patch.dict("sys.modules", {"config": base.config}):
-            auth = load("auto_write_test_auth", "auth.py")
-        with patch.dict("sys.modules", {"auth": auth}):
-            api = load("auto_write_test_api", "ac_auto_off_api.py")
+        base = HomeAssistantTests(); base.setUp()
+        with patch.dict("sys.modules", {"config":base.config}):
+            auth = load("auto_retired_auth", "auth.py")
+        with patch.dict("sys.modules", {"auth":auth}):
+            api = load("auto_retired_api", "ac_auto_off_api.py")
         app = FastAPI(); app.include_router(api.router)
-        client = TestClient(app)
-        with patch.dict("sys.modules", {"sheets": fake, "config": base.config}), patch("ha_climate.managed", return_value=True), patch("ha_climate.status", return_value={"available":True,"lastPower":"on"}), patch("ha_climate.control") as control:
-            response = client.post("/api/ac/auto-off", headers={"X-API-Key":OWNER},json={"device_name":"測試冷氣","hours":3})
-            self.assertEqual(response.status_code,200,response.text)
-            self.assertEqual(response.json()["scheduled_at"],"2026-09-14 12:00")
-            self.assertEqual(device[auto.HOURS_COLUMN],3)
-            self.assertEqual(client.get("/api/ac/auto-off",headers={"X-API-Key":OWNER}).json()["devices"]["測試冷氣"]["hours"],3)
-            response = client.post("/api/ac/auto-off", headers={"X-API-Key":OWNER},json={"device_name":"測試冷氣","hours":0})
-            self.assertEqual(response.json()["status"],"disabled")
-            self.assertEqual(schedules.rows[0]["狀態"],"已取消")
-            control.assert_not_called()
+        with patch.dict("sys.modules", {"sheets":SimpleNamespace()}):
+            response = TestClient(app).post("/api/ac/auto-off",headers={"X-API-Key":OWNER},json={"device_name":"測試冷氣","hours":3})
+        self.assertEqual(response.status_code,410)
 
     def test_owner_only_and_strict_hours_schema(self):
         from fastapi import FastAPI
