@@ -8,6 +8,12 @@ Chrome demo 新增 2026-12-01 03:00 HA 測試空調排程，編輯為關機並�
 1280×900 照明頁展開色盤，document 高度 900→1106，經典捲軸出現；卡片 left 均 56.4px、width 均 376px，沒有水平位移。
 本次未建立正式家庭排程、未控制實體家電；實際到期後的家電反應仍待使用者驗收。無需更新 HA 整合。
 
+部署確認：Render 已將 `41c5aab6e4aa14ee797baf558014d29e7208c203` 列為最後成功部署；
+HB [CI 34847276001](https://github.com/CZLin-TW/home-butler/actions/runs/34847276001) 與 Dashboard
+[CI 34847313146](https://github.com/CZLin-TW/Dashboard/actions/runs/34847313146) 均成功。
+Dashboard `ba3a330332ad6c7a6d423dd3ccc45bbe3f093788` 已上線，正式 `/api/version` 與頁面均為 1.55.0。
+已登入正式頁面，三台 HA 空調均有排程入口；客廳空調表單展開正常後取消，沒有建立正式排程。
+
 2026-09-14 v1.54.0（部署前驗證）：216 項 HB 離線測試、30 項 Dashboard 測試、lint、正式 build 通過。
 本機 demo 驗證彩色／白光切換、二維色盤點選、飽和度鍵盤操作、色溫回讀；390px 無橫向溢出。
 HA 新增色彩能力、互斥與全批預驗證、混合燈組／部分支援／去重測試。
