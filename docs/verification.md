@@ -6,11 +6,27 @@
 全部通過：211 項後端測試、HA Core 2026.9.2／Python 3.14 的 53 項框架測試及 Homebridge 測試。
 Dashboard `ea5cb72106369fa65fa0ae248d1500c2da18bee7` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34813495573)
 測試／lint／build 與 Vercel 部署成功，公開 `/api/version` 已實際確認 1.52.0。
-Render 公開健康頁回 200，但沒有取得本次 runtime SHA，因此尚未確認最新程序部署。
 使用者同意與感測器／Hue 統一一起上線，實體操作留待使用者稍後測試。
-目前 Chrome 尚未連線，家庭 HA 安裝、舊定時自動化停用與來源切換仍待執行，不能標示已完成。
-可使用上述完整測試 SHA 一起安裝 `home_butler` 1.4.0 與 `switchbot_hub_light` 1.2.0，再重啟一次。
-後續設定步驟見 [感測器與 Hue 統一](../homeassistant/sensors-and-hue.md)；不必再向使用者要求實機測試後才部署。
+同日 15:35（Asia/Taipei）已透過桌面啟動 Chrome 並使用既有登入完成家庭部署，不需遠端桌面。
+HA 從上述完整 SHA 安裝 `home_butler` 1.4.0 與 `switchbot_hub_light` 1.2.0，重啟成功，UI 版本已確認。
+安裝備份為 `/config/home_butler-backup-20260914-153500-346` 及
+`/config/switchbot_hub_light-backup-20260914-153501-357`。
+三台 Hub 保留選取，備援間隔儲存為 60 秒；舊自動化 `1789319755253` 已停用、未刪除。
+主臥光照 attributes 顯示最後定時請求從 15:44:44 進到 15:48:47，最後 Push 仍為 15:40:40，
+證明停用舊自動化後本機計時仍工作；此為請求時間，不能視為新的設備量測時間。
+
+Home Butler 已配對客廳／主臥／次臥 Hub 2 的溫度、濕度、光照，以及 SwitchBot CO2 的溫度、濕度、CO₂，共 12 項。
+原生來源為 `sensor.hub_2_ke_ting_*`、`sensor.hub_2_zhu_wo_*`、`sensor.hub_2_ci_wo_*` 的 temperature/humidity，
+三房光照依序為 `sensor.guang_zhao_deng_ji`、`sensor.guang_zhao_deng_ji_2`、`sensor.guang_zhao_deng_ji_3`；
+CO₂ 裝置使用 `sensor.co2_temperature`、`sensor.co2_humidity`、`sensor.co2_carbon_dioxide`。
+Hue 選取主臥、客廳及全家來源，保留原兩個 FP2 實體、三台原生空調及九個 IR 按鈕。
+Render 已儲存 `HOME_ASSISTANT_SENSOR_NAMES` 為這四個 HB 設備名称，`HOME_ASSISTANT_HUE_ENABLED=true`；
+設定部署 `dep-dajqbhu7bikc73d409pg` 在 Render UI 確認 **Live**，執行 commit 為 `c6f00ce`（部署 40.6 秒）。
+Dashboard 1.52.0 正式照明頁已顯示 Home Assistant、主臥／客廳兩區及既有場景／效果清單；
+主臥「偵測亮度」回 11 級、HA 同步於剛剛，與 HA 當下值相同。裝置頁溫濕度／CO₂、歷史圖與 HA 連線可讀。
+部署期間的資料過期提示於重新載入後消失。兩區 HB 自動夜燈均顯示 OFF，未變更其規則。
+未發出燈光、空調、風扇控制或測試通知；Hue 開關／調光／場景／效果／通知及人工介入仍待使用者晚上實機驗收。
+設定及還原見 [感測器與 Hue 統一](../homeassistant/sensors-and-hue.md)。
 
 2026-09-14 v1.51.0／home_butler 1.4.0：新增感測環境快照與 Hue 選定區域控制通道。
 本機 211 項後端離線測試通過，新增 HA 來源失聯／補償一次／歷史保留、光照型別、Hue 分流與提醒去重。
@@ -18,11 +34,10 @@ HA framework 測試新增 registry 改名／替換／單位、原生 Hue 場景�
 未授權目標拒絕、命令過期／取消／部分失敗不重送及雙向傳輸。
 `22bccffd12d97162cc6e61932d3b50ccf430992c` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34810186441)
 三個 job 全通過，其中 HA Core 2026.9.2／Python 3.14 的 47 項 framework 測試通過。
-家庭未啟用切換設定前仍走既有路徑；目前 Chrome 連線不可用，不能據離線結果宣稱實機已遷移。
+此為程式與 CI 階段紀錄；同日下午家庭安裝與切換已完成，詳見上方 v1.52.0 部署紀錄。
 Dashboard `dee34f26cd34c7fecf87bac4c51a00670df0ea0c` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34810581459)
 及 Vercel 部署成功（28 tests／lint／build）；隔離預覽已確認 HA 照明來源與「4 級」光照顯示。
-尚待：HA 安裝 1.4.0、逐台確認 Hub 2／CO₂ 實體及配對、勾選 Hue 區域、Render 切換設定、
-核對現有夜燈規則擁有者與實機驗收。Render 本次程序 SHA 未取得，不能以 Git push 代替部署確認。
+HA 配對、Hue 選取與 Render 來源切換已完成；燈光實機驗收仍未完成，不以部署成功替代。
 
 2026-09-14 家庭 HA 設定：建立「Hub 2 每分鐘更新感測資料」（`1789319755253`），
 時間模式 `/1`，更新三台 Hub 2 各一個原生溫度實體，保留 Push。

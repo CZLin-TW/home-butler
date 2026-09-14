@@ -3,7 +3,8 @@
 v1.52.0／switchbot_hub_light 1.2.0：Hub 備援查詢由整合管理，預設 60 秒、可設 60–3600 整數秒。
 Push 與定時刷新共用單台工作／原生 coordinator；請求結束後延後該台的下一次輪詢，保留最後一筆提示。
 不 monkey patch core、不取出憑證、不新增 HB 查詢；Render 斷線仍能輪詢。卸載／options reload 清理計時與 pending。
-家庭安裝後停用舊自動化 1789319755253，尚未操作前不可記成已停用。詳見光照文件及 verification。
+家庭已於 2026-09-14 安裝並停用舊自動化 1789319755253（保留供還原）；60 秒備援已讀到實際請求紀錄。
+感測器與 Hue 切換旗標已啟用，Dashboard 讀取已驗證；燈光實體操作仍待使用者驗收。詳見 verification。
 
 v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md)。
 `HOME_ASSISTANT_SENSOR_NAMES` 按名稱指定唯一 HA 即時來源；`ha_sensors` 套原 Sheet 補償一次，
