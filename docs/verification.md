@@ -10,6 +10,12 @@ Dashboard 28 項測試、lint／build 通過；模擬家庭完成桌機 1280 與
 自動模式下手動控制及感測器仍鎖定，監控時間可調。沒有操作家庭設備或更動 HA 自動化。
 純 UI 測試不代表 Hue 燈具效果實機驗收或 iPhone Safari 已驗收；這版不需重裝 HA 整合。
 
+同日正式部署確認：後端 `ac6361d8753e1e5b3efcbb7c736d8b7e9692f6b8` 的
+[CI](https://github.com/CZLin-TW/home-butler/actions/runs/34837653311) 三項 job 全部成功，
+Render UI 顯示該提交為 Last successfully deployed commit、Live，部署 `dep-dajtglgu01pc739ehsig`，耗時 1m14s。
+Dashboard `d25b57f` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34837693572) 成功，
+正式 `/api/version` 已確認 1.53.0。部署核對為唯讀，沒有操作家電；HA 套件及規則未修改。
+
 2026-09-14 README 重整（僅文件）：首頁改為現行架構與建置入口，詳細設定／API 移至 backend-guide，
 新增 version-selection，區分 main 不啟用 HA 與 HA 前 v1.44.0 固定快照。
 已用 Git 歷史核對首次 HA commit 的父版本：後端 `5c0b681f149741236d16d100bf96b734d1b1f767`，
