@@ -1,151 +1,111 @@
-# v1.57.0 自動關機改用一般排程編輯
+# HomeButler 維護入口
 
-使用者要求時數只在 Sheet「自動關機小時數」管理；Dashboard 移除設定面板與 BFF，舊後端 POST 回 410。
-HB 每 60 秒觀察 HA，首次 on 依 Sheet 產生來源「自動（HA）」的一筆排程；正整數時數變更用於下輪，0 取消本輪。
-Dashboard 原排程區可編輯時間／同一空調參數或刪除，不能編輯未知／失敗結果；刪除後不補回。
-以來源與既有 JSON metadata 追蹤本輪；_auto_edited 保留修改，_auto_deleted 的已取消列是隱藏去重紀錄，確認 off 前不能封存。
-確認 off 只取消本輪尚未執行的 off；另建的手動排程完全保留。若明確編成 on／調溫則結束 cycle、保留為一般未來排程。
-已關閉的成功／取消 cycle 可獨立封存，即使該設備還有未來手動排程。下次 on 才依 Sheet 重新產生。
-v1.56 _auto_paused 舊列會恢復為可編輯排程，保留期限；不再因另有手動 off 隱藏或重建此列。
-排程增改刪與背景 reconcile／dispatch／archive 共用 cycle lock；寫入前查即時列，歧義拒絕。未知結果不重送。
-不新增 Sheet 欄位或 HA 自動化，HA 組件不用更新；不可用家庭家電操作測試。詳見後端 docs/ac-auto-off.md。
+這份檔案是**現況**與**不可違反的約束**。歷史版本的逐版決定移到
+[版本變更紀錄](docs/agents-history.md)，那裡按時間保留原始描述，不隨新版改寫。
 
-# v1.55.0 HA 空調手動排程與控制樣式
+**加新行為時請修正本檔的現況章節與 docs 的原段落，不要在開頭追加新的版本章節**——
+那正是過去讓同一件事出現兩種說法的原因。變更內容另外寫進版本變更紀錄與
+[驗證紀錄](docs/verification.md)。
 
-Dashboard 空調可新增／修改／取消指定日期時間的一次性排程，由 HB 每 60 秒檢查、經 HA 控制。
-新建或明確編輯的 HA 手動排程使用來源「使用者（HA）」；舊列不自動升級，自動／防黴列不能轉換。
-執行時重驗來源與目前 provider；切換不一致則取消，不能 fallback 直接 IR。未知結果維持待確認、不重送。
-HB 舊自動關機、防黴與回饋仍不對 HA 空調執行；這不是 HA 自動化的編輯器，也不是每日重複排程。
-排程共用 Dropdown／38px 控制項與收合卡片；keepMounted 保留草稿，其他延遲載入面板仍按原設定卸載。
-html 預留 scrollbar-gutter: stable，舊瀏覽器以 overflow-y: scroll 備援，避免色盤展開引起左右位移。
-部署先 HB 再 Dashboard；不需更新 HA 整合或 Sheets 欄位。
+先讀 [README](Readme.md)、[系統導覽](docs/system-overview.md) 與 [驗證紀錄](docs/verification.md)。
+背景週期以 `main.py` 的 `jobs.add` 為準，設備控制權以 Render 環境變數與 HA 實際選取為準。
 
-# v1.54.0 照明光色控制
+## 目前控制權（2026-09-14 / 系統 v1.57.0）
 
-照明卡保留電源／亮度，加入白光色溫與可展開的 HSV 二維色盤；特效／場景直接顯示。
-通知操作已從日常照明卡移除，既有 ToDo breathe 提醒保留，通知效果編輯器尚未實作。
-需要 HA home_butler 1.5.0 才宣告 color_control；舊 HA／PC 不顯示新控制，不可默默忽略色彩請求。
-只向允許燈組內支援的燈具送色彩／色溫；HS 經 HA 公開色彩工具套每燈 gamut，色溫使用共同範圍。
-調色不附帶開機；白光和彩色不能同時下發，整批預驗證後寫入，未知／部分完成不重送。
-色盤放開、滑桿放開／鍵盤完成才送；模式切換只選擇編輯工具，調整後才套用。
-目前讀值來自 Bridge；混合光色不平均，mirek 取整後 K 值可能與輸入有小幅差異。
-這版聚焦光色卡片；HA 區域統一、HB 除濕機區域對應及 ToDo 效果編輯仍是下一階段，不能宣稱已完成。
+下表是**控制權歸屬，不是實機驗收狀態**；逐台逐模式的驗收缺口見
+[驗證紀錄](docs/verification.md) 與 [HA 遷移盤點](docs/ha-migration-audit.md)。改行為時連這張表一起改。
 
-# v1.53.0 照明精簡與除濕機保留
+| 範圍 | 目前由誰控制 | 決定權的旗標／來源 |
+| --- | --- | --- |
+| 三台空調 | HA（原生 SwitchBot Cloud climate） | `HOME_ASSISTANT_AC_NAMES`；整數溫度、無回饋補償、無防黴 |
+| 空調排程 | HB 保管，經 HA 下達 | 手動「使用者（HA）」、自動關機「自動（HA）」＋Sheet「自動關機小時數」 |
+| 三台 IR 電扇 | HA 本機 button | `HOME_ASSISTANT_IR_NAMES`；只有電源／風速±，無實體回讀 |
+| 溫濕度／CO₂／Hub 光照 | HA 為即時來源，HB 每 300 秒採樣留歷史 | `HOME_ASSISTANT_SENSOR_NAMES`；Hub 光照是 1–20 級，不是 lux |
+| Hue 照明（含色溫／HSV） | HA（需 home_butler 1.5.0 宣告 `color_control`） | `HOME_ASSISTANT_HUE_ENABLED`；PC agent Hue 僅備援 |
+| FP2 存在／光照 | HA → HB 記憶體快照 → Dashboard | 斷線或超過 90 秒即未知；`aqara_api.py` 不參與 |
+| 除濕機 | **完整留在 HB**（Panasonic／LG 直連） | 使用者 2026-09-14 決定不遷移，新家改中央除濕 |
+| 自動夜燈規則 | 已退役（v1.53.0） | 舊 Sheet 保留不執行，規則寫入回 410 |
+| 劇院／PC 指標 | theater-agent／PC agent，未遷移 | HA 日後最多當中繼，不重寫同一套連動 |
+| Apple Home | HA HomeKit Bridge | `homebridge/` 插件降為歷史相容，不列入驗收 |
 
-使用者決定除濕機完整留在 HB（新家預計中央除濕），不再列 HA 遷移待辦。
-HB 夜燈引擎／背景工作／Webhook 及 HA 快照評估已移除；舊 Sheet 保留不執行，規則寫入回 410。
-Hub 更新提示與備援轮詢保持；待辦燈光提醒改用 lighting_transport.send_command_sync，不可依賴已刪夜燈模組。
-照明卡常駐電源／亮度／場景，效果通知與區域設定收合；除濕機自動／手動設定收合，HB 控制語意不變。
-這是既有卡片整理，尚未改成新的全站控制 Layout。部署先後端再 Dashboard，無須重裝 HA 整合。
+## HB 與 HA 的分工原則
 
-# 接手入口
+- **即時互動與連續條件判斷歸 HA**：存在感測、夜燈、日出、亮度觸發、設備冷卻等待。
+  這些要在本地毫秒級反應，不該繞 Render。
+- **需要在 Dashboard 查看、記住、修改的一次性排程歸 HB**：使用者要看得到、改得動、
+  刪得掉的東西留在 Sheet，由 HB 每 60 秒派送、經 HA 下達。
+- 固定時段依上面兩條判斷，**不是一律歸 HA**：純本地即時反應寫在 HA；
+  需要家人查看或調整的做成 HB 排程。
+- 每台設備、每條規則同一時間只能有一個控制主體。禁止 HB → HA → HB 的循環命令路徑，
+  禁止同一條自動化在兩邊同時執行。
+- Dashboard 與任何語音入口都**不能編輯 HA 自動化**，也不要另外長出第二套排程引擎。
 
-README 已按現行 HA 分工重整；完整設定、Sheets 欄位與 API 移至 [後端參考](docs/backend-guide.md)。
-[版本選擇](docs/version-selection.md) 記錄 v1.44.0 的後端／Dashboard 固定 SHA、下載及更新限制。
-這是 HA 導入前最後快照，不是最後能無 HA 運作的版本；main 的 HA 來源仍由允許清單／旗標選配。
-維護時同步 README、參考文件與版本索引，不恢復「所有設備皆直連」或把舊快照當獨立維護分支。
+## 排程來源（五種，互相誤刪就是靜默失效）
 
-v1.52.0／switchbot_hub_light 1.2.0：Hub 備援查詢由整合管理，預設 60 秒、可設 60–3600 整數秒。
-Push 與定時刷新共用單台工作／原生 coordinator；請求結束後延後該台的下一次輪詢，保留最後一筆提示。
-不 monkey patch core、不取出憑證、不新增 HB 查詢；Render 斷線仍能輪詢。卸載／options reload 清理計時與 pending。
-家庭已於 2026-09-14 安裝並停用舊自動化 1789319755253（保留供還原）；60 秒備援已讀到實際請求紀錄。
-感測器與 Hue 切換旗標已啟用，Dashboard 讀取已驗證；燈光實體操作仍待使用者驗收。詳見 verification。
+| 來源 | 誰建立 | 適用設備 | 使用者可否編輯 |
+| --- | --- | --- | --- |
+| 使用者 | Dashboard／LINE／完整 Siri | 一般設備與未遷移空調 | 可 |
+| 使用者（HA） | 同上，對 HA 空調（v1.55.0 起） | HA 管理的空調 | 可 |
+| 自動 | `maintain_ac_auto_schedule` | **僅未遷移空調**（對 HA 空調 early-return） | 不應手動改 |
+| 自動（HA） | `ac_auto_off.reconcile`，依 Sheet 時數 | HA 管理的空調 | 可改時間／參數或刪除，刪除後本輪不補回 |
+| 防黴 | 切送風時寫入的收尾關 | **僅未遷移空調** | 不應手動改 |
 
-v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md)。
-`HOME_ASSISTANT_SENSOR_NAMES` 按名稱指定唯一 HA 即時來源；`ha_sensors` 套原 Sheet 補償一次，
-五分鐘歷史保持，不可在 HA 失聯時 fallback 雲端或把 1–20 光照等級當 lux。
-`HOME_ASSISTANT_HUE_ENABLED` 將所有照明入口切到 `lighting_transport`，HA 本機選定 Hue 區域。
-Hue 沿用原生 aiohue 4.9.0 公開連線；不得抄金鑰、任意 URL／service、未知結果換 payload 重試。
-`hue_model` 是 legacy agent 純呈現投影的相容副本，修改需同步契約／測試，不可 import PC agent。
-HA Hue 啟用時 legacy 待辦燈光 queue 必須為空；`lighting_reminders` 每分鐘執行，不傳私人待辦到 HA。
-生產切換狀態以 verification 紀錄為準，不能由合併／CI 推定已安裝。Theater／除濕機控制不在本次遷移。
+`schedule_execution.py` 派送前會重驗來源與該設備目前的 provider，不一致直接取消，
+**不能 fallback 成直接 IR**。未知／失敗結果一律不重送，也不能靠編輯重新排入。
+完整語意見 [自動關機與排程來源](docs/ac-auto-off.md)。
 
-v1.50.0：Hub 2 Push 見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
-Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 Hub 的刷新提示。
-無簽章 payload 不能寫進 HA 狀態；值只能來自 native authenticated refresh，新增事件 I/O 是明確需求。
-保留訂閱白名單、事件時間驗證、合併最後一筆、舊版 capability 相容、卸載與斷線清理測試。
-既有 HB 夜燈本來就走 Webhook；不搶占 URL、不新增 HA 夜燈規則。
-家庭 HA 另有「Hub 2 每分鐘更新感測資料」自動化（1789319755253），每台只刷新一個原生溫度實體。
-這是 1.1.0 的家庭備援設定；1.2.0 以整合內計時取代，切換時停用這條自動化。設定與還原見同一份光照文件。
+## 權限邊界（四把獨立金鑰，不可互通）
 
-v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
-原 switchbot_hub_light 1.0.0 僅共享原生 SwitchBot Cloud coordinator 的 lightLevel，不新增 I/O、
-不讀金鑰、不 monkey patch 核心。1–20 級不得標成 lux 或匯入現有 illuminance 通道。
-保留 native reload／registry identity／缺值未知／單獨光照更新及卸載 listener 清理測試。
+| 金鑰 | 入口 | 能做什麼 |
+| --- | --- | --- |
+| `HOME_BUTLER_API_KEY` | 完整 `/api/assistant`、Dashboard BFF | 家庭全功能，含建立／修改排程。`user_id` 只決定對話身分，不是降權機制 |
+| `DEVICE_VOICE_API_KEY` | 家電專用 `/api/assistant/devices` | 只有 `device_voice.ALLOWED_ARGS` 的控制與查詢。**沒有任何 schedule 動作，這是刻意的限制** |
+| `HOMEBRIDGE_API_KEY` | `homebridge_api.py` | 只有 `HOMEBRIDGE_DEVICE_NAMES` 內的空調 |
+| `HOME_ASSISTANT_API_KEY` | HA 主動連回的 WSS | 只有選定觀測與明確允許的設備動作 |
 
-v1.48.0：IR 電扇按鈕見 [HA IR 按鈕](homeassistant/ir-buttons.md)。獨立 switchbot_ir_buttons 本地整合
-只沿用明確選取的原生 SwitchBot Remote 連線，建立 momentary button，不推測 fan／power 狀態。
-home_butler 1.2.0 的 ir_control 能力只接受本機勾選的該平台 button；HB HOME_ASSISTANT_IR_NAMES
-逐台分流共用 IR handler，離線／錯誤不得 fallback 直接 IR。相對按鍵未知結果不重送；registry ID、
-命令期限、去重與真假來源測試必須保留。Theater／除濕機不隨電扇遷移。
+**絕不可把後三把加進 `verify_api_key`，或讓它們進入完整 assistant pipeline。**
+家電專用入口不讀家庭／待辦／食品／對話，不接受 `user_id` 覆寫；新增能力要同步
+專用 schema、驗證、handler 白名單、README 與 `tests/test_device_voice.py`。
+完整 prompt 的動作擴充**不會**自動授權家電捷徑。
 
-v1.47.1：Dashboard AC mode／fan_speed 送中文顯示值，HA 分流必須在嚴格驗證前正規化為 HA 值；
-`ha_climate.MODE_INPUTS/FAN_INPUTS` 同時支援既有中英文別名，不可對未知值套預設。回傳 lastMode／lastFanSpeed 仍為中文以供 UI 確認。
-回歸測試需用實際 Dashboard 中文 payload 經 handler → WebSocket → 確認狀態，不能只測英文或對已相同狀態送出。
+## 背景工作（以 `main.py:jobs.add` 為準）
 
-v1.47.0 室溫配對：`homeassistant/custom_components/ac_room_temperature` 為獨立本機整合，
-不依賴 Render／home_butler setup；每台原生 SwitchBot climate 配一個溫度 sensor。
-registry ID 固定來源與唯一實體；options 只換 sensor、不換空調 ID、不發指令。
-Apple Home 匯出配對 climate、排除原生 climate；HB 仍只選原生 SwitchBot 平台。
-感測事件只更新室溫，禁止控制迴圈、改 native state 或 monkey patch；失聯配對實體 unavailable。
-安裝、更換與限制見 [室溫配對](homeassistant/room-temperature.md)，驗證使用 HA CI。
+- **每 60 秒**：`schedules`（設備排程／封存，也是 HA 空調自動關機 reconcile 的入口）、
+  `ac-temperature-feedback`（先更新使用中的感測器再評估）、
+  `lighting-reminders`（HA Hue 待辦燈光提醒，僅 HA Hue 啟用時執行）
+- **每 300 秒**：`sensors`（一般感測器／歷史）、`notion`、`todo-reminders`、
+  `daily-push`、`agent-health`
 
-HA 架構以 [docs/local-hub-architecture.md](docs/local-hub-architecture.md) 為準。
-v1.46.0：`HOME_ASSISTANT_AC_NAMES` 明確決定逐台控制權；設定錯誤或 HA 失聯不可 fallback 到直接 IR。
-`ha_climate.py` 在原 handler／回饋 wrapper 前分流；HA 管理空調不寫 Sheet last-state，
-不跑補償、防黴、自動关機與 HB 排程。使用者已取消半度與回饋，溫度為整數。
-原生 SwitchBot Cloud climate 是唯一控制實體，禁止將 Homebridge 匯入實體再導回 HB。
-HA `climates.py` 僅接受本機明確選取的 registry ID + 穩定名稱、固定 climate 動作與參數。
-命令有效期 15 秒、無離線佇列；預驗證失敗與送出後未知分開，未知不自動重送。
-狀態由 HA 快照投影到 Dashboard／prompt／Homebridge；IR 仍無實體回讀。
-遷移後 Apple Home 應使用 HA HomeKit Bridge 的原生 climate；舊 Homebridge 不列入相容驗收（HA 關機時無模式，舊插件可能顯示無回應）。先加入新配件並驗收，再移除舊配件。
-FP2 觀測仍為斷線／90 秒過期未知；HA key 不可當 owner key，Framework 測試使用 Linux CI。
+v1.53.0 移除夜燈引擎後**已無每 300 秒的照明工作**。細節與歷史事故見下方「排程 / 推播架構」。
 
-先讀 [README](Readme.md)、[系統導覽](docs/system-overview.md) 與 [驗證紀錄](docs/verification.md)。下列歷史事故用來解釋設計；目前背景週期以 `main.py` 的 `jobs.add` 為準。更新行為時同步修正舊段落、API 表格與註解，避免只追加版本章節。
+## 不可違反的約束
+
+這些是歷次版本累積下來、到現在仍然成立的硬規則。放這裡是因為它們原本散在各版本章節裡，
+搬進歷史紀錄後就沒人看得到了。
+
+- **未知結果不自動重送。** 送出後沒拿到明確結果就維持待確認，讓使用者先檢查設備。
+  重啟後也不補送。這條適用所有設備通道。
+- **不 fallback 到另一條路徑。** HA 失聯、設定錯誤、provider 不一致時一律拒絕或取消，
+  不可改走直接 IR 或雲端。感測器同理：HA 失聯就是未知，不回頭讀雲端。
+- **不新增 Sheet 欄位或 HA 自動化**去實作 HB 的功能；HA 組件版本是明確相依，不默默忽略請求。
+- **1–20 光照等級不是 lux**，不可標成 lux 或匯入既有 illuminance 通道。
+- **無簽章 payload 不能寫進 HA 狀態**；值只能來自原生 authenticated refresh。
+- **不可把 Homebridge 匯入的實體再導回 HB** 控制，那會繞成迴圈。
+- **禁止用家裡的實體家電做測試。** 離線測試用假 Sheets／SDK；demo 用模擬家庭。
+- **後端維持單一 process／單 worker。** RLock、工作排程與記憶體快取都不是跨主機鎖，
+  Sheets 也沒有多步交易。要多 worker 必須先抽出唯一 scheduler／writer 並換成可交易的儲存。
+- **色彩／色溫不附帶開機**，白光與彩色不同時下發，整批預驗證後才寫入。
+- **除濕機留在 HB**，不列入 HA 遷移待辦（使用者 2026-09-14 決定）。
+
+## 既有維護規則
 
 IR 名稱修正見 `device_name_resolution.py` 與 `tests/test_ir_names.py`：完整名稱優先，僅等價化結尾「電風扇／電扇」，保留房間；歧義不送出。只有省略名稱時可用單一設備 fallback，明確錯誤名稱不可改控另一台。Siri 漏字與後端名稱解析分開驗證，勿由裸設備名稱自動補上開／關。
 
 Siri 精簡回覆：`/api/assistant` 呼叫 `process_message(..., voice=True)` 後經 `voice_reply.format_voice_reply`，請保持 `{reply}` 契約。純設備控制用實際 handler 結果；錯誤／未知／部分成功／追問不可為縮短而刪除。LINE 不啟用 voice。格式整理不可改掉溫度、負號、百分比與時間，不新增 LLM 呼叫；測試見 `tests/test_voice_reply.py`。
 
-家電專用語音：`device_voice_api.py` 的 `/api/assistant/devices` 只接受獨立 `DEVICE_VOICE_API_KEY`。**不得把此金鑰加入 `verify_api_key` 或讓它進入完整 assistant pipeline**。模型僅見設備目錄投影，不讀家庭／待辦／食品／對話，不接受 `user_id`；先驗證整批白名單動作及參數才執行。冷氣原有防黴／自動關機副作用仍保留，除濕機不能繞過自動鎖。新增能力必須同步專用 schema、驗證、handler 白名單、README 及 `tests/test_device_voice.py`；完整 prompt 的動作擴充不會自動授權家電捷徑。
+家電專用語音：`device_voice_api.py` 的 `/api/assistant/devices` 只接受獨立 `DEVICE_VOICE_API_KEY`。**不得把此金鑰加入 `verify_api_key` 或讓它進入完整 assistant pipeline**。模型僅見設備目錄投影，不讀家庭／待辦／食品／對話，不接受 `user_id`；先驗證整批白名單動作及參數才執行。未遷移空調的防黴／舊來源自動關機仍是控制指令的副作用（HA 空調不執行防黴），除濕機不能繞過自動鎖。新增能力必須同步專用 schema、驗證、handler 白名單、README 及 `tests/test_device_voice.py`；完整 prompt 的動作擴充不會自動授權家電捷徑。
 
 # 版本管理
-
-v1.44.0：空調回饋 interval_min 可設整數 1–30、min_adjust_min 可設整數 1–60；預設仍 5／10 分鐘。後端 valid_config、Dashboard 進階欄位與 simulator 必須一致。回饋啟用且冷暖房開機時，其感測器約每分鐘取值；其他背景讀取及歷史仍每 300 秒。sensor_polling 共用每 ID 的鎖與每個 60 秒時段內的讀取結果，sensor_state.update_current 不寫歷史。1 分鐘查詢不等於設備有新測量，保留樣本去重、冷卻等待、關機／未知結果限制。
-
-插件 1.3.0／系統 v1.43.1：`halfDegreeTest` 必須嚴格為 true 才建立 `diagnostic.js` 的純本機配件。與正式空調共用 HAP 介面，但模擬 adapter 不可取得真實 ButlerClient、不可進入 devices map；cached 診斷 UUID 在一般還原前分流，停用僅 unregister 診斷配件。冷暖 minStep 必須在首次 register 前設為 0.5，測試狀態重啟歸 26°C。使用者已確認 Siri 可半度、Apple Home 可顯示，但按鈕仍整度，勿再將協定支援當成 iPhone UI 已通過；驗證見 homebridge/tests/diagnostic.test.js。
-
-v1.43.0 半度目標：`ac_temperature.py` 是 16–30°C、0.5°C 步進和 half-up 捨入的共用規則。回饋啟用保留半度 `最後溫度`，實際 IR 仍為整數；停用時目標歸整但不發 IR、保留 IR 狀態。補償上下界必須 ceil／floor 向內取整。`_ac_saved_state` 是該次保存結果，Dashboard 用它確認後端接受的目標，不能和原始半度請求硬比；語音／排程的 ARG_KEY_TYPES.temperature 使用 num，不能先截斷。Homebridge 1.2.0 需更新並保留配件 UUID／設定。
-
-v1.42.1 回饋 API 的 `evaluate_now: true` 可在保存後立即評估；省略 config 時只讀現有設定，不寫回舊設定。明確評估略過背景週期／啟動等待，仍保留上次命令的間隔、持久化樣本與待確認檢查；不可把它實作成強制 IR 或清除 blocked。純 config POST 保持不送指令的相容契約。
-
-空調室溫回饋（v1.42.0）見 [docs/ac-temperature-feedback.md](docs/ac-temperature-feedback.md)：`最後溫度` 永遠保留舒適目標，IR 補償另存 JSON。設定僅 Dashboard 成員／owner Key 可操作，預設關閉；背景工作不可開關機、重置計時或呼叫一般 handler。所有 AC 命令共用 `ac_feedback.CONTROL_LOCK`，發送前持久化待確認、未知不重送；手動成功保存才解除。修改時同步 controller／API／Dashboard demo 與文件，不把補償 IR 值投影成 HomeKit 目標。
-
-Homebridge 見 [homebridge/README.md](homebridge/README.md)。`homebridge_api.py` 獨立 router 與
-`HOMEBRIDGE_API_KEY`，只允許 JSON `HOMEBRIDGE_DEVICE_NAMES` 的唯一啟用 AC；不得把此 Key 加入
-owner／device-voice verifier。GET 僅既有快取，POST 重新驗證 Sheet，ctx 限定精確 ID 後才呼叫原 handler。
-局部設定保留其他欄位，沒有歷史狀態則拒絕，不暗中套用 defaults。`_ac_state_saved` 表示保存完成，
-成功控制但保存失敗回 unknown、不重送。插件依 HomeKit 特徵更新狀態但不可呼叫 SET；防黴回應 fan/on
-不可被 HomeKit optimistic off 蓋回。室溫需實際同房間感測器，缺值回 HAP 錯誤。新增類型／模式要同步
-allowlist、投影、插件特徵、schema、文件與測試。`npm ci --ignore-scripts && npm test` 在 homebridge/，
-測試用真實 HAP／PlatformAccessory 配 fake I/O，不 publish、不控制硬體；後端完整 unittest 仍必跑。
-版本以 Dashboard 為準，插件 package 的版本用於打包安裝；不要新增 repo tag／Release。
-
-插件 1.1.0 支援 cool／heat，dry／fan 為同一配件內穩定 subtype 的模式開關；保留原配件 UUID。
-TargetHeaterCoolerState 沒有 dry／fan，運行時保留最近冷／暖選擇、Current=idle，以模式開關表達實際模式。
-`off_if_mode` 僅接受 dry／fan 的非空清單，且只能與 power=off 搭配；後端以新讀的 Sheet 判斷，
-已非該模式時成功 no-op、未知狀態拒絕，不把條件傳入 legacy handler。no-op 也必須去重。
-同手勢明確選模式優先於關掉另一模式開關，主電源 OFF 仍優先；未確認結果不可重送或假設成功。
-部署先後端再插件，舊後端會拒絕新增欄位。不要把模式關閉改成無條件關機。
-
-v1.39.3 Sheets：`_get_spreadsheet` 持續重用連線，RLock 僅保護建立／失效，不再每分鐘重新認證；google-auth 管理 token 更新，GET 暫時性重試用盡才失效讓下次建立。`update_device_state_fields` 一次讀取最新欄位及 Device ID 所在列，再 RAW 批次写入，缺失／歧義拒寫，未知寫入不重試；不要恢復用 ctx 舊 row index 或長期快取欄位位置。詳見 README、voice-timing 及 `tests/test_sheets_reuse.py`；不提供 Sheets 外部並行編輯的交易保證。
-
-v1.39.2 I/O 精簡：`get_lighting_area_info` 以 `load_area_settings(read_only=True)` 讀既有內容；不得在每次 prompt 組裝時重新建表／ensure_columns，原探索與設定路徑仍負責 schema。`maintain_ac_auto_schedule` 只在實際增刪分支取 worksheet，保留 timer anchor 與先封存後刪除。細分計時的 `parent_span_id` 表示包含關係，不能把外層與子階段相加；詳見 voice-timing 文件與 `tests/test_voice_io.py`。
-
-Siri 獨立指令（v1.39.1）：`process_message(..., voice=True)` 使用 `ask_claude(..., include_history=False)`，一般與降級請求都只送當句；初始讀取五張表，略過對話暫存。背景存檔保留，LINE 預設歷史不變。不得因共用解析器把 LINE 歷史一併關閉；Siri 跨輪省略／確認不再依賴上一句，文件與測試見 README、`tests/test_voice_history.py`。未重写完整 SYSTEM_PROMPT。
-
-語音請求計時見 [docs/voice-timing.md](docs/voice-timing.md)。`request_timing.py` 只在兩個 Siri 路由啟用，以 ContextVar 串起 `[TIMING]`；總時間從路由函式進入算起，不包含代理／threadpool 等待。新計時不可寫入輸入、身分、設備參數或金鑰；`completed` 不是硬體成功。原有模型設定、降級／重試與 `{reply}` 契約保持不變。純觀測不 bump Dashboard 版本。
 
 系統版本不在 home-butler 管。Source of truth 是 **Dashboard 的 `package.json:version`**，本 repo 透過 `config.py:get_app_version()` 在 runtime 撈 Dashboard `/api/version`（1 小時 cache，失敗 fallback「未知」），由 `prompt.py` 注入 `SYSTEM_PROMPT`，讓 LINE bot 能回答「目前版本是？」之類的問題。
 
@@ -184,7 +144,7 @@ schema 實測直接 400（55 個 optional 被拒，bot 全掛）。改成每個 
 
 # 排程 / 推播架構（in-process scheduler；GAS 已退場）
 
-背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread：設備排程每 60 秒；一般感測器／歷史、照明、Notion、待辦提醒、每日推播檢查、agent 健康檢查各每 300 秒；空調回饋每 60 秒先更新使用中的感測器再評估。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
+頻率見上方「背景工作」，以 `main.py` 的 `jobs.add` 為準。不需要外部 cron；每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
 - **工作隔離**：`run_schedule_tick` 執行設備排程與封存；`run_todo_tick` 生成週期待辦與提醒；Notion 獨立同步。`run_realtime_tick` 僅保留相容入口，正式背景執行不串在一起。
 - **每日綜合推播**：`notify.run_daily_push_if_due(ctx)`——每天過了 `DAILY_PUSH_HOUR`（env，預設 21 點）後第一個 tick 觸發一次。去重 marker 存在 Sheet「系統狀態」分頁的 `最後每日推播日期`（跨 Render 重啟存活，不重發不漏發；睡整晚跨午夜才醒則當天不補）。
@@ -259,11 +219,15 @@ hard-crash 就是這樣**躺了三天**沒人知道（Task Scheduler 早已 exit
 
 關冷氣時若「上次模式是冷氣/除濕 **且** 從最後一次開機算起運轉 ≥ 門檻分」，`handlers/device.py:handle_control_ac` 不直接關，改切送風（mode 4）+ 寫一筆「防黴收尾關」排程（送風分後），由每 60 秒的 `schedules` 工作收尾、真正關掉。**門檻（預設 30）與送風時長（預設 5）可在「智能居家」分頁逐台覆寫**：欄位 `防黴運轉門檻分鐘`、`防黴送風分鐘`（空白用預設；門檻 0 = 每次關都送風）。模式 `ANTIMOLD_MODES={冷氣,除濕}` 仍寫死在 device.py 頂。
 
+**現況：家裡三台空調都已由 HA 管理，`handle_control_ac` 在防黴判斷之前就被 `ha_climate.managed()` 分流走，
+所以這條路在家裡不會執行**——程式保留給未遷移的 IR 空調，不是死碼也不該當成「還在跑」。
+HA 空調的到期關機是 `ac_auto_off`（來源「自動（HA）」），跟這裡的「防黴」「自動」是三種互不相干的來源。
+
 幾個**非顯而易見、最容易改壞**的點：
 
 - **防遞迴**：收尾關排程的 params 帶 `antimold_final=True`，那次關機跳過防黴判斷直接關。少了它會無限循環（關→送風→排程關→送風…）。
 - **關機後還原模式**：切送風會把「最後模式」覆寫成送風。收尾關排程的 params 另外帶 `restore_mode/temp/fan`（防黴前的原始設定，在切送風「之前」從 prior_row 讀好），收尾關機時由 `_save_ac_last_state(..., restore_on_off=...)` 寫回，否則 UI 跟下次開機都會停在送風而不是原本的冷氣/除濕。
-- **來源欄用「防黴」不是「自動」**：跟 AC 自動關機 timer（來源=自動）區隔開，否則 `maintain_ac_auto_schedule` 會把收尾關當成自動關機排程**誤刪**。
+- **來源欄用「防黴」不是「自動」**：跟 AC 自動關機 timer（來源=自動）區隔開，否則 `maintain_ac_auto_schedule` 會把收尾關當成自動關機排程**誤刪**。HA 空調的「自動（HA）」是第三種來源，由 `ac_auto_off` 自己認領，兩邊都不會碰到對方的列。
 - **最後開機時間欄（錨定運轉起點）**：開機時記、**關機時清空**；下次開機若這欄是空的就重新錨定——不只靠「關→開」transition 偵測，避免快取電源狀態漂移（如上次用實體遙控器關、home-butler 以為還開著）時錨不到 → 防黴永不觸發。純調整 on→on（欄位非空）不重置。欄位由 `main.py:_warm_up` 背景呼叫 `ensure_columns` 自動補；真的算不出開機時間（如實體遙控器開的）就**保守不防黴**。
 - **使用者中途重開**：任何 power=on 指令會 `_cancel_antimold_schedules` 取消待執行的收尾關，避免剛開又被關掉。
 - **自動關機 timer 觸發的關機也會走防黴**（運轉夠久且冷氣/除濕模式）；送風期間刻意不呼叫 `maintain_ac_auto_schedule`，不讓它在送風中又生一筆自動關機。
@@ -328,45 +292,6 @@ page id 在改標題／改日期／改時間之後都不變，是唯一穩定的
 蓋掉；`[5b] results=` 也會把所有 handler 的原始回傳值印進 log。**新增寫入型 action 時
 考慮一起加進 `TRUTHFUL_ACTIONS`**——回一句「好的，已完成 ✅」卻什麼都沒做，比報錯難查
 一個數量級。
-
-# 歷史設計：自動夜燈場景指紋（v1.53.0 已退役）
-
-以下僅解釋舊版設計；lighting_auto 已移除，不可照這段恢復主線夜燈引擎。
-
-`lighting_auto` 判斷可不可以自動關燈時，問的是**「這個房間現在亮著的是不是那個夜燈場景」**
-（`_is_night_light`），不是「這盞燈是不是 auto 開的」。
-
-**為什麼不能用 ownership**：使用者多半用 **Hue 遙控器 / Hue App** 開燈，那些操作
-**完全不經過 home-butler**——我們連知道都不知道。所以「記住是不是自己開的」先天記不全：
-手動點開的夜燈永遠被當成別人的燈，天亮了、時段結束了都沒人關（實際遇到的困擾）。
-in-memory ownership 還會在 Render 重啟後歸零，同樣的洞再開一次。
-
-**指紋來源是 bridge 自己記的 `scene.status`**（Hue API v2，實機確認有；agent 端由
-`_hue_scene_status` 帶出來，掛在 `hue.list_areas` 每個 area 的 `scenes[]` 裡，
-不需要額外 API 呼叫）。agent recall、遙控器、App 更新的是同一份欄位，天生一視同仁。
-
-判斷分兩段，**第二段才是主力**：
-1. `status.active` 非 `inactive` → 燈此刻就是這個場景。
-2. 否則比 `status.last_recall`：這個房間裡最後被叫起來的場景就是夜燈 → 算數。
-
-**為什麼需要第二段**（非顯而易見）：`_fire_scene_on` 會在 recall 之後蓋上規則的
-`brightness`，bridge 判定「已偏離場景」→ `active` 立刻掉回 `inactive`。也就是說
-**auto 自己開的夜燈，`active` 多半是 inactive**，只靠第一段會連自己開的燈都認不出來。
-使用者事後用遙控器微調亮度也一樣。`last_recall` 不受這些影響。
-（想只靠 `active` 的話，得把亮度直接編進場景、拿掉那步覆寫——但那會改變實際亮度，
-沒做。）
-
-刻意不要求 `last_recall` 夠新：使用者按遙控器電源鍵直接開（不 recall 任何場景）時燈會
-回到上次的夜燈狀態，而夜燈仍是最後被 recall 的場景——那確實該算夜燈。
-
-**`auto_on` ownership 留著當 fallback**，沒有刪：agent 還沒更新到會回傳 status 的版本、
-或規則的 `scene_id` 不屬於該區域時，`_is_night_light` 回 `None`，行為退回改動前
-（只關 auto 自己開的）。所以部署後在 agent 自動更新完成前不會有行為變化，也不會因為
-拿不到新資料就亂關燈。
-
-**取捨**：判斷的是「長相」不是「意圖」。把燈調成夜燈的樣子想讓它整天亮著 → 還是會被關；
-recall 別的場景 → auto 完全不碰。另外這個機制**救不到**「拿過時亮值誤動作」——過時的
-『已經變亮』讀值仍可能把還在暗處的夜燈關掉、下一輪又開，那是感應器讀值新鮮度的問題。
 
 # Google Sheets 暫時性錯誤（503/429）重試
 
@@ -469,11 +394,13 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 **取捨**：天氣最多落後 30 分鐘、觀測 10 分鐘。對「今明兩天的預報」完全無感，但如果
 之後要拿它做接近即時的判斷（例如依當下降雨自動收衣服），記得這裡有這層延遲。
 
-# Aqara Cloud API（FP2）：認證有狀態，權杖必須落地
+# Aqara Cloud API（FP2）：已被 HA 取代的休眠路徑，認證有狀態
 
-`aqara_api.py` 是 Aqara Open API v3.0 的封裝，目前**只接到 API 為止**：授權、列裝置、
-把 resource 讀回來，全部走 `main.py` 的 `/aqara/*` debug 端點。**沒有** polling thread、
-沒有寫進「智能居家」分頁、Dashboard 與 LINE bot 都還看不到它。功能另外規劃。
+**FP2 的存在／光照現在走 HA**：`home_assistant_api.py` 的 WSS 快照 → HB 記憶體 → Dashboard／prompt，
+完全不經這個模組。`aqara_api.py` 仍留在 repo，但只剩 `main.py` 的 `/aqara/*` debug 端點呼叫得到：
+**沒有** polling thread、沒有寫進「智能居家」分頁、Dashboard 與 LINE bot 看不到它。要加 FP2 功能請走
+HA 那條，**不要回頭接這條**——同一台設備兩個來源就是製造第二份真相。以下雷點只有在真的要直連 Aqara
+雲端時才有用。
 
 ⚠️ 這個模組**沒有對真的 FP2 跑過**（開發環境的 egress proxy 擋掉 aqara.com）。協定形狀
 逐字對齊 Aqara 官方 Home Assistant 整合的 `aiot_cloud.py`（簽名字串、intent 名稱、header
@@ -516,7 +443,7 @@ Aqara 的每個欄位是一組 `x.y.z` 數字，官方文件按 model 分開列�
 用 `/aqara/devices/{did}/values` 對照真機（人走進 / 走出各打一次，diff）確認之後，把 id
 填進環境變數 `AQARA_FP2_PRESENCE_RESOURCE` 釘死，關鍵字猜測就完全不參與判斷。
 
-## 之後要接 polling 時
+## 之後真的要接 polling 時（目前無計畫，FP2 由 HA 供應）
 
 - 這個模組**還沒有熔斷器**（`lg_api` / `panasonic_api` 都有）。單純被人手打 debug 端點
   時不需要，但一旦掛進每 5 分鐘的 polling thread，Aqara 雲端掛掉就會變成穩定的重打——
@@ -541,6 +468,15 @@ Aqara 的每個欄位是一組 `x.y.z` 數字，官方文件按 model 分開列�
 # PC monitoring agent 部署現況
 
 家裡兩台 Windows PC 跑 `agent/agent.py` 監控本機指標，每 60s push 到 home-butler `/api/computers/heartbeat`。詳細 setup 看 `agent/README.md`，這裡只記**本家**部署現況跟踩過的雷。
+
+**Hue 中繼已退居備援**：v1.51.0 家庭啟用 `HOME_ASSISTANT_HUE_ENABLED` 之後，照明走 HB → HA → Hue Bridge，
+`lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是
+當時的診斷紀錄，現在照明異常**先查 HA**，別直接照那幾列去殺 agent。
+
+**任何推上 `main` 的 commit 都可能觸發 agent 自我更新**：`check_for_updates()` 比對的是 `HEAD` vs
+`origin/main` 的整個 SHA，**沒有依修改路徑過濾**，所以只改文件也算。`[skip render]` 只擋 Render 部署，
+擋不住這個。實際會不會重啟還要看該台的 `AUTO_UPDATE` 是否開著、以及 `git pull` 與編譯檢查是否成功——
+所以是「可能各重啟一次」，不是保證。
 
 ## 共用 layout
 

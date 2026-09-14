@@ -5,7 +5,8 @@
 不裝 HA 或固定 v1.44.0 的成套 SHA 與指令見 [版本選擇](version-selection.md)。
 
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
-HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
+HA 管理光照實體；HB 夜燈引擎自 v1.53.0 移除，夜燈規則改在 HA 建立（舊 Sheet 保留但不執行）。
+這條快速資料路徑仍依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
 
 2026-09-13 起依 [家庭中樞架構](local-hub-architecture.md) 分階段移轉：
 HA 承接本地設備／即時自動化與 HomeKit，HB 保留家庭應用與 AI。
@@ -13,7 +14,9 @@ v1.48.0 HOME_ASSISTANT_IR_NAMES 逐台將 IR 電扇 handler 改走 HA 選定的�
 button.press → 原生 SwitchBot 連線，不經 Render。安裝與來源白名單見 [IR 按鈕](../homeassistant/ir-buttons.md)。
 v1.47.0 Apple Home 可透過 HA 本機 `ac_room_temperature` 合併室溫 sensor，再將指令轉至原生空調；
 HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見 [設定方式](../homeassistant/room-temperature.md)。
-空調遷移由 HOME_ASSISTANT_AC_NAMES 逐台啟用：Dashboard／LINE → HB → HA → SwitchBot Cloud；Apple Home → HA HomeKit Bridge → 原生 climate。未遷移設備保留下列既有路徑。HA 空調使用整數目標、不執行 HB 回饋、防黴、自動關機或空調排程。
+空調遷移由 HOME_ASSISTANT_AC_NAMES 逐台啟用：Dashboard／LINE → HB → HA → SwitchBot Cloud；Apple Home → HA HomeKit Bridge → 原生 climate。未遷移設備保留下列既有路徑。HA 空調使用整數目標，不執行 HB 回饋與防黴；
+排程仍由 HB 保管並經 HA 下達——手動排程來源「使用者（HA）」，依 Sheet 時數產生的關機排程來源「自動（HA）」。
+舊來源「自動」「防黴」的列不對 HA 空調執行，也不會轉換成新來源。
 
 本頁記錄目前的責任與接手入口；設備位址、配對資料與憑證以各部署端設定為準，不複製到公開文件。
 
@@ -42,7 +45,10 @@ HA 選定觀測／環境感測／空調狀態 → 主動 WSS → home-butler →
 
 Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
 
-Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API；未遷移空調的防黴及自動關機仍運作，HA 管理空調不執行。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
+Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API。
+**兩條路徑對排程的權限不同**：完整入口可建立／修改排程（HA 空調會標成「使用者（HA）」），
+家電專用入口的 `device_voice.ALLOWED_ARGS` 沒有任何 schedule 動作，只能控制與查詢當下狀態——這是刻意保留的限制，不要為了對齊而放寬。
+未遷移空調的防黴與舊來源自動關機仍是控制指令的副作用；HA 管理空調不執行防黴，其到期關機由 `ac_auto_off` 以「自動（HA）」排程負責。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
 
 ## 週期與事件的責任
 
@@ -57,7 +63,8 @@ Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`�
 | --- | --- | --- |
 | 家電排程 | `main.py` 註冊 `schedules`，每 60 秒 | 工作耗時、服務休眠及外部 I/O 仍影響延遲；送出前記錄執行識別碼，未知結果不自動重送 |
 | 未遷移 HA 空調的室溫補償 | `ac-temperature-feedback` 每 60 秒檢查；HA 管理空調跳過，各未遷移設備預設 5 分鐘評估，最低 1 分鐘 | 舊路徑預設關閉，僅已開機冷／暖房；目前 HA 空調不使用此功能。[舊路徑設定與 IR 限制](ac-temperature-feedback.md) |
-| 感測器、照明、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
+| 感測器／歷史、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
+| 待辦燈光提醒 | `lighting-reminders`，每 60 秒 | 僅 HA Hue 啟用時執行；v1.53.0 後已無每 300 秒的照明自動規則工作 |
 | HA Hue 待辦燈光提醒 | 每 60 秒，僅 HA Hue 切換啟用時 | 同區域每分鐘最多一次；舊 PC queue 回空，不傳私人待辦文字給 HA |
 | PC 指標 | `agent/agent.py` 每 tick 回報，預設 60 秒 | 心跳只代表 PC agent 的回報 |
 | AVR／KEF | theater-agent 的 AVR push、KEF 長輪詢事件、每輪完成後等 15 秒補漏 | 事件需核對連動旗標及 AVR 狀態；不能保證 15 秒內完成硬體喚醒 |

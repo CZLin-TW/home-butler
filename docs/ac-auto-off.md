@@ -4,6 +4,22 @@
 非法值視為停用；不新增 Sheet 欄位、HA 自動化或 HA 權限。
 Dashboard 移除時數設定，改在既有排程區編輯、刪除本輪產生的排程。
 
+## 排程來源對照
+
+「排程指令」分頁同時存在五種來源，各由不同模組建立與清理。**來源寫錯會被別的模組當成自己的列誤刪**，
+`schedule_execution.py` 也會在派送前重驗來源與該設備目前的 provider，不一致就直接取消。
+
+| 來源 | 誰建立 | 誰清理 | 使用者可否編輯 | 適用設備 |
+| --- | --- | --- | --- | --- |
+| 使用者 | Dashboard／LINE／完整 Siri 的 `handle_add_schedule` | 到期執行，或使用者刪除 | 可 | 一般設備與未遷移空調 |
+| 使用者（HA） | 同上，對 HA 管理的空調（v1.55.0 起） | 同上 | 可 | HA 管理的空調 |
+| 自動 | `handlers/device.py:maintain_ac_auto_schedule` | 同一函式在電源或排程異動時重算 | 不應手動改 | **僅未遷移空調**；對 HA 空調 early-return |
+| 自動（HA） | `ac_auto_off.reconcile`，依 Sheet 時數 | 確認 off 時取消本輪尚未執行的 off | 可改時間／同一台空調的參數或刪除；刪除後本輪不補回 | HA 管理的空調 |
+| 防黴 | `handlers/device.py` 切送風時寫入的收尾關 | 任何 `power=on` 會 `_cancel_antimold_schedules` | 不應手動改 | **僅未遷移空調** |
+
+未知／失敗結果的列一律不重送，也不能靠編輯重新排入；要重來請先移除紀錄再自行新增。
+家電專用 Siri（`/api/assistant/devices`）的白名單沒有 schedule 動作，五種來源它都不能建立或修改。
+
 ## 計時與編輯
 
 - HB 每 60 秒觀察 HA 快照；首次確認 on 時依 Sheet 建立一次性 off，來源「自動（HA）」。

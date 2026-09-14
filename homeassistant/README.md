@@ -1,7 +1,8 @@
 # Home Butler：HA 主動連接 HomeButler
 
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
-HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](hub-light.md)。
+HA 管理光照實體；HB 夜燈引擎自 v1.53.0 移除，夜燈規則改在 HA 建立（舊 Sheet 保留但不執行）。
+這條快速資料路徑仍依賴 Render，詳見 [Hub 光照](hub-light.md)。
 
 Hub 2 光照可透過獨立 [光照等級整合](hub-light.md) 補入 HA；其 1～20 級不是 lux，
 目前不加入本整合的 illuminance 同步通道。
@@ -93,7 +94,8 @@ Snapshot 含遞增 sequence；重連重設，由 server 隔離舊連線。每 fr
    遷移後使用新 HA 配件；舊 Homebridge 不列入相容驗收（HA 關機沒有模式，舊插件可能顯示無回應）。新配件驗證後再移除舊空調配件，避免重複。
    HA HomeKit 投影的除濕／送風 UI 及 Siri 功能須另外驗證，不假設與舊 Homebridge 模式開關完全相同。
 
-已遷移空調的 HB 補償、防黴停止執行；v1.56.0 自動關機另由 HB 的新 HA 計時列執行（[說明](../docs/ac-auto-off.md)）；沒有明確 HA 手動標記的舊排程到期取消。
+已遷移空調的 HB 補償、防黴停止執行；到期關機由 HB 依 Sheet「自動關機小時數」產生「自動（HA）」排程
+（計時與排程列都在 HB，不建立 HA 自動化，[說明](../docs/ac-auto-off.md)）；沒有明確 HA 手動標記的舊排程到期取消。
 v1.55.0 起新建或明確編輯的手動排程會標記「使用者（HA）」並經 HA 執行；舊自動／防黴列不能轉換。
 每日重複或條件式自動化仍建議在 HA 設定，Dashboard 的一次性排程由 HB 管理。舊 Sheet 設定與歷史保留但不作目前狀態來源，不能以空值回退舊讀值。
 Dashboard／LINE 的半度輸入會 half-up 歸整；HA 原生實體步幅由 SwitchBot 整合決定。

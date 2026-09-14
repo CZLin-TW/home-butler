@@ -3,7 +3,8 @@
 2026-09-14 現況與待辦以 [HA 遷移盤點](ha-migration-audit.md) 為準。
 
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
-HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
+HA 管理光照實體；HB 夜燈引擎自 v1.53.0 移除，夜燈規則改在 HA 建立（舊 Sheet 保留但不執行）。
+這條快速資料路徑仍依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
 
 ## 責任分工
 
@@ -51,7 +52,8 @@ Dashboard 成員查看，kid 不開放此新資料；瀏覽器只存記憶體，
 - v1.53.0 移除 HB 自動夜燈執行路徑與 UI，舊 Sheet 不刪除；Hue 待辦提醒仍經共用通道執行。
 - 補齊空調四模式與各房間電扇實機驗收；Apple Home 配件驗收後核對並停用剩餘重複 Homebridge 服務。
 
-三台空調已移轉，半度與回饋補償維持取消；舊防黴已退出；v1.56.0 恢復 HB 依時數自動關機，其他條件式自動化按需求在 HA 重建。
+三台空調已移轉，半度與回饋補償維持取消；舊防黴不對 HA 空調執行。
+目前的自動關機由 HB 依 Sheet「自動關機小時數」產生「自動（HA）」排程，Dashboard 可編輯或刪除本輪；不建立 HA 自動化。
 v1.55.0 恢復 Dashboard 一次性手動排程，由 HB 到期經 HA 執行；不重新啟用舊排程或編輯 HA 自動化。
 
 每一台設備、每條規則同時間只有一個控制主體。禁止建立 HB → HA → HB 的循環命令路徑，
