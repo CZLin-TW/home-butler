@@ -47,7 +47,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control"]}
+    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control", "theater_relay"]}
 
 
 class Observation(BaseModel):
@@ -118,6 +118,15 @@ class IRResult(BaseModel):
     type: Literal["ir_result"]
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     status: Literal["success", "failed", "unknown"]
+
+
+class TheaterResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["theater_result"]
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    status: Literal["success", "failed", "unknown"]
+    result: dict | None = None
+    message: str | None = Field(default=None, max_length=400)
 
 
 class EnvironmentReading(BaseModel):
@@ -212,10 +221,14 @@ class LinkState:
         self.ir_buttons = []
         self.environment = []
         self.hue_capable = False
+        # The theater relay keeps its own in-flight slot: a Dashboard page load
+        # must never make an AC command report 'busy'.
+        self.theater_capable = False
+        self.theater_pending = {}
         self.uncertain = set()
         self.hub_updates = HubRelay(self)
 
-    def connect(self, socket, climate_capable=False, ir_capable=False, hub_capable=False, hue_capable=False):
+    def connect(self, socket, climate_capable=False, ir_capable=False, hub_capable=False, hue_capable=False, theater_capable=False):
         with self.lock:
             self._fail_pending()
             previous = self.socket
@@ -224,6 +237,7 @@ class LinkState:
             self.climate_capable = climate_capable
             self.ir_capable = ir_capable
             self.hue_capable = hue_capable
+            self.theater_capable = theater_capable
             self.hub_updates.reset(hub_capable)
             try:
                 self.loop = asyncio.get_running_loop()
@@ -244,6 +258,10 @@ class LinkState:
             if not future.done():
                 future.set_result({"status": "unknown", "message": "HA 連線中斷，指令結果未確認；不會自動重送"})
         self.pending.clear()
+        for _, _, future in self.theater_pending.values():
+            if not future.done():
+                future.set_result({"status": "unknown", "message": "HA 連線中斷，劇院指令結果未確認"})
+        self.theater_pending.clear()
 
     def receive(self, socket, snapshot):
         with self.lock:
@@ -408,6 +426,40 @@ class LinkState:
                 return
             pending[2].set_result({"status": result.status, "result": result.result})
 
+    def theater_result(self, socket, result):
+        with self.lock:
+            pending = self.theater_pending.get(result.request_id)
+            if socket is not self.socket or not pending or pending[0] is not socket or pending[2].done():
+                return
+            pending[2].set_result({"status": result.status, "result": result.result,
+                                   "message": result.message})
+
+    async def theater_command(self, action, payload=None):
+        """Relay one theater call through HA. Never queued, never replayed."""
+        with self.lock:
+            try:
+                configured_key()
+            except HTTPException:
+                return {"status": "failed", "message": "HA 未設定，未送出劇院指令"}
+            if not self.theater_capable or not self.snapshot()["online"]:
+                return {"status": "failed", "message": "HA 劇院中繼未就緒，未送出指令"}
+            if self.theater_pending:
+                return {"status": "failed", "message": "HA 正在處理劇院指令，請稍後再試"}
+            socket = self.socket
+            request_id = uuid4().hex
+            future = asyncio.get_running_loop().create_future()
+            self.theater_pending[request_id] = (socket, {"kind": "theater"}, future)
+        try:
+            await socket.send_json({"type": "theater_command", "request_id": request_id,
+                                    "action": action, "payload": payload or {},
+                                    "expires_at": time.time() + 20})
+            return await asyncio.wait_for(future, 30)
+        except (Exception, asyncio.CancelledError):
+            return {"status": "unknown", "message": "HA 劇院指令結果未確認；不會自動重送"}
+        finally:
+            with self.lock:
+                self.theater_pending.pop(request_id, None)
+
     def snapshot(self):
         with self.lock:
             try:
@@ -452,7 +504,8 @@ async def ha_websocket(websocket: WebSocket):
                 or not isinstance(token, str) or len(token) > 512):
             raise ValueError("Invalid hello")
         verify_ha_key(token)
-        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True, hello.get("hub_updates") is True, hello.get("hue_control") is True)
+        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True, hello.get("hub_updates") is True, hello.get("hue_control") is True,
+                               hello.get("theater_relay") is True)
         registered = True
         if previous is not None and previous is not websocket:
             try:
@@ -460,7 +513,7 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control"]})
+                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control", "theater_relay"]})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.
@@ -473,6 +526,9 @@ async def ha_websocket(websocket: WebSocket):
                 continue
             if frame.get("type") == "ir_result" and link.ir_capable:
                 link.ir_result(websocket, IRResult.model_validate(frame))
+                continue
+            if frame.get("type") == "theater_result" and link.theater_capable:
+                link.theater_result(websocket, TheaterResult.model_validate(frame))
                 continue
             snapshot = Snapshot.model_validate(frame)
             accepted = link.receive(websocket, snapshot)

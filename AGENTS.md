@@ -27,7 +27,8 @@
 | FP2 存在／光照 | HA → HB 記憶體快照 → Dashboard | 斷線或超過 90 秒即未知；無雲端備援（Aqara API 需實名制，已放棄） |
 | 除濕機 | **完整留在 HB**（Panasonic／LG 直連） | 使用者 2026-09-14 決定不遷移，新家改中央除濕 |
 | 自動夜燈規則 | 已退役（v1.53.0） | 舊 Sheet 保留不執行，規則寫入回 410 |
-| 劇院／PC 指標 | theater-agent／PC agent，未遷移 | HA 日後最多當中繼，不重寫同一套連動 |
+| 劇院連動 | theater-agent 獨立負責；中繼可選 PC agent 或 HA | `THEATER_VIA_HA`（預設 false）；HA 只中繼，不重寫同一套連動 |
+| PC 指標 | PC agent heartbeat | 與劇院中繼無關；拿掉 PC agent 會一併失去這張卡與失聯告警 |
 | Apple Home | HA HomeKit Bridge | `homebridge/` 插件降為歷史相容，不列入驗收 |
 
 ## HB 與 HA 的分工原則
@@ -53,6 +54,22 @@
 舊的「自動」（`maintain_ac_auto_schedule`，只服務未遷移空調）與「防黴」來源已移除；
 Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，不會被執行。
 
+### 劇院中繼
+
+`THEATER_VIA_HA=true` 時 `theater_api.py` 改走 HA（`home_assistant_api.link.theater_command`），
+否則走 PC agent。兩條的回傳形狀相同，Dashboard 契約不變。
+
+**HA 那條走獨立的 in-flight 車道**（`theater_pending`，不是 `pending`）。這不是潔癖：
+`/api/theater/summary` 每次開裝置頁就打一次，而 HA 端對同一車道的並發指令會丟
+`LinkError` **扯斷整條連線**——共用車道等於讓開頁面有機會弄掉空調控制。加車道時務必
+維持這個隔離。
+
+HA 端的 `theater.py` 是**白名單不是 proxy**：action 對應寫死的 method/path，flags 只收
+三個已知布林值。新增動作是明確的能力擴張，要同步兩端與 `homeassistant/tests/test_theater.py`。
+
+`health_alert.check_theater_agent` 的前置會跟著 `THEATER_VIA_HA` 切換（走 HA 就看 HA 連線，
+不再看 PC agent 是否在線），否則會變成「PC 關機 → 劇院掛了也不報」。
+
 `schedule_execution.py` 派送前會重驗來源與該設備目前的 provider，不一致直接取消，
 **不能 fallback 成直接 IR**。未知／失敗結果一律不重送，也不能靠編輯重新排入。
 完整語意見 [自動關機與排程來源](docs/ac-auto-off.md)。
@@ -64,7 +81,7 @@ Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，�
 | `HOME_BUTLER_API_KEY` | 完整 `/api/assistant`、Dashboard BFF | 家庭全功能，含建立／修改排程。`user_id` 只決定對話身分，不是降權機制 |
 | `DEVICE_VOICE_API_KEY` | 家電專用 `/api/assistant/devices` | 只有 `device_voice.ALLOWED_ARGS` 的控制與查詢。**沒有任何 schedule 動作，這是刻意的限制** |
 | `HOMEBRIDGE_API_KEY` | `homebridge_api.py` | 只有 `HOMEBRIDGE_DEVICE_NAMES` 內的空調 |
-| `HOME_ASSISTANT_API_KEY` | HA 主動連回的 WSS | 只有選定觀測與明確允許的設備動作 |
+| `HOME_ASSISTANT_API_KEY` | HA 主動連回的 WSS | 只有選定觀測、明確允許的設備動作，以及固定兩個劇院中繼呼叫 |
 
 **絕不可把後三把加進 `verify_api_key`，或讓它們進入完整 assistant pipeline。**
 家電專用入口不讀家庭／待辦／食品／對話，不接受 `user_id` 覆寫；新增能力要同步

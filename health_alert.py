@@ -263,10 +263,13 @@ def _theater_summary() -> dict:
 
 
 def check_theater_agent(ctx) -> None:
-    """劇院 agent 存活。**只有在那台 PC 的 butler agent 還在線時才檢查。**
+    """劇院 agent 存活。
 
-    這個前提是為了不重複告警：整台 PC 失聯時 check_pc_agents 已經報過了，這裡再補一則
-    「劇院沒回應」只是噪音，而且會把因果講反（不是劇院掛了，是整台不見了）。
+    **前置條件取決於中繼走哪一條**：走 PC agent 時，只有那台 PC 的 butler agent 還在線
+    才檢查——整台 PC 失聯時 check_pc_agents 已經報過了，這裡再補一則「劇院沒回應」只是
+    噪音，而且會把因果講反。但 THEATER_VIA_HA 開啟後劇院不再經過 PC agent，那個前置就
+    失去意義：沿用它會變成「PC 關機 → 劇院掛了也不報」的靜默失效。所以走 HA 時改看
+    HA 連線是否在線。
 
     連續失敗 THEATER_FAIL_STREAK 次才算數：單次逾時多半是 WebSocket 中繼剛好在重連。
     streak 只放 in-memory——它是「最近幾個 tick」的短期觀察，重啟後重新累積即可，真的
@@ -280,13 +283,18 @@ def check_theater_agent(ctx) -> None:
     if _on_event_loop_thread():
         return          # 從 async endpoint 同步進來的，block 會自我死鎖（見該函式 docstring）
 
-    online_theater = any(
-        a.get("online") and "theater" in (a.get("capabilities") or [])
-        for a in agent_ws.snapshot_agents()
-    )
-    if not online_theater:
+    import ha_theater
+    if ha_theater.enabled():
+        from home_assistant_api import link
+        relay_online = bool(link.snapshot().get("online")) and link.theater_capable
+    else:
+        relay_online = any(
+            a.get("online") and "theater" in (a.get("capabilities") or [])
+            for a in agent_ws.snapshot_agents()
+        )
+    if not relay_online:
         _theater_fail_streak = 0
-        return          # 沒有在線的 theater agent → 這個檢查不適用（PC 那條會處理）
+        return          # 中繼本身不在線 → 這個檢查不適用（PC／HA 各自的狀態另有來源）
 
     try:
         _theater_summary()

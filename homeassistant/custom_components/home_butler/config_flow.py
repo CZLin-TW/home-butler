@@ -6,13 +6,14 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
+from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_THEATER_KEY, CONF_THEATER_URL, CONF_URL, DOMAIN
 from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
 from .climates import select_climates
 from .ir_buttons import select_buttons
 from .environment import select_environment, current_mapping
 from .hue import group_options, select_groups
+from .theater import normalize_url as normalize_theater_url
 
 
 def export_selector():
@@ -88,7 +89,14 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                 buttons = select_buttons(self.hass, user_input.get("ir_entities", []))
                 environment = select_environment(self.hass, user_input.get("sensor_mapping", current_mapping(self.hass, entry.options.get("environment", []))))
                 groups = await select_groups(self.hass, user_input.get("hue_groups", entry.options.get("hue_groups", [])), entry.options.get("hue_groups", []))
-                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups})
+                theater_url = str(user_input.get(CONF_THEATER_URL, "")).strip()
+                theater_key = str(user_input.get(CONF_THEATER_KEY, "")).strip()
+                if theater_url:
+                    theater_url = normalize_theater_url(theater_url)
+                    if not theater_key:
+                        raise ValueError("Theater key required")
+                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups,
+                                                               CONF_THEATER_URL: theater_url, CONF_THEATER_KEY: theater_key if theater_url else ""})
             except ValueError:
                 errors["base"] = "invalid_input"
         sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
@@ -104,4 +112,6 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
             vol.Optional("ir_entities", default=current_entity_ids(self.hass, entry.options.get("ir_buttons", []))):
                 selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
                     {"domain": "button", "integration": "switchbot_ir_buttons"}])),
+            vol.Optional(CONF_THEATER_URL, default=entry.options.get(CONF_THEATER_URL, "")): str,
+            vol.Optional(CONF_THEATER_KEY, default=entry.options.get(CONF_THEATER_KEY, "")): password(),
         }), errors=errors)

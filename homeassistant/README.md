@@ -78,6 +78,30 @@ Snapshot 含遞增 sequence；重連重設，由 server 隔離舊連線。每 fr
 `pip install homeassistant==2026.9.2 pytest-homeassistant-custom-component` 後於本目錄 `pytest -q`。
 測試不連家庭 HA，也不代替上述實機驗收。
 
+## 劇院中繼（1.6.0，選配）
+
+theater-agent 是純內網服務，Render 連不到。原本只能經 PC agent 轉送；1.6.0 起 HA 也能當
+中繼，讓劇院不再依賴那台 Windows PC 開著。
+
+在 **設定 → 裝置與服務 → Home Butler → 設定** 填兩個欄位：
+
+- **劇院 agent 網址**：例如 `http://192.168.68.55:8080`。只收 http(s) origin，不能帶路徑或查詢字串。
+- **劇院 agent 金鑰**：theater-agent 的 `THEATER_AGENT_KEY`（與 PC agent `agent_config.py` 同一把）。
+
+兩欄都填才會啟用；只填網址會被拒絕，避免送出未帶金鑰的本機呼叫。填好之後在 Render 設
+`THEATER_VIA_HA=true`，HomeButler 才會改走這條。**先裝整合再翻旗標**，順序反了會直接回 503。
+
+這是白名單不是 proxy：只允許 `GET /summary` 與 `POST /flags`，旗標只收
+`kef_link`／`tv_screen_auto`／`tv_avr_sync` 三個布林值。其他路徑或欄位在 HA 端就被擋掉，
+後端即使被攻破也不能藉此打區網任意位址。
+
+中繼走**獨立的指令車道**，不與空調共用 in-flight slot——開一次 Dashboard 裝置頁不會讓
+空調指令回「忙碌中」。未取得結果一律回報未知，**不自動重送**（旗標寫入可能已經生效）。
+
+theater-agent 本身不需要任何改動。要退回 PC agent 只要把 `THEATER_VIA_HA` 改回 `false`；
+整合留著不啟用即可。
+
+
 ## 空調遷移
 
 1. HA 加入原生 **SwitchBot Cloud**（Token／Secret 只填 HA），確認空調的開關、冷暖／除濕／送風、整數溫度與風速可用。HA 新匯入的初始狀態不可當作實機已驗證。

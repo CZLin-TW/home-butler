@@ -5,13 +5,14 @@ from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_KEY, CONF_SOURCES, CONF_URL, DOMAIN
+from .const import CONF_KEY, CONF_SOURCES, CONF_THEATER_KEY, CONF_THEATER_URL, CONF_URL, DOMAIN
 from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
 from .climates import ClimateCommands, snapshot as climate_snapshot
 from .ir_buttons import IRCommands, snapshot as ir_snapshot
 from . import hub_updates, environment
 from .hue import HueCommands
+from .theater import TheaterRelay
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
@@ -28,6 +29,11 @@ async def async_setup_entry(hass, entry):
     buttons = entry.options.get("ir_buttons", [])
     sensors = entry.options.get("environment", [])
     groups = entry.options.get("hue_groups", [])
+    theater_url = entry.options.get(CONF_THEATER_URL, "")
+    theater_key = entry.options.get(CONF_THEATER_KEY, "")
+    # Relaying stays off until both the address and the key are configured; a
+    # half-filled form must not produce unauthenticated local calls.
+    theater = TheaterRelay(session, theater_url, theater_key) if theater_url and theater_key else None
     link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
                         commands=ClimateCommands(hass, climates) if climates or buttons else None,
@@ -35,6 +41,7 @@ async def async_setup_entry(hass, entry):
                         ir_commands=IRCommands(hass, buttons) if buttons else None,
                         environment=(lambda: environment.snapshot(hass, sensors)) if sensors else None,
                         hue_commands=HueCommands(hass, groups) if groups else None,
+                        theater_commands=theater,
                         hub_devices=lambda: hub_updates.devices(hass),
                         hub_updates=lambda frame: hub_updates.receive(hass, frame))
 

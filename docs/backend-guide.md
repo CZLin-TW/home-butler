@@ -352,6 +352,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | HOME_ASSISTANT_AC_NAMES | HA 管理的空調精確名稱 JSON 陣列；預設 `[]` | 逐台選配 |
 | HOME_ASSISTANT_IR_NAMES | HA 管理的 IR 電扇名稱 JSON 陣列；預設 `[]` | 逐台選配 |
 | HOME_ASSISTANT_SENSOR_NAMES | HA 唯一即時來源的感測器名稱 JSON 陣列；預設 `[]` | 逐台選配 |
+| THEATER_VIA_HA | `true` 時劇院指令改經 HA 中繼（需 home_butler 1.6.0 並在 HA 選項填劇院網址／金鑰）；預設 `false` 走 PC agent | 選配 |
 | HOME_ASSISTANT_HUE_ENABLED | `true` 將 Hue 控制／提醒切至 HA；預設 `false` 使用 PC Agent | 選配 |
 | LINE_CHANNEL_ACCESS_TOKEN | Line Bot 的 Channel Access Token | 必要 |
 | HOMEBRIDGE_API_KEY | 僅 `/api/homebridge/*` 接受的獨立 Key，至少 32 字元，不可與 owner／device-voice Key 相同；未設定停用 | 橋接選配 |

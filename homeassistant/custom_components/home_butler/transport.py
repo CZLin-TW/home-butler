@@ -44,7 +44,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
@@ -56,20 +56,26 @@ class OutboundLink:
         self.hub_devices, self.hub_updates = hub_devices, hub_updates
         self._hub_enabled = False
         self.environment, self.hue_commands = environment, hue_commands
+        # The theater relay runs in its own lane: a Dashboard page load must never
+        # block an AC command, and a concurrent relay call must never tear down the
+        # link the way the shared command guard below does.
+        self.theater_commands = theater_commands
 
     async def _serve_climates(self, ws):
         """Receive commands while waiting for the next sensor heartbeat."""
         acknowledgements = asyncio.Queue(maxsize=2)
         command_task = None
+        theater_task = None
 
         async def execute(frame):
-            controller = {"ir_command": self.ir_commands, "climate_command": self.commands, "hue_command": self.hue_commands}[frame["type"]]
+            controller = {"ir_command": self.ir_commands, "climate_command": self.commands,
+                          "hue_command": self.hue_commands, "theater_command": self.theater_commands}[frame["type"]]
             response = await controller.execute(frame)
             await ws.send_json(response)
             self.notify()
 
         async def receive():
-            nonlocal command_task
+            nonlocal command_task, theater_task
             while not self.closed:
                 frame = await ws.receive_json()
                 if not isinstance(frame, dict):
@@ -80,6 +86,16 @@ class OutboundLink:
                     acknowledgements.put_nowait(frame)
                 elif frame.get("type") == "hub_update" and self._hub_enabled:
                     self.hub_updates(frame)
+                elif frame.get("type") == "theater_command" and self.theater_commands:
+                    # Busy is an ordinary refusal here, not a protocol violation.
+                    if theater_task and not theater_task.done():
+                        await ws.send_json({"type": "theater_result", "status": "failed",
+                                            "request_id": frame.get("request_id", ""),
+                                            "message": "劇院中繼忙碌中"})
+                    else:
+                        if theater_task:
+                            theater_task.result()
+                        theater_task = asyncio.create_task(execute(frame))
                 elif (frame.get("type") == "climate_command" and self.commands) or (frame.get("type") == "ir_command" and self.ir_commands) or (frame.get("type") == "hue_command" and self.hue_commands):
                     if command_task and not command_task.done():
                         raise LinkError("Concurrent command rejected")
@@ -120,8 +136,9 @@ class OutboundLink:
             for task in done:
                 task.result()
         finally:
-            if command_task:
-                tasks.append(command_task)
+            for extra in (command_task, theater_task):
+                if extra:
+                    tasks.append(extra)
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -137,7 +154,8 @@ class OutboundLink:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
-                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None, "hue_control": self.hue_commands is not None})
+                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None, "hue_control": self.hue_commands is not None,
+                                        "theater_relay": self.theater_commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
@@ -155,7 +173,10 @@ class OutboundLink:
                         raise LinkError("Backend sensor upgrade required")
                     if self.hue_commands and "hue_control" not in hello.get("capabilities", []):
                         raise LinkError("Backend Hue upgrade required")
-                    if self.commands is not None or self._hub_enabled or self.environment or self.hue_commands:
+                    if self.theater_commands and "theater_relay" not in hello.get("capabilities", []):
+                        raise LinkError("Backend theater upgrade required")
+                    if (self.commands is not None or self._hub_enabled or self.environment
+                            or self.hue_commands or self.theater_commands):
                         await self._serve_climates(ws)
                         delay = 5
                         continue
