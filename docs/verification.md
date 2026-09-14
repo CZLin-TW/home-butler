@@ -8,6 +8,13 @@
 Chrome demo 驗證 HA 測試空調保存 3 小時顯示預計關機時間、收合重開保留值、改 0 停用；390×844 的欄位高 38px，無水平溢出。
 本次沒有寫入家庭時數或操作實體家電；不需更新 HA。上線後原 Sheet 有效時數會啟用，首次接手已開機從觀察起算，實體到期反應待使用者驗收。
 
+v1.56.0 部署確認：Render 功能提交 `27784f7aaf8bd7343fe9661ba45b88ee8a6f8a72` 已啟動並顯示 service live，HA WebSocket 重新連線成功。
+HB [CI 34852889166](https://github.com/CZLin-TW/home-butler/actions/runs/34852889166) 與 Dashboard
+[CI 34852924077](https://github.com/CZLin-TW/Dashboard/actions/runs/34852924077) 均成功。
+Dashboard `f27bd3a3013ac935a60fb2ab1e8c598a2c1aa95d` 正式頁面及 `/api/version` 均為 1.56.0。
+正式頁唯讀展開三台空調「自動關機」，均成功讀取 Sheet 既有時數；已開機者顯示計時中與預計關機時間，其餘顯示等待下次開機。
+未在正式頁保存設定或送出控制；實體到期關機仍待使用者驗收。
+
 2026-09-14 v1.55.0（部署前驗證）：221 項 HB 離線測試、31 項 Dashboard 測試、lint、正式 build 通過。
 新增 HA 手動排程來源標記、明確編輯、舊自動列拒絕、provider 切換取消與未知結果不重送測試。
 實際 scheduler → control_ac → HB WebSocket 路徑以假 HA 接收命令、回覆狀態；確認發送前先持久化待確認、重複 tick 不重送且 legacy handler 未呼叫。
