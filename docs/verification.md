@@ -3,7 +3,9 @@
 2026-09-14 v1.51.0／home_butler 1.4.0：新增感測環境快照與 Hue 選定區域控制通道。
 本機 211 項後端離線測試通過，新增 HA 來源失聯／補償一次／歷史保留、光照型別、Hue 分流與提醒去重。
 HA framework 測試新增 registry 改名／替換／單位、原生 Hue 場景／動態／smart_scene／timed effect、
-未授權目標拒絕、命令過期／取消／部分失敗不重送及雙向傳輸。Linux CI 與家庭切換待本次部署後補記。
+未授權目標拒絕、命令過期／取消／部分失敗不重送及雙向傳輸。
+`22bccffd12d97162cc6e61932d3b50ccf430992c` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34810186441)
+三個 job 全通過，其中 HA Core 2026.9.2／Python 3.14 的 47 項 framework 測試通過。
 家庭未啟用切換設定前仍走既有路徑；目前 Chrome 連線不可用，不能據離線結果宣稱實機已遷移。
 
 2026-09-14 家庭 HA 設定：建立「Hub 2 每分鐘更新感測資料」（`1789319755253`），

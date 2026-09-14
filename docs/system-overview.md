@@ -27,14 +27,15 @@ HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見
 瀏覽器 → Dashboard（Session／API 邊界）→ home-butler
 LINE／Siri 捷徑 ─────────────────────→ home-butler
                                        ├→ HA → SwitchBot Cloud（已遷移空調／電扇）
+                                       │     └→ Hue Bridge（啟用 HA Hue 後）
                                        ├→ Sheets／其他設備雲端（未遷移功能）
                                        └→ PC agent WebSocket
-                                            ├→ Hue Bridge（待轉 HA）
+                                            ├→ Hue Bridge（僅未切換 HA Hue 時）
                                             └→ 同機 theater-agent → AVR／KEF／Bravia
                                                      └ Apple TV monitor（獨立程序）
 Apple 家庭／Siri → HA HomeKit Bridge → 已匯出配件
 HA 本地自動化 → HA 裝置整合（Hue、SwitchBot、FP2 等）
-HA 選定觀測／空調狀態 → 主動 WSS → home-butler → Dashboard
+HA 選定觀測／環境感測／空調狀態 → 主動 WSS → home-butler → Dashboard
 ```
 
 Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
@@ -55,6 +56,7 @@ Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`�
 | 家電排程 | `main.py` 註冊 `schedules`，每 60 秒 | 工作耗時、服務休眠及外部 I/O 仍影響延遲；送出前記錄執行識別碼，未知結果不自動重送 |
 | 空調室溫補償 | `ac-temperature-feedback` 每 60 秒先更新回饋使用中感測器，再檢查；各設備預設 5 分鐘評估，最低 1 分鐘 | 預設關閉，僅已開機冷／暖房；不改舒適目標、不重設排程，未知結果暫停。[設定與 IR 限制](ac-temperature-feedback.md) |
 | 感測器、照明、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
+| HA Hue 待辦燈光提醒 | 每 60 秒，僅 HA Hue 切換啟用時 | 同區域每分鐘最多一次；舊 PC queue 回空，不傳私人待辦文字給 HA |
 | PC 指標 | `agent/agent.py` 每 tick 回報，預設 60 秒 | 心跳只代表 PC agent 的回報 |
 | AVR／KEF | theater-agent 的 AVR push、KEF 長輪詢事件、每輪完成後等 15 秒補漏 | 事件需核對連動旗標及 AVR 狀態；不能保證 15 秒內完成硬體喚醒 |
 | Apple TV／畫面 | Apple TV push 加主動查詢與畫面恢復狀態機 | 只恢復自己關閉的畫面；細節以私人 repo 為準 |
