@@ -1,5 +1,10 @@
 # 接手入口
 
+README 已按現行 HA 分工重整；完整設定、Sheets 欄位與 API 移至 [後端參考](docs/backend-guide.md)。
+[版本選擇](docs/version-selection.md) 記錄 v1.44.0 的後端／Dashboard 固定 SHA、下載及更新限制。
+這是 HA 導入前最後快照，不是最後能無 HA 運作的版本；main 的 HA 來源仍由允許清單／旗標選配。
+維護時同步 README、參考文件與版本索引，不恢復「所有設備皆直連」或把舊快照當獨立維護分支。
+
 v1.52.0／switchbot_hub_light 1.2.0：Hub 備援查詢由整合管理，預設 60 秒、可設 60–3600 整數秒。
 Push 與定時刷新共用單台工作／原生 coordinator；請求結束後延後該台的下一次輪詢，保留最後一筆提示。
 不 monkey patch core、不取出憑證、不新增 HB 查詢；Render 斷線仍能輪詢。卸載／options reload 清理計時與 pending。

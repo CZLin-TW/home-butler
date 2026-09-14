@@ -10,7 +10,7 @@ HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render�
 | 元件 | 長期責任 | 目前現況 |
 | --- | --- | --- |
 | Home Assistant（HA） | 本地設備狀態、基本控制、即時自動化、Apple Home 發布 | FP2、三台空調、IR 電扇按鈕及 Hub 光照已接入；Hue 已可本地控制 |
-| HomeButler（Render） | AI／LINE、家庭權限、待辦庫存、跨服務提醒、Dashboard API | 空調與選定電扇經 HA；v1.51.0 可切換感測與 Hue 到 HA，除濕機控制仍保留 |
+| HomeButler（Render） | AI／LINE、家庭權限、待辦庫存、跨服務提醒、Dashboard API | 家庭空調、選定電扇、感測與 Hue 已切換 HA；其他部署可不啟用 HA，除濕機控制仍保留 |
 | Dashboard | 家庭成員操作與資訊顯示 | 讀取 HB 的 HA 即時投影及原歷史；不能直接管理 HA 自動化 |
 | Apple Home／Siri | Apple 生態的操作入口 | FP2 與空調經 HA HomeKit Bridge；使用者已確認空調换新配件 |
 | Theater Agent | AVR、KEF、電視等具狀態的協調控制 | 維持独立程序與既有 HB／PC relay；本階段不移轉 |

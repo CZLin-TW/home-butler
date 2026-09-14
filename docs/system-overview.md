@@ -1,6 +1,8 @@
 # 三個 repo 的系統導覽
 
 後續工作與驗收缺口見 [2026-09-14 HA 遷移盤點](ha-migration-audit.md)。
+新建置先讀 [README](../Readme.md)，設定／API 見 [後端參考](backend-guide.md)。
+不裝 HA 或固定 v1.44.0 的成套 SHA 與指令見 [版本選擇](version-selection.md)。
 
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
 HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
@@ -18,7 +20,7 @@ HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見
 | Repo | 責任 | 主要入口 |
 | --- | --- | --- |
 | [Dashboard](https://github.com/CZLin-TW/Dashboard) | UI、LINE 配對登入、JWT Session、可信使用者身分與 API 代理、瀏覽器快取、獨立 demo | [README](https://github.com/CZLin-TW/Dashboard/blob/main/README.md)、[AGENTS](https://github.com/CZLin-TW/Dashboard/blob/main/AGENTS.md)、[demo](https://github.com/CZLin-TW/Dashboard/blob/main/docs/demo-mode.md) |
-| [home-butler](https://github.com/CZLin-TW/home-butler) | LINE／Siri 意圖與家庭 API、Sheets、私人待辦權限、設備排程與規則；`agent/` 提供 PC 指標、Hue 與劇院中繼 | [README](../Readme.md)、[AGENTS](../AGENTS.md)、[PC agent](../agent/README.md) |
+| [home-butler](https://github.com/CZLin-TW/home-butler) | LINE／Siri 意圖與家庭 API、Sheets、權限、提醒及未遷移設備規則；`agent/` 提供 PC 指標與劇院中繼，未啟用 HA Hue 時亦負責 Hue | [README](../Readme.md)、[AGENTS](../AGENTS.md)、[PC agent](../agent/README.md) |
 | [theater-agent](https://github.com/CZLin-TW/theater-agent)（私人） | AVR／KEF 連動、KEF 事件、Bravia 畫面恢復、Apple TV 監控及本服務的健康更新流程 | [README](https://github.com/CZLin-TW/theater-agent/blob/main/README.md)、[AGENTS](https://github.com/CZLin-TW/theater-agent/blob/main/AGENTS.md)、[可靠性](https://github.com/CZLin-TW/theater-agent/blob/main/docs/reliability.md)；需要既有 repo 存取權 |
 
 ## 資料與控制路徑
@@ -54,7 +56,7 @@ Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`�
 | 工作 | 實作／頻率 | 限制 |
 | --- | --- | --- |
 | 家電排程 | `main.py` 註冊 `schedules`，每 60 秒 | 工作耗時、服務休眠及外部 I/O 仍影響延遲；送出前記錄執行識別碼，未知結果不自動重送 |
-| 空調室溫補償 | `ac-temperature-feedback` 每 60 秒先更新回饋使用中感測器，再檢查；各設備預設 5 分鐘評估，最低 1 分鐘 | 預設關閉，僅已開機冷／暖房；不改舒適目標、不重設排程，未知結果暫停。[設定與 IR 限制](ac-temperature-feedback.md) |
+| 未遷移 HA 空調的室溫補償 | `ac-temperature-feedback` 每 60 秒檢查；HA 管理空調跳過，各未遷移設備預設 5 分鐘評估，最低 1 分鐘 | 舊路徑預設關閉，僅已開機冷／暖房；目前 HA 空調不使用此功能。[舊路徑設定與 IR 限制](ac-temperature-feedback.md) |
 | 感測器、照明、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
 | HA Hue 待辦燈光提醒 | 每 60 秒，僅 HA Hue 切換啟用時 | 同區域每分鐘最多一次；舊 PC queue 回空，不傳私人待辦文字給 HA |
 | PC 指標 | `agent/agent.py` 每 tick 回報，預設 60 秒 | 心跳只代表 PC agent 的回報 |

@@ -1,5 +1,13 @@
 # 驗證方式與範圍
 
+2026-09-14 README 重整（僅文件）：首頁改為現行架構與建置入口，詳細設定／API 移至 backend-guide，
+新增 version-selection，區分 main 不啟用 HA 與 HA 前 v1.44.0 固定快照。
+已用 Git 歷史核對首次 HA commit 的父版本：後端 `5c0b681f149741236d16d100bf96b734d1b1f767`，
+Dashboard `2c31431d0588e4cfbe8323384234f64d092dfd9d`；確認當時 Dashboard 1.44.0、Homebridge 1.3.0、
+PC Agent 的 AUTO_UPDATE 開關與 origin/main 更新行為。未重新部署或實測舊版，不據此保證外部服務相容。
+檢查七份入口與參考文件的本地／跨 repo 連結、標題錨點及程式碼區塊，git diff --check 通過。
+無執行程式變更、無系統版本調整、無家庭設備操作或 HA 設定改動；此次不重跑硬體／模型測試。
+
 2026-09-14 v1.52.0／switchbot_hub_light 1.2.0：內建可設定 60～3600 秒的備援更新，預設 60 秒。
 定時／Push 共用工作，新增週期、合併、失敗恢復、卸載與選項重載測試。
 `c6f00ce9d941ae4377c316a4156dc67a3569576f` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34813483894)
