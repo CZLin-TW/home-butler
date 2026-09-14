@@ -38,7 +38,9 @@
           "climate_entities": "Native ACs HomeButler may control",
           "ir_entities": "IR buttons HomeButler may press",
           "sensor_mapping": "Sensor mapping (HB name → metric → HA entity ID)",
-          "hue_groups": "Hue areas controlled by Home Butler"
+          "hue_groups": "Hue areas controlled by Home Butler",
+          "theater_url": "Theater agent address (leave empty to keep using the PC agent)",
+          "theater_key": "Theater agent API key"
         }
       }
     },
