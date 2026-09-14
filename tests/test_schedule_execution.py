@@ -2,10 +2,10 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from command_result import CommandResult
-from schedule_execution import execute_pending, ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
+from schedule_execution import execute_pending, ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN, HA_MANUAL_SOURCE
 from test_callback_concurrency import endpoint
 
 
@@ -61,6 +61,22 @@ class ScheduleExecutionTests(unittest.TestCase):
         self.assertTrue(self.sheet.rows[0][ATTEMPT_COLUMN])
         self.run_tick()
         self.handler.assert_called_once_with({"power": "off", "device_name": "測試冷氣"}, self.ctx, from_auto_schedule=False)
+
+    def test_only_explicit_manual_ha_schedule_runs_and_unknown_is_not_replayed(self):
+        self.sheet.rows = [schedule(**{"來源": source}) for source in ["使用者", "自動", "防黴", HA_MANUAL_SOURCE]]
+        self.handler.return_value = CommandResult.unknown("HA reply lost")
+        with patch("ha_climate.managed", return_value=True):
+            self.run_tick()
+            self.assertEqual([r["狀態"] for r in self.sheet.rows], ["已取消", "已取消", "已取消", "待確認"])
+            self.run_tick()
+        self.handler.assert_called_once_with({"power": "off", "device_name": "測試冷氣"}, self.ctx, from_auto_schedule=False)
+
+    def test_ha_schedule_cannot_fall_back_to_direct_driver_after_provider_change(self):
+        self.sheet.rows[0]["來源"] = HA_MANUAL_SOURCE
+        with patch("ha_climate.managed", return_value=False):
+            self.run_tick()
+        self.assertEqual(self.sheet.rows[0]["狀態"], "已取消")
+        self.handler.assert_not_called()
 
     def test_failure_retains_reason_without_replay_or_success_archive(self):
         self.handler.return_value = CommandResult.failed("✅ appears in provider text; device refused")

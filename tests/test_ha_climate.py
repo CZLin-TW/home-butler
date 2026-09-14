@@ -16,6 +16,34 @@ AC = {"id": "c" * 32, "entity_id": "climate.living", "name": "客廳空調",
 
 
 class HaClimateTests(unittest.TestCase):
+    def test_manual_schedule_dispatch_reaches_real_ha_websocket_without_legacy(self):
+        from datetime import datetime, timezone
+        import ac_feedback
+        from schedule_execution import execute_pending, HA_MANUAL_SOURCE
+        from test_schedule_execution import Sheet, Context, schedule, ensure_columns, update_fields
+        sheet = Sheet([schedule(**{"設備名稱": AC["name"], "來源": HA_MANUAL_SOURCE})])
+        ctx = Context(sheet)
+        ctx.data["智能居家"] = [{"名稱": AC["name"], "類型": "空調", "狀態": "啟用"}]
+        legacy = Mock(side_effect=AssertionError("Must not use direct IR"))
+        def tick():
+            return execute_pending(datetime(2026, 9, 6, 12, 5, tzinfo=timezone.utc), ctx,
+                tz=SimpleNamespace(localize=lambda d: d.replace(tzinfo=timezone.utc)),
+                handlers={"control_ac": ac_feedback.manual_control(legacy)}, ensure_columns=ensure_columns,
+                update_fields=update_fields, antimold_source="防黴")
+        with self.client.websocket_connect("/api/home-assistant/ws") as ws:
+            self.connect(ws)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(tick)
+                command = ws.receive_json()
+                self.assertEqual(command["patch"], {"power": "off"})
+                self.assertEqual(sheet.rows[0]["狀態"], "待確認")
+                ws.send_json({"type": "climate_result", "request_id": command["request_id"],
+                    "status": "success", "state": {**AC, "hvac_mode": "off"}})
+                self.assertEqual(future.result(3), {AC["name"]})
+                self.assertEqual(sheet.rows[0]["狀態"], "已執行")
+                self.assertEqual(tick(), set())
+        legacy.assert_not_called()
+
     def setUp(self):
         base.HomeAssistantTests.setUp(self)
         self.env = patch.dict(os.environ, {"HOME_ASSISTANT_AC_NAMES": json.dumps([AC["name"]])})

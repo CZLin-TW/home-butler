@@ -14,6 +14,9 @@ ATTENTION_STATES = {"執行失敗", "待確認"}
 VISIBLE_STATES = {"待執行", *ATTENTION_STATES}
 ATTEMPT_COLUMN = "執行識別碼"
 RESULT_COLUMN = "執行結果"
+# Explicit opt-in on newly created/edited manual schedules. Old AC rows must
+# not come back to life merely because Dashboard scheduling is enabled again.
+HA_MANUAL_SOURCE = "使用者（HA）"
 _dispatch_lock = threading.Lock()
 _identity_fields = ("設備名稱", "動作", "參數", "觸發時間", "建立者", "建立時間", "來源")
 
@@ -53,10 +56,13 @@ def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, an
             row_number, row = match
             device_name = row.get("設備名稱", "")
             from ha_climate import managed
-            if row.get("動作") == "control_ac" and managed(device_name):
-                update_fields(sheet, row_number, {"狀態": "已取消", RESULT_COLUMN: "空調已移轉 HA；舊排程不再執行，請在 HA 重新設定"})
-                processed.add(device_name)
-                continue
+            if row.get("動作") == "control_ac":
+                ha_managed = managed(device_name)
+                ha_manual = row.get("來源") == HA_MANUAL_SOURCE
+                if ha_managed != ha_manual:
+                    update_fields(sheet, row_number, {"狀態": "已取消", RESULT_COLUMN: "空調控制來源已變更或為舊排程；請確認設備後重新建立手動排程"})
+                    processed.add(device_name)
+                    continue
             if (now - trigger).total_seconds() > 7200 and row.get("來源") != antimold_source:
                 update_fields(sheet, row_number, {"狀態": "已過期"})
                 processed.add(device_name)

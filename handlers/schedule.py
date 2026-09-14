@@ -4,7 +4,7 @@ from config import now_taipei
 from sheets import get_all_devices_by_type, append_record, update_row_fields, ensure_columns
 from prompt import _format_schedule_params
 from handlers.device import maintain_ac_auto_schedule
-from schedule_execution import ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
+from schedule_execution import ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN, HA_MANUAL_SOURCE
 
 
 def _norm_trigger(s):
@@ -67,8 +67,7 @@ def handle_add_schedule(data, user_name, ctx):
             return "❌ 請指定設備名稱"
 
     from ha_climate import managed
-    if target_action == "control_ac" and managed(device_name):
-        return "❌ 空調已交由 HA 管理，請在 HA 設定空調排程"
+    ha_manual = target_action == "control_ac" and managed(device_name)
     new_row = {
         "設備名稱": device_name,
         "動作": target_action,
@@ -77,7 +76,7 @@ def handle_add_schedule(data, user_name, ctx):
         "建立者": user_name,
         "建立時間": now,
         "狀態": "待執行",
-        "來源": "使用者",
+        "來源": HA_MANUAL_SOURCE if ha_manual else "使用者",
     }
     append_record(sheet, new_row)
     # 同步 ctx 快取，讓接著呼叫的 maintain_ac_auto_schedule 看得到這筆新排程
@@ -99,7 +98,7 @@ def handle_modify_schedule(data, user_name, ctx):
     params_new 是「整個 dict 取代」，不做 merge——對應 UI 是重填表單，
     partial merge 反而難理解。
 
-    建立者 / 建立時間 / 來源 不動，保留原 metadata。
+    建立者 / 建立時間不動；來源依明確編輯後的控制端更新 HA 手動標記。
 
     跨類型編輯（control_ac ↔ control_ir / control_dehumidifier）允許，
     呼叫端負責 params_new 形狀對得上新 action（與 add_schedule 一致，後端不驗）。
@@ -140,8 +139,9 @@ def handle_modify_schedule(data, user_name, ctx):
 
     old_action = target_row.get("動作", "")
     from ha_climate import managed
-    if ((new_action or old_action) == "control_ac" and managed(new_device or device_name)):
-        return "❌ 空調已交由 HA 管理，請在 HA 設定空調排程"
+    ha_manual = (new_action or old_action) == "control_ac" and managed(new_device or device_name)
+    if ha_manual and target_row.get("來源") not in ("使用者", HA_MANUAL_SOURCE):
+        return "❌ 舊自動關機／防黴排程已停用，請另外新增手動排程"
 
     # 寫入前即時定位列號，不信任快取的 target_idx+2（背景 tick 增刪排程列會位移）。
     live = _locate_schedule_rows(sheet.get_all_values(), device_name, trigger_time, False)
@@ -150,6 +150,10 @@ def handle_modify_schedule(data, user_name, ctx):
     sheet_row = live[0][0]
 
     updates = {}
+    if ha_manual:
+        updates["來源"] = HA_MANUAL_SOURCE
+    elif target_row.get("來源") == HA_MANUAL_SOURCE:
+        updates["來源"] = "使用者"
     if new_device is not None:
         updates["設備名稱"] = new_device
     if new_action is not None:
