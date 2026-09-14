@@ -7,6 +7,10 @@ HA framework 測試新增 registry 改名／替換／單位、原生 Hue 場景�
 `22bccffd12d97162cc6e61932d3b50ccf430992c` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34810186441)
 三個 job 全通過，其中 HA Core 2026.9.2／Python 3.14 的 47 項 framework 測試通過。
 家庭未啟用切換設定前仍走既有路徑；目前 Chrome 連線不可用，不能據離線結果宣稱實機已遷移。
+Dashboard `dee34f26cd34c7fecf87bac4c51a00670df0ea0c` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34810581459)
+及 Vercel 部署成功（28 tests／lint／build）；隔離預覽已確認 HA 照明來源與「4 級」光照顯示。
+尚待：HA 安裝 1.4.0、逐台確認 Hub 2／CO₂ 實體及配對、勾選 Hue 區域、Render 切換設定、
+核對現有夜燈規則擁有者與實機驗收。Render 本次程序 SHA 未取得，不能以 Git push 代替部署確認。
 
 2026-09-14 家庭 HA 設定：建立「Hub 2 每分鐘更新感測資料」（`1789319755253`），
 時間模式 `/1`，更新三台 Hub 2 各一個原生溫度實體，保留 Push。
