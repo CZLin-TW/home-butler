@@ -2,8 +2,21 @@
 
 2026-09-14 v1.54.0（部署前驗證）：216 項 HB 離線測試、30 項 Dashboard 測試、lint、正式 build 通過。
 本機 demo 驗證彩色／白光切換、二維色盤點選、飽和度鍵盤操作、色溫回讀；390px 無橫向溢出。
-HA 新增色彩能力、互斥與全批預驗證、混合燈組／部分支援／去重測試，框架 CI 待 push 後確認。
-尚未操作家庭燈具，未驗證 iPhone Safari 實機；HA 1.5.0 安裝狀態另記，不能由程式完成推定已安裝。
+HA 新增色彩能力、互斥與全批預驗證、混合燈組／部分支援／去重測試。
+模擬離線情境正確顯示錯誤並隱藏不可操作卡片；未驗證 iPhone Safari 實機。
+
+同日約 20:34（Asia/Taipei）正式部署完成：
+- 後端／HA `75f80739953ff81a81b1148fff07a2660cf8bfa9` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34843465827)
+  全部成功（後端、HA Core 2026.9.2 真實框架、Homebridge）。
+- Dashboard `6ba4572f588b076002d6ed65a68bb431ec6a5d60` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34843644252)
+  成功，公開 `/api/version` 與正式頁面均顯示 1.54.0。
+- Render 公開 OpenAPI 的 HueAreaStateRequest 已確認包含 hs_color 與 color_temp_kelvin，非僅前端上線。
+- 透過家庭 HA Terminal 安裝上述固定 SHA 的 home_butler 1.5.0；備份為
+  `/config/home_butler-backup-20260914-202943-379`，`ha core check` 與 `ha core restart` 均回成功。
+- 重啟後正式 Dashboard 已重新讀到主臥／客廳兩組燈，各一盞，均有白光／彩色選擇；
+  主臥為關閉、客廳開啟，Bridge 回讀顯示彩色。僅讀取家庭狀態，沒有發出燈光變更命令。
+
+實際色盤／色溫呈色效果留待使用者驗收。HA 區域統一與 ToDo 通知效果編輯未在此版實作。
 
 
 2026-09-14 v1.53.0：使用者決定除濕機完整保留 HB，移除 HB 自動夜燈與前端入口。
