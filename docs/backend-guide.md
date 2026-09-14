@@ -953,3 +953,9 @@ AI 解析成本與效果的既有實測見 [評估紀錄](../evals/README.md)。
 - [開發指引](../AGENTS.md) 與 [PC agent 維護](../agent/README.md)：程式維護與本機部署。
 
 僅未遷移 HA 的空調回饋 v1.44.0：評估間隔最低 1 分鐘（上限 30）、最短調整間隔最低 1 分鐘（上限 60）。預設仍 5／10 分鐘，既有設定不變；回饋使用中的感測器約每分鐘取得最新讀值，歷史記錄仍約每 5 分鐘；同一顆感測器共用查詢，相同讀取樣本不重複調整。
+
+
+### 照明光色 API（v1.54.0）
+
+照明 state PATCH 可另帶互斥的 hs_color 或 color_temp_kelvin；需要 HA home_butler 1.5.0。
+詳見 [光色控制契約](../homeassistant/sensors-and-hue.md#光色控制home_butler-150)。

@@ -13,6 +13,7 @@ import time
 
 from homeassistant.config_entries import ConfigEntryState
 from . import hue_model as model
+from . import hue_color
 
 UUID = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 ACTIONS = {"hue.list_areas", "hue.set_state", "hue.recall_scene", "hue.set_effect", "hue.notify", "hue.breathe"}
@@ -74,13 +75,14 @@ def plan(action, payload, catalogues):
     for entry_id, selected, data in catalogues:
         for area in model.list_areas(data)["areas"]:
             if area["id"] in selected:
+                area["color_control"] = hue_color.describe(area, data)
                 candidates.append((entry_id, data, area))
     if action == "hue.list_areas":
         if payload:
             raise ValueError("Unexpected list parameters")
         return [], {"areas": [area for _, _, area in candidates], "counts": {"selected_areas": len(candidates)}}
     allowed_keys = {
-        "hue.set_state": {"area_id", "resource_type", "on", "brightness"},
+        "hue.set_state": {"area_id", "resource_type", "on", "brightness", "hs_color", "color_temp_kelvin"},
         "hue.recall_scene": {"scene_id", "resource_type", "action"},
         "hue.set_effect": {"area_id", "resource_type", "effect"},
         "hue.notify": {"area_id", "resource_type", "notification"},
@@ -120,9 +122,12 @@ def plan(action, payload, catalogues):
             if type(value) not in (int, float) or not math.isfinite(value) or not 1 <= value <= 100:
                 raise ValueError("Invalid brightness")
             body["dimming"] = {"brightness": value}
-        if not body:
+        color_writes, skipped = hue_color.plan_color(area, data, payload)
+        if not body and not color_writes:
             raise ValueError("Empty state command")
-        return [(eid, "grouped_light", target, body)], result
+        writes = [(eid, "grouped_light", target, body)] if body else []
+        writes.extend((eid, "light", lid, color_body) for lid, color_body in color_writes)
+        return writes, {**result, "skipped_light_ids": skipped}
     if action in ("hue.notify", "hue.breathe"):
         key = "alert:breathe" if action == "hue.breathe" else payload.get("notification", "alert:breathe")
         matches = [n for n in area["notifications"] if n["key"] == key]

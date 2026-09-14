@@ -10,6 +10,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.home_butler.hue import HueCommands, group_options, select_groups
+from homeassistant.util.color import color_hs_to_xy
 
 G, R, L, D, S, T = [f"00000000-0000-0000-0000-{n:012d}" for n in range(1, 7)]
 CATALOGUE = [
@@ -141,3 +142,74 @@ async def test_partial_effect_failure_and_unselected_scene_are_not_replayed(nati
     data[4]["group"]["rid"] = second
     assert (await commands.execute(frame("hue.recall_scene", {"scene_id": S}, "e" * 32)))["status"] == "failed"
     assert len(api.writes) == 2
+
+
+def add_color(api):
+    light = api.request.return_value[3]
+    light["color"] = {"xy": {"x": .3127, "y": .3290}}
+    light["color_temperature"] = {"mirek": 333, "mirek_valid": True,
+        "mirek_schema": {"mirek_minimum": 153, "mirek_maximum": 500}}
+    return light
+
+
+async def test_color_white_readback_and_capabilities(native):
+    _, api, commands = native
+    light = add_color(api)
+    area = (await commands.execute(frame()))["result"]["areas"][0]
+    info = area["color_control"]
+    assert info == {"color_count": 1, "temperature_count": 1, "min_kelvin": 2000, "max_kelvin": 6535,
+                    "mode": "temperature", "hs": None, "kelvin": 3003}
+    request = frame("hue.set_state", {"area_id": G, "hs_color": [280, 40]}, "b" * 32)
+    assert (await commands.execute(request))["status"] == "success"
+    x, y = color_hs_to_xy(280, 40)
+    assert api.writes[-1] == ("put", f"clip/v2/resource/light/{L}", {"color": {"xy": {"x": x, "y": y}}})
+    assert (await commands.execute(request))["status"] == "success"
+    assert len(api.writes) == 1
+    # A settings command preserves power. Readback comes from the bridge, not request.
+    light["color_temperature"]["mirek_valid"] = False
+    light["color"]["xy"] = {"x": x, "y": y}
+    info = (await commands.execute(frame(request_id="c" * 32)))["result"]["areas"][0]["color_control"]
+    assert info["mode"] == "color" and abs(info["hs"][0] - 280) < 2 and abs(info["hs"][1] - 40) < 2
+    assert (await commands.execute(frame("hue.set_state", {"area_id": G, "color_temp_kelvin": 4000}, "d" * 32)))["status"] == "success"
+    assert api.writes[-1][2] == {"color_temperature": {"mirek": 250}}
+
+
+@pytest.mark.parametrize("settings", [
+    {"hs_color": [360, 101]}, {"hs_color": [-1, 20]}, {"hs_color": [True, 20]},
+    {"hs_color": [float("nan"), 20]}, {"hs_color": [40]}, {"hs_color": "red"},
+    {"hs_color": [40, 20], "color_temp_kelvin": 3000}, {"color_temp_kelvin": 6536},
+    {"color_temp_kelvin": 1999}, {"color_temp_kelvin": 3000.5},
+])
+async def test_color_validation_precedes_all_writes(native, settings):
+    _, api, commands = native
+    add_color(api)
+    result = await commands.execute(frame("hue.set_state", {"area_id": G, "on": True, **settings}))
+    assert result["status"] == "failed"
+    assert not api.writes
+
+
+async def test_mixed_color_group_does_not_average_or_write_unsupported_bulb(native):
+    _, api, commands = native
+    add_color(api)
+    second = "00000000-0000-0000-0000-000000000010"
+    data = api.request.return_value
+    data[2]["services"].append({"rid": second, "rtype": "light"})
+    data.append({"type": "light", "id": second, "color_temperature": {
+        "mirek": 250, "mirek_valid": True, "mirek_schema": {"mirek_minimum": 200, "mirek_maximum": 454}}})
+    info = (await commands.execute(frame()))["result"]["areas"][0]["color_control"]
+    assert info["mode"] == "mixed" and info["hs"] is None and info["kelvin"] is None
+    assert info["color_count"] == 1 and info["temperature_count"] == 2
+    assert info["min_kelvin"] == 2203 and info["max_kelvin"] == 5000
+    result = await commands.execute(frame("hue.set_state", {"area_id": G, "hs_color": [0, 0]}, "b" * 32))
+    assert result["status"] == "success" and result["result"]["skipped_light_ids"] == [second]
+    assert len(api.writes) == 1 and api.writes[0][1].endswith(L)
+
+
+async def test_partial_color_failure_is_unknown_and_never_replayed(native):
+    _, api, commands = native
+    add_color(api)
+    api.error = True
+    request = frame("hue.set_state", {"area_id": G, "color_temp_kelvin": 3000})
+    assert (await commands.execute(request))["status"] == "unknown"
+    assert (await commands.execute(request))["status"] == "unknown"
+    assert len(api.writes) == 1

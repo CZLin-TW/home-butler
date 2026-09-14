@@ -10,6 +10,14 @@ HomeButler 負責家庭資料與 AI 理解；目前推薦搭配 Home Assistant�
 **開始使用：** [選擇架構與版本](#選擇架構與版本) · [架構](#目前架構) · [建置](#開始建置) ·
 [設定與 API](docs/backend-guide.md) · [Dashboard](https://github.com/CZLin-TW/Dashboard) · [驗證紀錄](docs/verification.md)
 
+## 照明光色更新
+
+v1.54.0 Dashboard 加入白光色溫、可展開二維色盤（色相＋飽和度），保留亮度／特效／場景。
+需更新 HA `home_butler` 至 **1.5.0** 才啟用新能力；HA 舊版與 legacy PC 仍保留原有控制。
+混合燈具依能力套用，讀回實際色彩或混合狀態；未知結果不重送、調色不附帶開機。
+[控制契約與安裝](homeassistant/sensors-and-hue.md#光色控制home_butler-150)
+HA 區域統一、除濕機區域對應及 ToDo 通知效果編輯屬後續規劃；這版尚未遷移。
+
 ## 選擇架構與版本
 
 **HA 是可選整合，不是目前 main 的強制依賴。** 新的家庭中樞架構以 HA 為主要設備入口，

@@ -53,7 +53,7 @@ adapter 使用 aiohue 4.9.0 的公開 `request`（讀取）及 `create_request`�
 保留原 grouped_light UUID，Sheet 的區域別名及燈光提醒目標不需重建。
 設定好後在 Render 設定 `HOME_ASSISTANT_HUE_ENABLED=true`。
 
-功能範圍：開關、亮度、普通／動態場景、smart_scene 啟用／停用、燈具所宣告的效果
+功能範圍：開關、亮度、光色（1.5.0 起）、普通／動態場景、smart_scene 啟用／停用、燈具所宣告的效果
 （包含有支援時的 timed_effects 日出）、alert／signaling 通知。
 Hue App 的「喚醒自動化」不等於可呼叫場景，本 adapter 不讀取或編輯 Hue App 自動化。
 保留硬體支援清單與部分燈具不支援的提示，不虛構所有燈都可用日出。
@@ -79,3 +79,25 @@ Hue App 的「喚醒自動化」不等於可呼叫場景，本 adapter 不讀取
 要還原路徑，先將 Hue 設為 false、感測名稱清單還原舊值，再視需要還原程式／HA 備份。
 HA 安裝腳本會保存原整合副本；不要在切換旗標仍啟用時先卸載整合，否則對應裝置會如預期顯示未知。
 還原 Hue 前確認 PC Agent 原 Hue 配對仍可用；不要同時啟用兩套提醒工作。
+
+## 光色控制（home_butler 1.5.0）
+
+系統 v1.54.0 的 `PATCH /api/lighting/areas/{id}/state` 增加互斥參數：
+`hs_color: [色相 0–360, 飽和度 0–100]` 或整數 `color_temp_kelvin`。
+JSON 不可同時提供兩者；布林、非有限數值、超出範圍與額外欄位皆拒絕。
+HA 以當次選定區域 catalogue 再驗證能力，不接受客戶端指定單燈 ID；
+僅對支援該模式的群組成員寫入，回傳 skipped_light_ids。顏色轉換使用 HA 公開 util.color，
+依每盞燈 gamut 限制；白光範圍為有色溫燈具的共同 mirek 範圍，沒有交集就不提供控制。
+調光／調色本身不附帶 on；燈關閉時可保存設定，是否立即呈現由燈具決定。
+整批驗證在第一次寫入之前完成，部分寫入失敗／逾時保持 unknown 且不重送。
+
+`GET /api/lighting/areas` 每個 HA 群組增加 `color_control`：color_count、temperature_count、
+min_kelvin／max_kelvin、mode（temperature／color／mixed／null）、hs、kelvin。
+數值來自 Bridge 讀回；混合模式／不同顏色不平均，缺讀值回 null，並非最後要求的顏色。
+因 Hue 使用整數 mirek，送 3000 K 讀回可能為 3003 K，前端應以讀值顯示。
+色盤為螢幕近似預覽，實際色域與各燈呈色可能不同。
+
+先部署後端並確認 CI，再以 `install.sh <完整 commit SHA> home_butler` 更新到 1.5.0，
+重啟 HA，最後部署／重新整理 Dashboard。此次不需更新 switchbot_hub_light，原選取清單保留。
+舊 HA 不宣告 color_control，因此前端不顯示色盤；legacy PC 色彩請求回 409，不能假裝成功。
+HA 區域與 Hue 房間／區域仍是不同概念；區域統一另案處理，不變更 UUID 或既有提醒目標。

@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
 
 import switchbot_api
 from lighting_transport import send_command as send_agent_command
@@ -29,9 +29,19 @@ class HueBreatheRequest(BaseModel):
 
 
 class HueAreaStateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     on: Optional[bool] = None
     brightness: Optional[float] = None
     resource_type: Optional[str] = "grouped_light"
+    hs_color: Optional[list[StrictFloat | StrictInt]] = Field(default=None, min_length=2, max_length=2)
+    color_temp_kelvin: Optional[StrictInt] = Field(default=None, ge=1000, le=10000)
+
+    @model_validator(mode="after")
+    def validate_color(self):
+        if self.hs_color is not None:
+            if self.color_temp_kelvin is not None or not 0 <= self.hs_color[0] <= 360 or not 0 <= self.hs_color[1] <= 100:
+                raise ValueError("Choose valid hue/saturation or white temperature")
+        return self
 
 
 class HueSceneRecallRequest(BaseModel):
@@ -110,8 +120,13 @@ async def api_update_lighting_area(area_id: str, req: HueAreaUpdateRequest):
 
 @router.patch("/lighting/areas/{area_id}/state")
 async def api_set_lighting_area_state(area_id: str, req: HueAreaStateRequest):
-    if req.on is None and req.brightness is None:
-        raise HTTPException(status_code=400, detail="on or brightness is required")
+    if all(value is None for value in (req.on, req.brightness, req.hs_color, req.color_temp_kelvin)):
+        raise HTTPException(status_code=400, detail="A lighting setting is required")
+    # Old PC agents silently ignore unknown keys: reject instead of false success.
+    if req.hs_color is not None or req.color_temp_kelvin is not None:
+        from lighting_transport import ha_enabled
+        if not ha_enabled():
+            raise HTTPException(status_code=409, detail="光色控制需要更新 HA Home Butler 整合並啟用 HA 照明來源")
     try:
         message = await send_agent_command(
             "hue.set_state",
@@ -120,6 +135,8 @@ async def api_set_lighting_area_state(area_id: str, req: HueAreaStateRequest):
                 "on": req.on,
                 "brightness": req.brightness,
                 "resource_type": req.resource_type or "grouped_light",
+                **({"hs_color": req.hs_color} if req.hs_color is not None else {}),
+                **({"color_temp_kelvin": req.color_temp_kelvin} if req.color_temp_kelvin is not None else {}),
             },
             required_capability="hue",
             timeout=15.0,

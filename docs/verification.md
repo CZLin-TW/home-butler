@@ -1,5 +1,11 @@
 # 驗證方式與範圍
 
+2026-09-14 v1.54.0（部署前驗證）：216 項 HB 離線測試、30 項 Dashboard 測試、lint、正式 build 通過。
+本機 demo 驗證彩色／白光切換、二維色盤點選、飽和度鍵盤操作、色溫回讀；390px 無橫向溢出。
+HA 新增色彩能力、互斥與全批預驗證、混合燈組／部分支援／去重測試，框架 CI 待 push 後確認。
+尚未操作家庭燈具，未驗證 iPhone Safari 實機；HA 1.5.0 安裝狀態另記，不能由程式完成推定已安裝。
+
+
 2026-09-14 v1.53.0：使用者決定除濕機完整保留 HB，移除 HB 自動夜燈與前端入口。
 刪除 lighting_auto／ha_sensor_events；startup 不再載入夜燈 Sheet 或註冊 lighting 工作，
 Webhook 只保留 HA Hub 提示，環境快照只更新資料。舊 rules GET 回空與 retired、寫入／刪除 410。
