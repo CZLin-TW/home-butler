@@ -40,17 +40,6 @@ class SensorPollingTests(unittest.TestCase):
         self.append = Mock()
         self.state.threading = SimpleNamespace(Thread=lambda target, args, daemon: SimpleNamespace(start=lambda: self.append(*args)))
 
-    def test_selection_only_active_thermal_feedback_and_shared_sensor_once(self):
-        self.assertEqual(self.poll.feedback_sensors(self.rows + [{**AC, "名稱": "second", "Device ID": "ac2"}], {}), [SENSOR])
-        for change in [{"最後電源": "off"}, {"最後模式": "送風"}, {"最後模式": "除濕"},
-                       {"狀態": "停用"}, {"空調溫度回饋設定": "{}"}]:
-            self.assertEqual(self.poll.feedback_sensors([{**AC, **change}, SENSOR], {}), [])
-        for status in [{"lastPower": "off"}, {"lastMode": "送風"}, {"stateUncertain": True}]:
-            self.assertEqual(self.poll.feedback_sensors(self.rows, {"空調": status}), [])
-        for extra in [SENSOR, {**SENSOR, "名稱": "alias"}]:
-            self.assertEqual(self.poll.feedback_sensors(self.rows + [extra], {}), [])
-        self.assertEqual(self.poll.feedback_sensors([AC, {**SENSOR, "位置": "主臥"}], {}), [])
-
     def test_concurrent_dashboard_and_feedback_share_one_read_without_history(self):
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _: self.poll.refresh(SENSOR), range(8)))
@@ -102,24 +91,11 @@ class SensorPollingTests(unittest.TestCase):
         self.state.record_history("室溫")
         self.assertEqual(self.append.call_count, 288)  # Never replay stale current state.
 
-    def test_feedback_reads_before_evaluation_and_stops_fast_polling_when_off(self):
-        observed = []
-        def evaluate():
-            observed.append(self.state.snapshot()["室溫"]["current"]["temp"])
-        import ac_feedback
-        with patch.object(ac_feedback, "tick", side_effect=evaluate):
-            self.poll.feedback_tick()
-            self.now += 60
-            self.status.update("空調", {"lastPower": "off"})
-            self.poll.feedback_tick()
-        self.assertEqual(observed, [27, 27])
-        self.sdk.get_hub_sensor.assert_called_once()
-
     def test_dashboard_refresh_uses_shared_compensated_value_without_double_offset(self):
         with patch.dict("sys.modules", {"sensor_polling": self.poll}):
             fetch = endpoint("web_api.py", "_fetch_sensor_status", {})
             self.assertEqual(fetch(SENSOR), {"temperature": 27, "humidity": 58})
-            self.poll.poll_feedback()
+            self.poll.refresh(SENSOR)
         self.sdk.get_hub_sensor.assert_called_once()
 
     def test_backfill_keeps_new_current_and_does_not_duplicate_history_after_restart(self):

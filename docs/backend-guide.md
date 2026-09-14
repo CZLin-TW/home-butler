@@ -139,7 +139,6 @@ Render／Vercel 設定及服務限制可能變動，選擇能符合自己可用�
 - Auth 欄：僅 Panasonic 除濕機需要填寫
 - 控制類型值：`command`（標準指令，例如 turnOn/turnOff、setAll）／`customize`（DIY IR 自訂按鈕）。對應 SwitchBot API 的 commandType；空白時 IR 開/關按鈕走 command、其他按鈕走 customize
 - 最後電源／最後溫度／最後模式／最後風速／最後更新時間：**僅空調設備使用**，由程式自動寫入，不需手動填。Dashboard 用來顯示最後狀態，LINE bot 用來支援「調低 1 度」這類相對指令。手動建 sheet 時這 5 欄保持空白即可
-- 空調溫度回饋設定／空調溫度回饋狀態：首次於 Dashboard 保存補償設定時自動補上 JSON 欄位；`最後溫度` 仍是舒適目標，實際 IR 下發溫度及待確認標記另存於回饋狀態。預設不啟用，詳見[補償說明](ac-temperature-feedback.md)。
 - 溫度補償／濕度補償：**僅感應器設備使用**。填入數字（正或負），程式讀取 sensor 數值後自動加上此補償值。例如 Hub 2 貼牆導致濕度偏高 5%，填 `-5`。空白 = 不補償。濕度補償後會自動限制在 0~100% 範圍
 - 自動關機小時數：**僅空調設備使用**。v1.57.0 時數僅在 Sheet 設 0–168 整數小時，Dashboard 編輯本輪產生的排程，HA 空調計時語意見 [自動關機](ac-auto-off.md)；以下是未遷移空調的既有行為。填入整數，系統會在空調開啟後 N 小時自動加一筆 off 排程。例如填 `8` → 開空調後最晚 8 小時關。空白或 0 = 停用此功能。使用者每次對該空調發送「從關→開」的命令會重置計時；純調整溫度/模式/風速不會重置。如果使用者自己設了 off 排程，系統會清掉自動排程讓使用者的決定優先
 - SwitchBot Device ID 取得方式：瀏覽器打開 `https://home-butler.onrender.com/switchbot/devices`
@@ -150,7 +149,7 @@ Render／Vercel 設定及服務限制可能變動，選擇能符合自己可用�
 - 動作值：control_ac / control_ir / control_dehumidifier
 - 參數：JSON 字串（例如 `{"temperature":27,"power":"on"}`）
 - 狀態值：待執行 / 已執行 / 已過期 / 已取消
-- 來源值：使用者 / 使用者（HA） / 自動 / 自動（HA） / 防黴。「自動（HA）」列的參數另含 `_auto_hours`／`_auto_paused`／`_auto_closed` 供持久化本次計時；不可直接刪除未結束的計時列。HA 空調新建或明確編輯的手動排程為「使用者（HA）」；其餘手動為「使用者」。執行時只允許與目前控制來源一致的列；HA 空調舊列不自動升級，自動／防黴列不能編輯為 HA 手動排程。
+- 來源值：使用者 / 使用者（HA） / 自動（HA）。舊的「自動」「防黴」來源已於 v1.58.0 移除，殘留舊列到期會標成已過期。「自動（HA）」列的參數另含 `_auto_hours`／`_auto_paused`／`_auto_closed` 供持久化本次計時；不可直接刪除未結束的計時列。HA 空調新建或明確編輯的手動排程為「使用者（HA）」；其餘手動為「使用者」。執行時只允許與目前控制來源一致的列；HA 空調舊列不自動升級。
 
 **排程封存**
 | 設備名稱 | 動作 | 參數 | 觸發時間 | 建立者 | 建立時間 | 狀態 | 來源 |
@@ -313,7 +312,7 @@ HA 本地規則不等待 Render，但所操作的 SwitchBot Cloud 設備仍依�
 
 背景工作由 `main.py` 註冊到 `job_runner.py`，每項使用獨立 thread，實際頻率以 `jobs.add` 為準：
 **每 60 秒**是 `schedules`（設備排程與封存，也是 HA 空調自動關機 reconcile 的入口）、
-`ac-temperature-feedback`（先更新使用中的感測器再評估）、`lighting-reminders`（HA Hue 待辦燈光提醒）；
+`lighting-reminders`（HA Hue 待辦燈光提醒）；
 **每 300 秒**是 `sensors`（一般感測器／歷史）、`notion`、`todo-reminders`、`daily-push`、`agent-health`。
 v1.53.0 移除夜燈引擎後已無每 300 秒的照明工作。不需要外部 cron。每項不重疊、按固定期限運行，錯過週期不密集補跑。
 
@@ -322,7 +321,7 @@ v1.53.0 移除夜燈引擎後已無每 300 秒的照明工作。不需要外部 
 - **Agent 失聯告警**（`health_alert.run_checks`）：由獨立 `agent-health` 工作每 300 秒執行，純觀察不控制設備。詳見 `AGENTS.md` 的「Agent 失聯告警」。
 
 上述工作只有在後端程序運行時才會執行。既有 UptimeRobot 監控用途見「十三、常駐與健康檢查」，變更主機方案時需一併考慮。
-HA 管理空調不執行舊補償與舊來源（「自動」「防黴」）排程；手動排程「使用者（HA）」與自動關機「自動（HA）」都由 HB 保管、經 HA 下達。
+手動排程「使用者（HA）」與自動關機「自動（HA）」都由 HB 保管、經 HA 下達。
 
 `/notify`、`/notify_realtime` 端點仍保留，但只當**手動觸發**（debug / 補發；手動 `/notify` 不檢查也不更新每日 marker）：
 
@@ -460,7 +459,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/auto/sensors | GET | 舊網址保留的唯讀光感應器清單，不建立或評估規則 |
 | /api/lighting/auto/sensors/{device_id}/light-level | GET | 唯讀光照：已遷移取 HA 快照，其餘讀 SwitchBot status；沒有夜燈 Webhook 快取 |
 | /api/homebridge/devices | GET | 獨立橋接 Key，僅允許冷氣與同位置室溫感測器投影；直接讀快取，不查 Sheets／設備 |
-| /api/homebridge/devices/{id}/ac | POST | 獨立橋接 Key，明確 AC 局部設定與 UUID request_id；即時重驗允許清單、保留防黴排程，不經 AI。完整契約見 homebridge/README.md |
+| /api/homebridge/devices/{id}/ac | POST | 獨立橋接 Key，明確 AC 局部設定與 UUID request_id；即時重驗允許清單，不經 AI。完整契約見 homebridge/README.md |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；每次只送當句，不帶歷史對話，仍背景存檔供查閱。`user_id` 不帶則用 `SIRI_USER_ID` |
 | /api/assistant/devices | POST | 家電專用自然語言入口，只接受 `DEVICE_VOICE_API_KEY`。body 僅 `{text}`，1–500 字元；不接受 `user_id` 等額外欄位。回 `{reply}`，單句獨立解析，不讀寫家庭對話紀錄、不提供私人資料給模型 |
 
@@ -563,7 +562,7 @@ Siri 每次解析視為獨立指令：`voice=True` 會傳入 `ask_claude(..., in
 
 後端只載入 `智能居家` 並將名稱、類型、位置、按鈕、控制類型及品牌投影給專用解析器，**不傳 Device ID、Auth、家庭成員、待辦、食品或對話紀錄**。模型解析後，後端會先驗證整批動作、參數範圍及唯一設備名稱，全部通過才執行；不使用完整 `ACTION_HANDLERS`。範圍外要求回固定拒絕句，不由模型編造查詢結果。最多四個動作；有效動作執行時的硬體失敗不具交易回復能力，發生例外會保留前面結果、停止後續動作且不自動重送。
 
-未遷移 HA 的冷氣控制仍由原 handler 維護既有防黴收尾與自動關機排程；HA 管理空調不執行舊防黴；其到期關機由 HB 每分鐘觀察 HA 狀態、依 Sheet 時數產生「自動（HA）」排程。這是設備控制的必要副作用，不代表此金鑰可直接管理排程。除濕機自動模式鎖定時，仍需由完整 Dashboard 關閉自動模式才能手動控制，家電捷徑不能繞過鎖定。
+HA 空調的到期關機由 HB 每分鐘觀察 HA 狀態、依 Sheet 時數產生「自動（HA）」排程。這是設備控制的必要副作用，不代表此金鑰可直接管理排程。除濕機自動模式鎖定時，仍需由完整 Dashboard 關閉自動模式才能手動控制，家電捷徑不能繞過鎖定。
 
 錯誤判讀：401 為金鑰錯誤；422 通常是仍帶 `user_id`／多餘欄位或輸入長度錯誤；400 為全空白文字；503 可能是未啟用、金鑰設定不合規或上游暫時不可用。停用時移除 `DEVICE_VOICE_API_KEY` 並套用部署；輪替則換新值及更新共用捷徑，原家電金鑰失效，完整金鑰不必更換。所有持有家電金鑰的人權限相同；沒有個人識別、逐人撤銷或逐台設備限制。
 
@@ -648,7 +647,6 @@ Siri 每次解析視為獨立指令：`voice=True` 會傳入 `ask_claude(..., in
 
 設備排程由獨立 schedules 工作每 60 秒檢查一次，通常延遲在一個檢查週期內（仍受網路、服務休眠影響）。觸發時間超過 2 小時未執行的排程自動標記為已過期。設備所有排程完成後統一通知建立者（含執行結果與設備目前狀態）。
 
-**冷氣防黴送風（僅未遷移 HA 的空調）**：關冷氣時，若這次以冷氣/除濕（會結露的模式）從最後一次開機算起已運轉 ≥30 分鐘，home-butler 不直接關，而是先切「送風」吹乾蒸發器約 5 分鐘（正常情況另加不到一個 60 秒排程週期，仍受網路、工作耗時與服務休眠影響）再由排程自動關閉，降低濕氣悶在機內長黴。全部空調自動套用、免設定；送風期間若重新開冷氣，收尾關會自動取消。經 home-butler 的所有關機路徑（LINE / Dashboard / Siri / Hub 2 按鈕 / 自動關機 timer）都會觸發；唯獨直接用實體遙控器關機因繞過 home-butler 無法攔截。對應排程在「排程指令」分頁以「來源=防黴」標記。**門檻（預設 30 分）與送風時長（預設 5 分）可在「智能居家」分頁逐台調整**：欄位「防黴運轉門檻分鐘」「防黴送風分鐘」，留空用預設、門檻填 0 代表每次關都送風。
 
 ### 風格
 

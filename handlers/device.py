@@ -1,6 +1,7 @@
 from command_result import CommandResult
 from device_name_resolution import resolve_ir_device
 import json
+import math
 from datetime import datetime, timedelta
 from config import now_taipei, TZ
 from sheets import get_device_id_by_name, get_all_devices_by_type, build_row, update_device_state_fields
@@ -46,19 +47,11 @@ def apply_sensor_compensation(temp, humidity, device_row):
 _AC_MODE_LABEL = {1: "自動", 2: "冷氣", 3: "除濕", 4: "送風", 5: "暖氣"}
 _AC_FAN_LABEL = {1: "自動", 2: "低", 3: "中", 4: "高"}
 
-# ── 防黴送風（關冷氣前先吹乾蒸發器） ──
-# 冷氣/除濕運轉會在蒸發器結露，直接關機悶著容易長黴。關機前若「這次運轉夠久且是會結露
-# 的模式」，先切送風吹乾 N 分鐘，再由排程把它真正關掉。
-ANTIMOLD_FAN_MINUTES = 5          # 預設送風分鐘；收尾由 60 秒 schedules 工作執行，另受網路與工作耗時影響
-ANTIMOLD_MIN_RUNTIME_MINUTES = 30  # 運轉門檻「預設」：從最後一次開機算起運轉滿這麼久才防黴
-ANTIMOLD_MODES = {"冷氣", "除濕"}  # 只有會結露的模式才需要（送風/暖氣/自動不攔）
-ANTIMOLD_SOURCE = "防黴"           # 排程「來源」欄值，跟使用者/自動關機排程區隔開
-# 上面兩個分鐘數可在「智能居家」分頁逐台覆寫（欄位空白就用預設）。
-ANTIMOLD_THRESHOLD_COL = "防黴運轉門檻分鐘"
-ANTIMOLD_FAN_COL = "防黴送風分鐘"
+# Shared AC primitives: the command lock and the target-temperature rule.
+from ac_control import CONTROL_LOCK, ac_temperature
 
 
-def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, fan_int=None, mark_on_time=False, restore_on_off=None):
+def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, fan_int=None):
     """把最後一次 AC 指令寫回「智能居家」分頁，供下次相對調整使用。
 
     [AC 最後狀態 cache 總覽]
@@ -85,26 +78,9 @@ def _save_ac_last_state(ctx, device_id, power, temperature=None, mode_int=None, 
                 new_values["最後模式"] = _AC_MODE_LABEL.get(mode_int, "")
             if fan_int is not None:
                 new_values["最後風速"] = _AC_FAN_LABEL.get(fan_int, "")
-            # 開機時錨定「最後開機時間」（防黴算運轉時長用）；由 caller 決定何時記
-            #（transition，或欄位本來就空）。欄位不存在時寫入函式會自動略過。
-            if mark_on_time:
-                new_values["最後開機時間"] = now_str
-        else:
-            # 關機 → 清掉開機錨點（沒有進行中的運轉了）。下次開機若這欄是空的就會重新錨定，
-            # 比只靠 關→開 transition 偵測更穩——避免快取電源狀態漂移時錨不到、防黴永遠不觸發。
-            new_values["最後開機時間"] = ""
-            # 防黴收尾關用：把模式/溫度/風速還原成防黴前的設定（label 直接寫），
-            # 否則會停在「送風」，UI 跟下次開機都變成吹送風而不是原本的冷氣/除濕。
-            if restore_on_off:
-                new_values.update(restore_on_off)
         # power == "off" 一般情況仍保留先前的溫度/模式/風速，方便下次重新開機時沿用
 
-        if hasattr(ctx, "_feedback_state"):
-            from ac_feedback import manual_saved_fields
-            new_values.update(manual_saved_fields(ctx, power, temperature))
-            rec, applied = update_device_state_fields(device_id, new_values, required_fields=new_values.keys())
-        else:
-            rec, applied = update_device_state_fields(device_id, new_values)
+        rec, applied = update_device_state_fields(device_id, new_values)
         # Keep this request's subsequent actions in sync only after persistence.
         # Match stable ID, since the fresh Sheet row may have moved or been renamed.
         for cached in ctx.get("智能居家"):
@@ -264,113 +240,13 @@ def maintain_ac_auto_schedule(device_name, ctx, transitioned_to_on=False):
         print(f"[MAINTAIN AUTO SCHEDULE ERROR] device={device_name}: {e}")
 
 
-def _minutes_since_power_on(device_row, now):
-    """距「最後開機時間」過了幾分鐘；欄位空白或無法解析回 None（→ 視為無法判斷，不防黴）。"""
-    raw = str(device_row.get("最後開機時間", "") or "").strip()
-    if not raw:
-        return None
-    try:
-        on_dt = TZ.localize(datetime.strptime(raw, "%Y-%m-%d %H:%M"))
-    except (ValueError, TypeError):
-        return None
-    return (now - on_dt).total_seconds() / 60
-
-
-def _antimold_threshold(device_row):
-    """這台 AC 的防黴運轉門檻（分）。智能居家沒設或非法 → 用 ANTIMOLD_MIN_RUNTIME_MINUTES。
-    0 代表一開機就算達標（每次關都送風）。"""
-    v = _parse_optional_int(device_row.get(ANTIMOLD_THRESHOLD_COL))
-    return v if v is not None and v >= 0 else ANTIMOLD_MIN_RUNTIME_MINUTES
-
-
-def _antimold_fan_minutes(device_row):
-    """這台 AC 的防黴送風時長（分）。智能居家沒設或 < 1 → 用 ANTIMOLD_FAN_MINUTES。"""
-    v = _parse_optional_int(device_row.get(ANTIMOLD_FAN_COL))
-    return v if v is not None and v >= 1 else ANTIMOLD_FAN_MINUTES
-
-
-def _should_antimold(device_row, now):
-    """關 AC 前是否該先送風防黴：上次是「開著」的冷氣/除濕模式，且從最後一次開機算起已運轉
-    ≥ 該台門檻分鐘（智能居家可逐台設，預設 30）。無法判斷開機時間（欄位空白／實體遙控器開的）
-    就保守不防黴。
-
-    必須先確認「最後電源==on」：否則對一台已經關著的 AC 再按一次關（最後模式/開機時間還是
-    上次運轉留下的舊值），會誤判成要防黴 → 反而把它吹成送風（開機），結果完全相反。"""
-    if str(device_row.get("最後電源", "") or "").strip() != "on":
-        return False
-    mode = str(device_row.get("最後模式", "") or "").strip()
-    if mode not in ANTIMOLD_MODES:
-        return False
-    elapsed = _minutes_since_power_on(device_row, now)
-    return elapsed is not None and elapsed >= _antimold_threshold(device_row)
-
-
-def _schedule_antimold_off(device_name, ctx, fan_minutes, restore_mode="", restore_temp="", restore_fan=""):
-    """寫一筆「防黴收尾關」排程：fan_minutes 分後把 AC 真正關掉。
-    - params 帶 antimold_final=True，讓那次關機不再被攔截送風（防遞迴）。
-    - params 帶 restore_*（防黴前的模式/溫度/風速）：收尾關機時把這些寫回，避免狀態停在送風。
-    - 來源用 ANTIMOLD_SOURCE，跟使用者/自動關機排程區隔，maintain_ac_auto_schedule 不會誤刪它。
-    - 已有未執行的防黴排程就不重複建。"""
-    schedule_sheet = ctx.get_worksheet("排程指令")
-    all_schedules = ctx.get("排程指令")
-    for r in all_schedules:
-        if (r.get("設備名稱") == device_name
-                and r.get("狀態") == "待執行"
-                and r.get("來源") == ANTIMOLD_SOURCE):
-            return
-    trigger = (now_taipei() + timedelta(minutes=fan_minutes)).strftime("%Y-%m-%d %H:%M")
-    now_str = now_taipei().strftime("%Y-%m-%d %H:%M")
-    headers = schedule_sheet.row_values(1)
-    new_row = {
-        "設備名稱": device_name,
-        "動作": "control_ac",
-        "參數": json.dumps({
-            "power": "off", "antimold_final": True,
-            "restore_mode": restore_mode, "restore_temp": restore_temp, "restore_fan": restore_fan,
-        }, ensure_ascii=False),
-        "觸發時間": trigger,
-        "建立者": "系統",
-        "建立時間": now_str,
-        "狀態": "待執行",
-        "來源": ANTIMOLD_SOURCE,
-    }
-    schedule_sheet.append_row(build_row(headers, new_row))
-    all_schedules.append(new_row)  # 同步 ctx 快取
-    print(f"[ANTIMOLD] {device_name} 送風 {fan_minutes} 分後關 @ {trigger}")
-
-
-def _cancel_antimold_schedules(device_name, ctx):
-    """取消某台 AC 未執行的防黴收尾排程（使用者/系統重新開機時呼叫，避免剛開又被收尾關掉）。"""
-    try:
-        all_schedules = ctx.get("排程指令")
-        targets = [
-            (i, r) for i, r in enumerate(all_schedules)
-            if r.get("設備名稱") == device_name
-            and r.get("狀態") == "待執行"
-            and r.get("來源") == ANTIMOLD_SOURCE
-        ]
-        if not targets:
-            return
-        schedule_sheet = ctx.get_worksheet("排程指令")
-        archive_sheet = ctx.get_worksheet("排程封存")
-        archive_headers = archive_sheet.row_values(1)
-        for i, row in sorted(targets, key=lambda x: x[0], reverse=True):
-            archive_sheet.append_row(build_row(archive_headers, {**row, "狀態": "已取消"}))
-            schedule_sheet.delete_rows(i + 2)
-            all_schedules.pop(i)
-        print(f"[ANTIMOLD] {device_name} 重新開機，取消防黴收尾排程")
-    except Exception as e:
-        print(f"[ANTIMOLD CANCEL ERROR] device={device_name}: {e}")
-
-
 def handle_control_ac(data, ctx, from_auto_schedule=False):
     """Legacy LINE/automation callers keep their text response."""
     return control_ac_result(data, ctx, from_auto_schedule=from_auto_schedule).message
 
 
-def control_ac_result(data, ctx, from_auto_schedule=False):
+def _control_ac(data, ctx, from_auto_schedule=False):
     from request_timing import timed_call
-    from ac_temperature import target_for, ir_temperature
 
     device_name = data.get("device_name", "")
     device_id = get_device_id_by_name(device_name, ctx)
@@ -393,7 +269,7 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
             return CommandResult.failed("空調已交由 HA 管理，舊自動關機不再執行")
         return ha_climate.control({**data, "device_name": device_name}, ctx)
 
-    # 命令前的狀態快照：判斷「關→開」transition（auto-schedule timer 是否重置）+ 防黴判斷
+    # 命令前的狀態快照：判斷「關→開」transition（auto-schedule timer 是否重置）
     prior_row = next(
         (r for r in ctx.get("智能居家")
          if r.get("Device ID") == device_id and r.get("狀態") == "啟用"),
@@ -406,70 +282,21 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
     mode = None
     fan = None
     if power == "off":
-        # 防黴送風：冷氣/除濕運轉 ≥30 分後關機，先切送風吹乾蒸發器再排程關閉。
-        # antimold_final 是防黴收尾排程自己觸發的那次關機 → 不再攔截，直接關（防遞迴）。
-        _now = now_taipei()
-        if not data.get("antimold_final") and _should_antimold(prior_row, _now):
-            try:
-                temp_keep = target_for(prior_row.get("最後溫度") or 27, prior_row)
-            except ValueError:
-                return CommandResult.failed("❌ 空調目標溫度無效，請先設定有效溫度")
-            fan_minutes = _antimold_fan_minutes(prior_row)
-            fan_result = switchbot_api.ac_set_all(device_id, ir_temperature(temp_keep), 4, 1, "on")  # mode 4=送風, fan 1=自動
-            if fan_result.get("success"):
-                # 先抓「防黴前」的模式/溫度/風速，交給收尾關機時還原（下面 _save_ac_last_state
-                # 寫送風會把 prior_row 改成送風，所以要在寫入前先讀）。
-                restore_mode = str(prior_row.get("最後模式", "") or "").strip()
-                restore_temp = prior_row.get("最後溫度", "")
-                restore_fan = str(prior_row.get("最後風速", "") or "").strip()
-                # 記成「送風中」的真實狀態，但不更新最後開機時間（這是延續，不是新開機）
-                timed_call("ac.save_state", _save_ac_last_state, ctx, device_id, "on", temp_keep, 4, 1)
-                timed_call("ac.antimold_schedule", _schedule_antimold_off, device_name, ctx, fan_minutes,
-                                       restore_mode=restore_mode, restore_temp=restore_temp,
-                                       restore_fan=restore_fan)
-                # 刻意不呼叫 maintain_ac_auto_schedule：送風期間不要再生自動關機排程
-                return CommandResult.success(f"✅ {device_name} 已運轉一陣子，先送風 {fan_minutes} 分鐘防黴，之後自動關閉 🌬️")
-            print(f"[ANTIMOLD] {device_name} 送風失敗，改直接關機：{fan_result.get('error')}")
-        elif not data.get("antimold_final"):
-            # 沒進防黴 → 印出原因，方便從 Render log 診斷。最常見：開機時間空白（這次開機發生在
-            # 部署防黴之前、或實體遙控器開的）→ 運轉時長算不出來、保守不送風直接關。
-            print(f"[ANTIMOLD] {device_name} 不送風直接關："
-                  f"電源={prior_row.get('最後電源', '')!r} 模式={prior_row.get('最後模式', '')!r} "
-                  f"開機時間={prior_row.get('最後開機時間', '')!r} "
-                  f"運轉={_minutes_since_power_on(prior_row, _now)} 分（門檻 {_antimold_threshold(prior_row)}）")
         result = switchbot_api.ac_turn_off(device_id)
     else:
         mode_str = data.get("mode", "cool")
         try:
-            temperature = target_for(data.get("temperature", 24 if mode_str == "heat" else 27), prior_row)
+            temperature = ac_temperature(data.get("temperature", 24 if mode_str == "heat" else 27))
         except ValueError as error:
             return CommandResult.failed(str(error))
         fan_str = data.get("fan_speed", "auto")
         mode = switchbot_api.AC_MODE_MAP.get(mode_str, 2)
         fan = switchbot_api.AC_FAN_MAP.get(fan_str, 1)
-        result = switchbot_api.ac_set_all(device_id, ir_temperature(temperature), mode, fan, "on")
+        result = switchbot_api.ac_set_all(device_id, temperature, mode, fan, "on")
 
     if result.get("success"):
         transitioned = (power == "on") and not prior_power_on
-        # 開機時錨定「最後開機時間」：transition（關→開）或目前欄位是空的就記。後者讓「關機會
-        # 清空 → 下次開機必錨定」，即使 prior_power_on 快取漂移（如上次用實體遙控器關）也補得回。
-        on_time_empty = not str(prior_row.get("最後開機時間", "") or "").strip()
-        # 防黴收尾關（antimold_final）：把模式/溫度/風速還原回防黴前，避免狀態停在送風。
-        restore = None
-        if data.get("antimold_final"):
-            restore = {}
-            if data.get("restore_mode"):
-                restore["最後模式"] = data["restore_mode"]
-            if data.get("restore_temp") not in (None, ""):
-                restore["最後溫度"] = target_for(data["restore_temp"], prior_row)
-            if data.get("restore_fan"):
-                restore["最後風速"] = data["restore_fan"]
-            restore = restore or None
-        timed_call("ac.save_state", _save_ac_last_state, ctx, device_id, power, temperature, mode, fan,
-                            mark_on_time=(transitioned or on_time_empty), restore_on_off=restore)
-        # 重新開機（含純調整 on→on）→ 取消任何待執行的防黴收尾關，避免剛開又被關
-        if power == "on":
-            timed_call("ac.cancel_antimold", _cancel_antimold_schedules, device_name, ctx)
+        timed_call("ac.save_state", _save_ac_last_state, ctx, device_id, power, temperature, mode, fan)
         # 自動排程 safety net：非自動排程觸發時才重算（避免 auto 觸發 → auto 再生 auto 的無限循環）
         if not from_auto_schedule:
             timed_call("ac.auto_schedule", maintain_ac_auto_schedule, device_name, ctx, transitioned_to_on=transitioned)
@@ -478,9 +305,10 @@ def control_ac_result(data, ctx, from_auto_schedule=False):
         return CommandResult.provider_failure(result, f"❌ {device_name} 控制失敗：{result.get('error', '未知錯誤')}")
 
 
-# All AC entry points share the feedback lock; no action parameter bypasses it.
-from ac_feedback import manual_control
-control_ac_result = manual_control(control_ac_result)
+def control_ac_result(data, ctx, from_auto_schedule=False):
+    """All AC entry points serialize here; no parameter bypasses the lock."""
+    with CONTROL_LOCK:
+        return _control_ac(data, ctx, from_auto_schedule=from_auto_schedule)
 
 
 def handle_control_ir(data, ctx):

@@ -26,7 +26,7 @@ def _locate_schedule_rows(values, device_name, trigger_time, match_all, executio
     """在即時 Sheet 值矩陣裡定位待執行排程列，回 [(row_number_1based, row_dict), ...]。
 
     純函式好測；row_number 直接是 Sheet 列號（含 header）。寫入/刪除前用它取代 request
-    快取的 i+2：背景 tick（排程執行封存、防黴、自動關機）會增刪排程列，快取位置會過時 →
+    快取的 i+2：背景 tick（排程執行封存、自動關機）會增刪排程列，快取位置會過時 →
     用舊 index 會打到別列。trigger_time 須已正規化；match_all=True 時忽略 trigger、
     抓該設備所有待執行。
     """
@@ -155,7 +155,7 @@ def handle_modify_schedule(data, user_name, ctx):
     from ha_climate import managed
     ha_manual = (new_action or old_action) == "control_ac" and managed(new_device or device_name)
     if ha_manual and target_row.get("來源") not in ("使用者", HA_MANUAL_SOURCE, SOURCE):
-        return "❌ 舊自動關機／防黴排程已停用，請另外新增手動排程"
+        return "❌ 舊的自動關機排程已停用，請另外新增手動排程"
 
     updates = {}
     if automatic:

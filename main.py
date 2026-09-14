@@ -1,5 +1,4 @@
 from job_runner import jobs
-import ac_feedback
 from fastapi import FastAPI, Request, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -31,8 +30,6 @@ app.include_router(notify_router)
 # Web Dashboard REST API
 from web_api import router as web_api_router
 app.include_router(web_api_router)
-from ac_feedback_api import router as ac_feedback_router
-app.include_router(ac_feedback_router)
 from ac_auto_off_api import router as ac_auto_off_router
 app.include_router(ac_auto_off_router)
 
@@ -134,13 +131,11 @@ def _on_startup():
             ("ac_history backfill", ac_history.backfill_from_sheet),
             ("dehumidifier_history backfill", dehumidifier_history.backfill_from_sheet),
             ("dehumidifier_auto rules", dehumidifier_auto.load_rules),
-            # 防黴送風的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
             # 「濕度控制規則」在感應器那列，給除濕機自動模式的自訂分時目標濕度用
             # （格式 7=55, 23=60；見 dehumidifier_auto 模組 docstring）。
-            # 缺就補在表尾，不動既有欄位；失敗不擋（防黴會自動退化成不觸發）。
-            ("ensure 防黴欄位", lambda: ensure_columns(
-                get_sheet("智能居家"),
-                ["最後開機時間", "防黴運轉門檻分鐘", "防黴送風分鐘", "濕度控制規則"])),
+            # 缺就補在表尾，不動既有欄位；失敗不擋。
+            ("ensure 濕度規則欄位", lambda: ensure_columns(
+                get_sheet("智能居家"), ["濕度控制規則"])),
             # 失聯告警的收件人開關欄（health_alert.ALERT_COLUMN）。補不出來不會讓告警
             # 靜音，只是無法縮小收件範圍（沒人勾 → 發給全部啟用成員）。
             ("ensure 系統告警欄位", lambda: ensure_columns(
@@ -237,7 +232,6 @@ def _on_startup():
         callback(ctx)
 
     jobs.add("sensors", 300, _sensor_tick)
-    jobs.add("ac-temperature-feedback", 60, sensor_polling.feedback_tick)
     import lighting_reminders
     jobs.add("lighting-reminders", 60, lighting_reminders.tick)
     jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, []))

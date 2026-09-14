@@ -52,7 +52,7 @@ class ScheduleExecutionTests(unittest.TestCase):
         return execute_pending(datetime(2026, 9, 6, 12, 5, tzinfo=timezone.utc), self.ctx,
                                tz=SimpleNamespace(localize=lambda d: d.replace(tzinfo=timezone.utc)),
                                handlers={"control_ac": self.handler}, ensure_columns=ensure_columns,
-                               update_fields=self.update, antimold_source="防黴")
+                               update_fields=self.update)
 
     def test_success_requires_typed_result_and_is_not_replayed(self):
         self.handler.return_value = CommandResult.success("wording contains ❌ but status is accepted")
@@ -134,14 +134,15 @@ class ScheduleExecutionTests(unittest.TestCase):
         self.assertEqual([r["狀態"] for r in self.sheet.rows], ["待執行", "已執行"])
         self.handler.assert_called_once()
 
-    def test_expiry_antimold_and_automatic_ac_flag(self):
+    def test_expiry_applies_to_every_source_and_automatic_ac_flag(self):
         self.sheet.rows = [schedule(**{"觸發時間": "2026-09-06 09:00"}),
-                           schedule(**{"觸發時間": "2026-09-06 09:00", "來源": "防黴"}),
+                           schedule(**{"觸發時間": "2026-09-06 09:00", "來源": "自動"}),
                            schedule(**{"來源": "自動"})]
         self.run_tick()
-        self.assertEqual([r["狀態"] for r in self.sheet.rows], ["已過期", "已執行", "已執行"])
+        # No source is exempt from the 2h expiry window any more.
+        self.assertEqual([r["狀態"] for r in self.sheet.rows], ["已過期", "已過期", "已執行"])
         self.assertEqual([c.kwargs for c in self.handler.call_args_list],
-                         [{"from_auto_schedule": False}, {"from_auto_schedule": True}])
+                         [{"from_auto_schedule": True}])
 
     def test_one_failure_does_not_skip_other_due_schedules(self):
         self.sheet.rows.append(schedule(**{"觸發時間": "2026-09-06 12:01"}))

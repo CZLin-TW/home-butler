@@ -53,7 +53,8 @@ class PolicyTests(unittest.TestCase):
             action("control_dehumidifier", device_name="客廳除濕機", humidity="55", mode="智慧除濕"),
             action("query_sensor", device_name="主臥溫濕度")), ROWS)
         self.assertEqual(prepared[0][1]["device_name"], "主臥電扇")
-        self.assertEqual(prepared[1][1]["temperature"], 26.5)
+        # Half degrees are accepted from speech but rounded half-up to a whole target.
+        self.assertEqual(prepared[1][1]["temperature"], 27)
         self.assertEqual(prepared[2][1]["humidity"], 55)
 
     def test_only_device_catalog_reaches_model_no_private_pages_or_history(self):

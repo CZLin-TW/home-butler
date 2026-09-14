@@ -24,7 +24,6 @@ class HaClimateTests(unittest.TestCase):
 
     def _schedule_dispatch(self, automatic=False):
         from datetime import datetime, timezone
-        import ac_feedback
         from schedule_execution import execute_pending, HA_MANUAL_SOURCE
         from test_schedule_execution import Sheet, Context, schedule, ensure_columns, update_fields
         sheet = Sheet([schedule(**{"設備名稱": AC["name"], "來源": HA_MANUAL_SOURCE})])
@@ -34,12 +33,13 @@ class HaClimateTests(unittest.TestCase):
             from ac_auto_off import SOURCE, HOURS_COLUMN
             sheet.rows[0].update({"來源": SOURCE, "參數": json.dumps({"power":"off", "_auto_hours":3})})
             ctx.data["智能居家"][0][HOURS_COLUMN] = 3
-        legacy = Mock(side_effect=AssertionError("Must not use direct IR"))
+        ir = Mock(side_effect=AssertionError("Must not use direct IR"))
+        control_ac_result = self.real_ac_handler(ir)
         def tick():
             return execute_pending(datetime(2026, 9, 6, 12, 5, tzinfo=timezone.utc), ctx,
                 tz=SimpleNamespace(localize=lambda d: d.replace(tzinfo=timezone.utc)),
-                handlers={"control_ac": ac_feedback.manual_control(legacy)}, ensure_columns=ensure_columns,
-                update_fields=update_fields, antimold_source="防黴")
+                handlers={"control_ac": control_ac_result}, ensure_columns=ensure_columns,
+                update_fields=update_fields)
         with self.client.websocket_connect("/api/home-assistant/ws") as ws:
             self.connect(ws)
             with ThreadPoolExecutor(max_workers=1) as pool:
@@ -52,7 +52,7 @@ class HaClimateTests(unittest.TestCase):
                 self.assertEqual(future.result(3), {AC["name"]})
                 self.assertEqual(sheet.rows[0]["狀態"], "已執行")
                 self.assertEqual(tick(), set())
-        legacy.assert_not_called()
+        ir.assert_not_called()
 
     def setUp(self):
         base.HomeAssistantTests.setUp(self)
@@ -184,18 +184,31 @@ class HaClimateTests(unittest.TestCase):
             with patch.dict(os.environ, {"HOME_ASSISTANT_AC_NAMES": bad}):
                 self.assertTrue(ha_climate.managed(AC["name"]))
 
-    def test_migrated_feedback_and_manual_wrapper_skip_legacy(self):
-        import ac_feedback
-        legacy = Mock()
-        ctx = SimpleNamespace()
+    def real_ac_handler(self, ir):
+        """The production dispatch, loaded without importing the LINE stack."""
+        from threading import RLock
+        from command_result import CommandResult
+        from test_callback_concurrency import endpoint
+        env = {"CommandResult": CommandResult, "CONTROL_LOCK": RLock(),
+               "get_device_id_by_name": lambda name, ctx: "ir-id",
+               "get_all_devices_by_type": lambda *a: [],
+               "switchbot_api": SimpleNamespace(ac_turn_off=ir, ac_set_all=ir),
+               "_save_ac_last_state": Mock(), "maintain_ac_auto_schedule": Mock(),
+               "ac_temperature": lambda v: int(v)}
+        env["_control_ac"] = endpoint("handlers/device.py", "_control_ac", env)
+        return endpoint("handlers/device.py", "control_ac_result", env)
+
+    def test_migrated_ac_dispatches_to_ha_and_never_reaches_direct_ir(self):
+        control_ac_result = self.real_ac_handler(
+            Mock(side_effect=AssertionError("Must not use direct IR")))
+        ctx = SimpleNamespace(get=lambda n: [{"名稱": AC["name"], "類型": "空調", "狀態": "啟用",
+                                              "Device ID": "ir-id", "最後電源": "on"}])
         with patch.object(ha_climate, "control", return_value=SimpleNamespace(status="success")) as control:
-            ac_feedback.manual_control(legacy)({"device_name": AC["name"]}, ctx)
+            control_ac_result({"device_name": AC["name"], "power": "off"}, ctx)
             control.assert_called_once()
-            legacy.assert_not_called()
             control.reset_mock()
-            result = ac_feedback.manual_control(legacy)({"device_name": AC["name"]}, ctx, from_auto_schedule=True)
+            # The retired auto-off source must not reach HA or direct IR either.
+            result = control_ac_result({"device_name": AC["name"], "power": "off"}, ctx,
+                                       from_auto_schedule=True)
             self.assertEqual(result.status, "failed")
             control.assert_not_called()
-        self.assertFalse(ac_feedback.config_for({"名稱": AC["name"], ac_feedback.CONFIG_COL: '{"enabled":true}'})["enabled"])
-        with self.assertRaises(ValueError):
-            ac_feedback.save_config(AC["name"], {})

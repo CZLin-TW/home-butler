@@ -33,7 +33,7 @@ def _identity(row):
     return tuple(str(row.get(key, "") or "") for key in _identity_fields)
 
 
-def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, antimold_source):
+def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields):
     if not _dispatch_lock.acquire(blocking=False): return set()
     processed = set()
     try:
@@ -66,7 +66,7 @@ def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, an
                     continue
                 if row.get("來源") == SOURCE and not dispatch_allowed(row, ctx, [r for _, r in live]):
                     continue  # Offline/unknown is not permission to send or rearm.
-            if (now - trigger).total_seconds() > 7200 and row.get("來源") != antimold_source:
+            if (now - trigger).total_seconds() > 7200:
                 update_fields(sheet, row_number, {"狀態": "已過期"})
                 processed.add(device_name)
                 continue

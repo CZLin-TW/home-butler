@@ -160,7 +160,7 @@ def validate_actions(payload, rows):
         if data.get("power") == "off" and set(data) - {"device_name", "power"}:
             raise VoicePolicyError("關機和調整設定請分開說。")
         if "temperature" in data:
-            from ac_temperature import comfort_temperature
+            from ac_control import ac_temperature as comfort_temperature
             try:
                 data["temperature"] = comfort_temperature(data["temperature"])
             except ValueError:

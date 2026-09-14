@@ -80,8 +80,6 @@ def control(data, ctx):
     rows = [r for r in ctx.get("智能居家") if r.get("名稱") == name and r.get("狀態") == "啟用"]
     if len(rows) != 1 or rows[0].get("類型") != "空調":
         return CommandResult.failed("找不到唯一啟用的空調")
-    if data.get("antimold_final"):
-        return CommandResult.failed("空調已移轉 HA，舊防黴排程不再執行")
     patch = {k: data[k] for k in ("power", "temperature", "mode", "fan_speed") if k in data and data[k] is not None}
     patch.setdefault("power", "on")
     if patch["power"] not in ("on", "off"):

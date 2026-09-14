@@ -137,23 +137,6 @@ class SheetsReuseTests(unittest.TestCase):
             write('target', fields, required_fields=fields.keys())
         ss.values_batch_update.assert_not_called()
 
-    def test_manual_state_save_atomically_restores_comfort_and_ir_temperatures(self):
-        import json
-        grid = [['Device ID', '名稱', '最後電源', '最後溫度', '最後模式', '最後風速',
-                 '最後更新時間', '空調溫度回饋狀態'], ['target', '主臥', 'on', 26, '冷氣', '低', '', '{}']]
-        write, ss = self.writer(grid)
-        save, status = self.saver(write)
-        ctx = SimpleNamespace(get=lambda _: [{'Device ID': 'target'}],
-            _feedback_state={'blocked': True, 'ir_temperature': 24})
-        save(ctx, 'target', 'on', 26.5, 2, 2)
-        self.assertTrue(ctx._ac_state_saved)
-        writes = ss.values_batch_update.call_args.args[0]['data']
-        self.assertEqual(next(w for w in writes if w['range'].endswith('D2'))['values'], [[26.5]])
-        saved = json.loads(next(w for w in writes if w['range'].endswith('H2'))['values'][0][0])
-        self.assertEqual(saved['ir_temperature'], 27)
-        self.assertFalse(saved['blocked'])
-        self.assertEqual(status.update.call_args.kwargs['fields']['lastTemperature'], 26.5)
-
     def saver(self, write):
         status = SimpleNamespace(update=Mock())
         save = endpoint('handlers/device.py', '_save_ac_last_state', {
@@ -163,25 +146,21 @@ class SheetsReuseTests(unittest.TestCase):
             'print': Mock()})
         return save, status
 
-    def test_state_save_keeps_power_anchor_and_antimold_restore_and_updates_by_id(self):
-        grid = [['Device ID', '名稱', '最後電源', '最後溫度', '最後模式', '最後風速', '最後開機時間', '最後更新時間'],
-                ['target', '主臥', 'off', '27', '冷氣', '低', '', '']]
+    def test_state_save_updates_only_the_matching_cached_row_by_id(self):
+        grid = [['Device ID', '名稱', '最後電源', '最後溫度', '最後模式', '最後風速', '最後更新時間'],
+                ['target', '主臥', 'off', '27', '冷氣', '低', '']]
         write, ss = self.writer(grid)
         save, status = self.saver(write)
         cache = [{'Device ID': 'other', '最後電源': 'off'}, {'Device ID': 'target', '最後電源': 'off'}]
         ctx = SimpleNamespace(get=lambda name: cache)
-        save(ctx, 'target', 'on', 26, 2, 2, mark_on_time=True)
-        self.assertEqual(cache[1]['最後開機時間'], '2026-09-07 00:30')
+        save(ctx, 'target', 'on', 26, 2, 2)
         self.assertEqual(cache[1]['最後模式'], '冷氣')
         self.assertEqual(cache[0], {'Device ID': 'other', '最後電源': 'off'})
-        save(ctx, 'target', 'on', 26, 4, 1)  # Antimold fan mode must not reset anchor.
-        self.assertEqual(cache[1]['最後開機時間'], '2026-09-07 00:30')
-        self.assertEqual(cache[1]['最後模式'], '送風')
-        save(ctx, 'target', 'off', restore_on_off={'最後模式': '冷氣', '最後溫度': 26, '最後風速': '低'})
-        self.assertEqual(cache[1]['最後開機時間'], '')
+        save(ctx, 'target', 'off')
+        # power=off keeps the previous temperature/mode/fan for the next power-on.
+        self.assertEqual(cache[1]['最後電源'], 'off')
         self.assertEqual(cache[1]['最後模式'], '冷氣')
-        self.assertEqual(cache[1]['最後溫度'], 26)
-        self.assertEqual(status.update.call_count, 3)
+        self.assertEqual(status.update.call_count, 2)
 
     def test_save_failure_does_not_advance_request_or_dashboard_state(self):
         write = Mock(side_effect=TimeoutError('fake'))

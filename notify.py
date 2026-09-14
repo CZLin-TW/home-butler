@@ -13,7 +13,7 @@ from prompt import get_style_instruction, _format_schedule_params
 from conversation import save_conversation, cleanup_conversation, generate_notify_message, get_recent_conversation
 from calendar_sync import sync_external_events
 from handlers.device import (
-    control_ac_result, control_ir_result, control_dehumidifier_result, ANTIMOLD_SOURCE,
+    control_ac_result, control_ir_result, control_dehumidifier_result,
 )
 from handlers.recurring_todo import materialize_recurring_todos
 from auth import verify_api_key
@@ -300,7 +300,7 @@ def _process_todo_reminders(now, today, ctx):
 
 
 def _execute_pending_schedules(now, ctx):
-    return execute_pending(now, ctx, tz=TZ, antimold_source=ANTIMOLD_SOURCE,
+    return execute_pending(now, ctx, tz=TZ,
                            ensure_columns=ensure_columns, update_fields=update_row_fields,
                            handlers={"control_ac": control_ac_result,
                                      "control_ir": control_ir_result,

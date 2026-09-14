@@ -41,7 +41,7 @@ class AutoOffTests(unittest.TestCase):
         execute_pending(self.now + timedelta(hours=3), self.ctx,
                         tz=SimpleNamespace(localize=lambda d: d.replace(tzinfo=timezone.utc)),
                         handlers={"control_ac": handler}, ensure_columns=ensure_columns,
-                        update_fields=update_fields, antimold_source="防黴")
+                        update_fields=update_fields)
         return handler
 
     def test_first_on_and_temperature_changes_do_not_reset_or_write(self):

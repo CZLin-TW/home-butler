@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
+from threading import RLock
 from command_result import CommandResult
 from device_name_resolution import resolve_ir_device
 from test_callback_concurrency import endpoint
@@ -51,11 +52,13 @@ class CommandResultTests(unittest.TestCase):
         api = SimpleNamespace(ac_turn_off=Mock(return_value={"success": True}))
         maintain = Mock()
         env = {"CommandResult": CommandResult, "get_device_id_by_name": lambda *a: "fake", "switchbot_api": api,
-               "now_taipei": lambda: None, "_save_ac_last_state": Mock(), "maintain_ac_auto_schedule": maintain}
+               "now_taipei": lambda: None, "_save_ac_last_state": Mock(), "maintain_ac_auto_schedule": maintain,
+               "CONTROL_LOCK": RLock()}
+        env["_control_ac"] = endpoint("handlers/device.py", "_control_ac", env)
         typed = endpoint("handlers/device.py", "control_ac_result", env)
         legacy = endpoint("handlers/device.py", "handle_control_ac", env)
         ctx = SimpleNamespace(get=lambda n: [{"Device ID": "fake", "狀態": "啟用", "最後電源": "on"}])
-        params = {"device_name": "測試", "power": "off", "antimold_final": True, "restore_mode": "冷氣"}
+        params = {"device_name": "測試", "power": "off"}
         self.assertEqual(typed(params, ctx, from_auto_schedule=True).status, "success")
         maintain.assert_not_called()
         self.assertIsInstance(legacy(params, ctx, from_auto_schedule=True), str)

@@ -1,5 +1,9 @@
 # HomeButler Homebridge 插件
 
+> **這是歷史相容元件。** 家裡的空調已改由 HA HomeKit Bridge 發布，這個插件不列入驗收。
+> v1.58.0 已移除後端的半度目標、室溫回饋補償與防黴送風，下面提到這三者的段落只反映當時行為；
+> 目前後端一律接受整數 16–30°C，關機就是直接關機。
+
 Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBot。
 此目錄是 Node.js 插件，與 Windows Python PC agent 分開執行；只安裝在 Homebridge 主機。
 支援允許清單中的紅外線空調：開關、冷氣／暖氣與 16–30°C、間隔 0.5°C 的目標溫度，

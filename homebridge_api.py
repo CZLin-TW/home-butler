@@ -9,7 +9,7 @@ import math
 import secrets
 import time
 from collections import OrderedDict
-from ac_feedback import CONTROL_LOCK
+from ac_control import CONTROL_LOCK
 from typing import Literal
 from uuid import UUID
 
