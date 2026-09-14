@@ -17,7 +17,7 @@ def tick():
     if not link.snapshot()["hue_available"]:
         return
     from web_api import collect_todo_light_reminders
-    from lighting_auto import _agent_command
+    from lighting_transport import send_command_sync
     reminders = collect_todo_light_reminders()["reminders"]
     targets = {r["light_area_id"] for r in reminders if r.get("light_area_id")
                and r.get("light_area_resource_type") == "grouped_light"}
@@ -27,7 +27,7 @@ def tick():
             continue
         _attempted[target] = minute  # An unknown result cannot be replayed in this minute.
         try:
-            _agent_command("hue.breathe", {"resource_id": target, "resource_type": "grouped_light"})
+            send_command_sync("hue.breathe", {"resource_id": target, "resource_type": "grouped_light"})
         except Exception:
             print("[Hue reminder] HA result unavailable; no immediate retry")
     for key in list(_attempted):

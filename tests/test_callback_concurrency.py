@@ -65,7 +65,6 @@ class CallbackConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(threading.get_ident(), loop_thread)
             return {"lightLevel": 7}
         fn = endpoint("lighting_api.py", "api_lighting_auto_sensor_light_level", {
-            "lighting_auto": SimpleNamespace(get_cached_light_level=lambda n: None), "time": time,
             "switchbot_api": SimpleNamespace(get_device_status=status), "run_in_threadpool": asyncio.to_thread})
         self.assertEqual((await fn("fake"))["light_level"], 7)
 

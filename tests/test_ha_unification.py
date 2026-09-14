@@ -109,7 +109,7 @@ class UnifiedLinkTests(unittest.TestCase):
         with patch.dict("os.environ", {"HOME_ASSISTANT_HUE_ENABLED": "true"}), patch.dict("sys.modules", {
                 "home_assistant_api": SimpleNamespace(link=SimpleNamespace(snapshot=lambda: {"hue_available": True})),
                 "web_api": SimpleNamespace(collect_todo_light_reminders=queue),
-                "lighting_auto": SimpleNamespace(_agent_command=command)}), patch.object(lighting_reminders, "_attempted", {}):
+                "lighting_transport": SimpleNamespace(send_command_sync=command, ha_enabled=lambda: True)}), patch.object(lighting_reminders, "_attempted", {}):
             legacy = endpoint("web_api.py", "api_get_todo_light_reminders", {"collect_todo_light_reminders": queue})
             self.assertEqual(legacy()["reminders"], [])
             queue.assert_not_called()

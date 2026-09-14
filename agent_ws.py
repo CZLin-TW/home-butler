@@ -4,7 +4,7 @@ Agents connect outbound from the home LAN to Render. Connection state is kept
 in memory only (registry rebuilds itself as agents reconnect after a restart).
 
 Command delivery is implemented and load-bearing: send_agent_command() dispatches
-to a connected agent and awaits its reply — it is how Hue (lighting_auto,
+to a connected agent and awaits its reply — it is how Hue (lighting_transport,
 lighting_api) and the theater relay reach LAN-only devices that Render cannot
 otherwise talk to.
 """

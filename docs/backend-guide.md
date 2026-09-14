@@ -365,7 +365,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | LG_CLIENT_ID | LG ThinQ client 識別字串，固定一組即可。預設 `home-butler-client` | 選配 |
 | SWITCHBOT_TOKEN | SwitchBot 開發者 Token | 選配 |
 | SWITCHBOT_SECRET | SwitchBot 開發者 Secret Key | 選配 |
-| PUBLIC_BASE_URL | 本服務的公開網址，startup 用來向 SwitchBot 註冊 webhook（HA Hub 刷新提示／未遷移的 HB 夜燈）。**Render 上不用設**（自帶 `RENDER_EXTERNAL_URL`），部署在其他平台才需要。兩者都沒有時跳過註冊，無法使用這条推送路徑；已安裝的 HA Hub 整合仍有本機備援查詢，未遷移 HB 夜燈仍有 5 分鐘工作 | 選配 |
+| PUBLIC_BASE_URL | 本服務的公開網址，startup 用來向 SwitchBot 註冊 webhook（HA Hub 刷新提示）。**Render 上不用設**（自帶 `RENDER_EXTERNAL_URL`），部署在其他平台才需要。兩者都沒有時跳過註冊，無法使用這条推送路徑；已安裝的 HA Hub 整合仍有本機備援查詢 | 選配 |
 | PANASONIC_ACCOUNT | Panasonic Smart App 帳號 | 選配 |
 | PANASONIC_PASSWORD | Panasonic Smart App 密碼 | 選配 |
 | CWA_API_KEY | 中央氣象署開放資料授權碼 | 選配 |
@@ -397,8 +397,8 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /switchbot/devices | GET | 查看 SwitchBot 帳號下所有設備與 Device ID |
 | /switchbot/test/{device_id}/{button} | GET | 測試 IR 按鈕（customize 模式） |
 | /switchbot/test_turnon/{device_id} | GET | 測試 turnOn 指令 |
-| /switchbot/webhook | POST | SwitchBot Cloud webhook 接收端，Hub 2 changeReport 轉送選定 HA Hub 的刷新提示；未遷移感測保留原夜燈評估。無簽章，HA 值須由原生 API 驗證讀取，詳見 Hub 光照文件 |
-| /switchbot/webhook/status | GET | Debug：查 SwitchBot Cloud 目前註冊的 webhook URL，確認自動夜燈推播路徑活著 |
+| /switchbot/webhook | POST | SwitchBot Cloud webhook 接收端，Hub 2 changeReport 轉送選定 HA Hub 的刷新提示；不再評估 HB 夜燈。無簽章，HA 值須由原生 API 驗證讀取，詳見 Hub 光照文件 |
+| /switchbot/webhook/status | GET | Debug：查 SwitchBot Cloud 目前註冊的 webhook URL，確認 HA Hub 更新提示路徑 |
 | /panasonic/devices | GET | 列出 Panasonic 帳號下所有設備（GWID / Auth），新增除濕機抓參數用 |
 | /panasonic/dehumidifier/{name}/full_status | GET | Debug：掃某 Panasonic 除濕機 CommandType 0x00~0x1F 全欄位 |
 | /lg/devices | GET | 列出 LG ThinQ 帳號下所有裝置，抓 deviceId 用 |
@@ -468,11 +468,11 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/lighting/areas/{area_id}/notification | POST | 對 Hue 區域下發通知動作，例如 `alert:breathe` 呼吸燈；若 Bridge 回傳 signaling 支援值也會列入通知清單 |
 | /api/lighting/areas/{area_id}/effect | POST | 對區域內支援指定 effect 的燈具套用燈效，透過 agent 的 `hue.set_effect` 下發；部分支援時只套用支援的燈 |
 | /api/lighting/breathe | POST | 按設定經 HA／PC Agent 對指定 Hue grouped_light 觸發 breathe |
-| /api/lighting/auto/rules | GET | 列出所有 Hue 區域的自動夜燈規則 + runtime state（時段旗標、最後亮度值與時間） |
-| /api/lighting/auto/rules/{area_id} | PATCH | 設定 / 更新該區域的自動夜燈規則（光感應器、亮度門檻 1–20、場景、開燈亮度 1–100、啟用時段 HH:MM 可跨午夜、啟用開關）。啟用且當下在時段內會立即評估一次 |
-| /api/lighting/auto/rules/{area_id} | DELETE | 刪除該區域的自動夜燈規則 |
-| /api/lighting/auto/sensors | GET | 自動夜燈可選的光感應器清單（「智能居家」分頁啟用中的感應器） |
-| /api/lighting/auto/sensors/{device_id}/light-level | GET | 系統當下可得的最新 lightLevel（1~20）：6 分鐘內的 webhook 快取優先（附 `age_seconds` 資料年齡），否則打 SwitchBot status 雲端快取（樣本時間未知，`age_seconds=null`）。`light_level=null` 表示該設備不回報亮度（不是 Hub 2） |
+| /api/lighting/auto/rules | GET | 相容舊客戶端，回空 rules 與 retired=true，不讀 Sheet |
+| /api/lighting/auto/rules/{area_id} | PATCH | 已退役，回 410，不再啟用或儲存規則 |
+| /api/lighting/auto/rules/{area_id} | DELETE | 已退役，回 410；舊 Sheet 設定保留 |
+| /api/lighting/auto/sensors | GET | 舊網址保留的唯讀光感應器清單，不建立或評估規則 |
+| /api/lighting/auto/sensors/{device_id}/light-level | GET | 唯讀光照：已遷移取 HA 快照，其餘讀 SwitchBot status；沒有夜燈 Webhook 快取 |
 | /api/homebridge/devices | GET | 獨立橋接 Key，僅允許冷氣與同位置室溫感測器投影；直接讀快取，不查 Sheets／設備 |
 | /api/homebridge/devices/{id}/ac | POST | 獨立橋接 Key，明確 AC 局部設定與 UUID request_id；即時重驗允許清單、保留防黴排程，不經 AI。完整契約見 homebridge/README.md |
 | /api/assistant | POST | 自然語言入口（Siri 捷徑用）。body `{text, user_id?}`，與 LINE 共用意圖／控制，回 `{reply}`（語音精簡、去 emoji／朗讀格式）；每次只送當句，不帶歷史對話，仍背景存檔供查閱。`user_id` 不帶則用 `SIRI_USER_ID` |
@@ -717,31 +717,13 @@ Siri 每次解析視為獨立指令：`voice=True` 會傳入 `ask_claude(..., in
 
 ## 自動夜燈機制
 
-每個 Hue 區域可設定一條規則（Dashboard 照明卡片下方）：光感應器（SwitchBot Hub 2）+ 亮度門檻（lightLevel 1~20）+ 觸發場景 + 開燈亮度（1~100）+ 啟用時段（支援跨午夜）。
+v1.53.0 起已移除 HB 夜燈引擎與 Dashboard 表單。背景五分鐘工作、Webhook、HA 環境快照
+皆不再觸發 HB 自動開關燈；舊「照明自動規則」Sheet 保留，不載入、不修改，原 enabled 值不會使規則復活。
+舊讀取 API 回空規則並標示 retired，寫入／刪除回 410。夜燈請在 HA 建立；本次未新增或更動 HA 規則。
 
-**時段內邏輯**（規則引擎 `lighting_auto.py`，跑在 home-butler 後端，網頁關閉仍運作）：
-
-| 條件 | 動作 |
-|------|------|
-| 亮度 ≤ 門檻 且 該區燈是關的 | recall 場景 → 設定開燈亮度 |
-| 亮度 ≤ 門檻 且 燈已開著 | 不動作（不覆蓋使用者手動設定） |
-| 亮度 > 門檻 且 燈開著 且 是 auto 自己開的 | 關燈 |
-| 亮度 > 門檻 且 燈開著 但 是使用者手動開的 | 不動作（ownership：auto 只關自己開的燈，避免感應器讀值過時誤關手動開的燈） |
-
-時段結束時關燈一次，之後到下個時段前不再理會。
-
-**評估路徑按感測器來源選擇**：
-
-- HA 管理的感測器：只使用 HA 已驗證的環境快照，變化時觸發 HB 夜燈评估；Webhook 僅提示 HA 原生 API 刷新，不把未簽章讀值寫進 HA。
-- 未遷移感測器：保留 SwitchBot Webhook 與直接雲端讀取。
-- HB 每 5 分鐘的工作補做時段邊界與規則評估；HA Hub 的 60 秒備援刷新是另外一層，並非同一個排程。
-- Hue 指令依 `HOME_ASSISTANT_HUE_ENABLED` 送往 HA 或 PC Agent，失聯不自動換路徑。
-
-光照是 1～20 級，不能當作 lux。API、App、物理環境的更新時間可能不同，
-調門檻應使用實際規則來源的讀值。沒有實測依據時，不保證「秒級」或推斷 App 一定走藍牙。
-開燈本身可能讓讀值跨過門檻；門檻需避免開關循環，並驗證人工介入行為。
-現有關燈判斷使用場景指紋，不能只靠「上次是誰開燈」推斷；詳見 [開發指引](../AGENTS.md)。
-若改用 HA 自動化，先停用同一區域的 HB 規則，避免兩邊控制相同燈具。
+SwitchBot Webhook 仍轉送 HA 已選 Hub 的更新提示，HA 原生 API 驗證讀值及整合內備援輪詢不受影響。
+HB 待辦燈光提醒已改用獨立共用傳輸函式，繼續經 HA Hue 執行；除濕機全部維持 HB。
+舊版夜燈設計請看 [歷史版本](version-selection.md)，回復舊程式前先檢查 Sheet 的 enabled 值，避免重複規則。
 
 ---
 
@@ -903,8 +885,8 @@ resource，再照那份清單去讀值」，清單快取 6 小時。這樣新裝
 | web_api.py | REST API（裝置控制、待辦、週期待辦、食品、排程、天氣、成員查詢、PC 監控、感測器/空調歷史、除濕機自動規則、Dashboard 裝置配對登入，以及 Siri 自然語言入口 `/api/assistant`） |
 | device_auth.py | Dashboard 裝置配對登入（OAuth Device Grant 風格）：發 user_code/device_token、LINE Bot 端核准、PWA 輪詢領 session。狀態存 Sheets「裝置配對」分頁。解 iOS PWA 登入被踢去 Safari 的問題 |
 | agent_ws.py | PC agent WebSocket registry（agent hello / heartbeat / 在線狀態），讓 Render 有一條可回到家中區網的即時通道 |
-| lighting_api.py | Hue 照明 API（列區域含 on/brightness/場景/通知/燈效、更新顯示名稱、控制電源/亮度、套用場景/通知/燈效、觸發 breathe）＋自動夜燈規則 CRUD / 光感應器清單 / lightLevel 偵測端點，實際 Hue 呼叫由 lighting_transport 依設定送 HA／PC agent，不在失聯時換路徑 |
-| lighting_auto.py | HB 夜燈規則引擎；HA 感測快照或未遷移的 Webhook 觸發，5 分鐘工作補做評估；控制統一使用 lighting_transport |
+| lighting_api.py | Hue 區域、電源、亮度、場景、通知與燈效 API，依 lighting_transport 送 HA／PC；保留已退役夜燈端點的明確回覆與唯讀光照探查 |
+| lighting_transport.py / lighting_reminders.py | 共用 HA／PC 照明通道與背景待辦提醒；不依賴已移除的夜燈模組 |
 | hue_area_settings.py | Sheet「Hue 照明區域」讀寫：保存 Hue ID 與 Dashboard 顯示名稱的對應 |
 | pc_state.py | PC 監控 in-memory ring buffer（24h × 60s/PC），給 `/api/computers/heartbeat` 寫、`/api/computers/status` 讀 |
 | sensor_state.py | 感測器 24h 歷史與 Sheet append/backfill；HA 即時投影／未遷移 sensor_polling 與五分鐘歷史採樣分離 |

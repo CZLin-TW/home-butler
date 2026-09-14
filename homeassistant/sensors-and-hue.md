@@ -40,7 +40,7 @@ HOME_ASSISTANT_SENSOR_NAMES=["SwitchBot Hub 2 客廳","SwitchBot Hub 2 主臥","
 
 只填實際完成配對的名稱。此清單明確停止那些感測器的 HB 雲端輪詢、手動查詢及夜燈光照讀取。
 HA 斷線不會自動切回 SwitchBot API；格式錯誤也不會重新開啟直接讀取。
-既有 HB 夜燈若仍啟用，改以已驗證的 HA 光照快照變更觸發；unsigned webhook 只觸發 HA 刷新。
+v1.53.0 已移除 HB 夜燈引擎；HA 快照不再觸發 HB 開關燈，unsigned webhook 仍只提示 HA 刷新。
 
 ## Hue
 

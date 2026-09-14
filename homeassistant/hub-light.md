@@ -60,9 +60,8 @@ Render 離線期間仍有本機備援計時及原生輪詢，但快速夜燈觸�
 `last_push_refresh_requested` 是已交付原生更新請求的時間，**不是設備量測時間，也不保證 API 有新值**。
 光照值始終來自原生 coordinator 的正式 API 回應。
 
-既有 HB 夜燈原本已使用相同 Webhook，不能把全部 HomeButler 感測都說成輪詢。
-本次保留原接收網址與既有規則，避免搶占 SwitchBot 唯一 Webhook；日後將同一區域夜燈搬入 HA
-時，應停用 HB 的對應規則，避免兩套自動化同時控制同一盞燈。
+v1.53.0 起 HB 夜燈引擎已移除，但保留原接收網址及 HA 更新提示，不搶占 SwitchBot 唯一 Webhook。
+舊夜燈 Sheet 資料不執行；HA／Hue App 的規則仍需避免重複控制同一盞燈。
 
 ## 整合內備援更新（1.2.0／系統 v1.52.0）
 

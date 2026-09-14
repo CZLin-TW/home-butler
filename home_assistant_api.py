@@ -478,12 +478,6 @@ async def ha_websocket(websocket: WebSocket):
             accepted = link.receive(websocket, snapshot)
             await websocket.send_json({"type": "snapshot_ack", "sequence": snapshot.sequence,
                                        "accepted": accepted})
-            if accepted and snapshot.environment:
-                import ha_sensor_events
-                try:
-                    ha_sensor_events.notify()
-                except Exception:
-                    pass  # Automation failures cannot disconnect the device transport.
     except WebSocketDisconnect:
         pass
     except (HTTPException, ValueError, ValidationError, asyncio.TimeoutError):

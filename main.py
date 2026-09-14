@@ -75,15 +75,15 @@ async def _sheets_unavailable_handler(request: Request, exc: GSpreadException):
     )
 
 
-# 照明自動化的 Hue 指令從 sync thread（polling / webhook 衍生 thread）發出，
+# 待辦燈光提醒的 Hue 指令從背景工作 thread 發出，
 # 需要 FastAPI 的 running loop 才能 run_coroutine_threadsafe 到 agent WS。
 # 這個 handler 要註冊在 _on_startup 之前，確保 polling thread 起跑前 loop 已就緒。
 @app.on_event("startup")
 async def _capture_event_loop():
-    import lighting_auto
+    import lighting_transport
     import health_alert
     loop = asyncio.get_running_loop()
-    lighting_auto.set_event_loop(loop)
+    lighting_transport.set_event_loop(loop)
     # health_alert 的劇院存活檢查同樣要從 polling thread 打 agent WS，共用同一顆 loop
     health_alert.set_event_loop(loop)
 
@@ -104,7 +104,6 @@ def _on_startup():
     import dehumidifier_history
     import dehumidifier_driver
     import device_status
-    import lighting_auto
     import notify
     from sheets import RequestContext
     import switchbot_api
@@ -134,7 +133,6 @@ def _on_startup():
             ("ac_history backfill", ac_history.backfill_from_sheet),
             ("dehumidifier_history backfill", dehumidifier_history.backfill_from_sheet),
             ("dehumidifier_auto rules", dehumidifier_auto.load_rules),
-            ("lighting_auto rules", lighting_auto.load_rules),
             # 防黴送風的欄位：最後開機時間（算運轉時長）+ 逐台覆寫的門檻/送風分鐘。
             # 「濕度控制規則」在感應器那列，給除濕機自動模式的自訂分時目標濕度用
             # （格式 7=55, 23=60；見 dehumidifier_auto 模組 docstring）。
@@ -154,19 +152,19 @@ def _on_startup():
                 print(f"[warmup] {label} failed: {e}")
         print("[warmup] done")
 
-    # SwitchBot webhook 註冊（Hub 2 lightLevel → 自動夜燈秒級評估）。
+    # SwitchBot webhook 註冊：轉送 HA 已選 Hub 的更新提示。
     # Render 自帶 RENDER_EXTERNAL_URL；其他環境可用 PUBLIC_BASE_URL 覆寫。
-    # 沒設就跳過——自動夜燈仍可運作，只是退化成 5min 輪詢的反應速度。
+    # 沒設就跳過；HA 整合內的備援輪詢仍可運作。
     public_base = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip()
     if public_base:
         def _register_webhook():
             url = public_base.rstrip("/") + "/switchbot/webhook"
             result = switchbot_api.ensure_webhook(url)
-            print(f"[light-auto] webhook register {url}: {result}")
+            print(f"[Hub updates] webhook register {url}: {result}")
         threading.Thread(target=_register_webhook, daemon=True).start()
     else:
-        print("[light-auto] PUBLIC_BASE_URL / RENDER_EXTERNAL_URL 未設定，跳過 webhook 註冊"
-              "（自動夜燈退化為 5min 輪詢反應）")
+        print("[Hub updates] PUBLIC_BASE_URL / RENDER_EXTERNAL_URL 未設定，跳過 webhook 註冊"
+              "（HA 仍可使用整合內備援輪詢）")
 
     sensor_ready = False
 
@@ -239,7 +237,6 @@ def _on_startup():
 
     jobs.add("sensors", 300, _sensor_tick)
     jobs.add("ac-temperature-feedback", 60, sensor_polling.feedback_tick)
-    jobs.add("lighting", 300, lighting_auto.tick)
     import lighting_reminders
     jobs.add("lighting-reminders", 60, lighting_reminders.tick)
     jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
@@ -461,19 +458,17 @@ def test_switchbot_turnon(device_id: str):
 
 @app.get("/switchbot/webhook/status", dependencies=[Depends(verify_api_key)])
 def switchbot_webhook_status():
-    """Debug: 看 SwitchBot Cloud 目前註冊的 webhook URL，確認自動夜燈推播路徑活著。"""
+    """Debug: 看 SwitchBot Cloud 目前註冊的 webhook URL，確認 HA Hub 更新提示的推播路徑。"""
     return switchbot_api.query_webhook()
 
 
 @app.post("/switchbot/webhook")
 async def switchbot_webhook(request: Request):
-    """SwitchBot Cloud webhook 接收端（Hub 2 changeReport → 自動夜燈秒級評估）。
+    """Only forward refresh hints for selected HA Hubs, never sensor values.
 
-    SwitchBot 不對請求簽名，這個端點無法驗證來源；payload 只拿來跟已設定規則的
-    sensor_device_id 比對，不匹配就忽略——偽造流量最多只能在啟用時段內觸發一次
-    既有夜燈規則的重新評估，無法控制其他任何設備。
-    另向 HA 已選 Hub 2 轉送有時間限制的更新提示；不轉送感測值。
-    HA 以原生 API 憑證驗證讀取。舊夜燈評估在背景執行，HA 提示合併後非同步轉送。"""
+    HA validates readings with its own native API. Retired HB nightlight rules
+    are not loaded or evaluated, even when old Sheet rows are still enabled.
+    """
     try:
         body = await request.json()
     except Exception:
@@ -485,15 +480,6 @@ async def switchbot_webhook(request: Request):
     context = body.get("context") if isinstance(body, dict) else None
     if not isinstance(context, dict):
         return {"status": "ignored"}
-    device_mac = context.get("deviceMac") or context.get("deviceId") or ""
-    light_level = context.get("lightLevel")
-    if device_mac and light_level is not None:
-        import lighting_auto
-        threading.Thread(
-            target=lighting_auto.on_light_report,
-            args=(str(device_mac), light_level),
-            daemon=True,
-        ).start()
     return {"status": "ok"}
 
 

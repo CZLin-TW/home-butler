@@ -70,7 +70,7 @@ def alert_offline_seconds() -> int:
 
 def set_event_loop(loop):
     """main.py 在 async startup 抓 running loop 餵進來，sync thread 才問得到劇院 agent。
-    跟 lighting_auto 同一套橋接方式。"""
+    跟 lighting_transport 同一套橋接方式。"""
     global _loop
     _loop = loop
 

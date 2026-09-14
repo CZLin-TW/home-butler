@@ -1,14 +1,11 @@
 """Dashboard lighting API using the explicitly selected HA or legacy PC route."""
 
-import re
-import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-import lighting_auto
 import switchbot_api
 from lighting_transport import send_command as send_agent_command
 from auth import verify_api_key
@@ -18,7 +15,6 @@ from sheets import RequestContext
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
-_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 
 
 class HueAreaUpdateRequest(BaseModel):
@@ -231,55 +227,20 @@ async def api_send_lighting_area_notification(area_id: str, req: HueAreaNotifica
     }
 
 
-# ── 自動夜燈規則 ────────────────────────────────────────
-
+# Legacy rule endpoints stay explicit for older clients; no Sheet reads/writes.
 @router.get("/lighting/auto/rules")
 async def api_lighting_auto_rules():
-    return {"rules": lighting_auto.get_all_rules()}
+    return {"rules": {}, "retired": True}
 
 
 @router.patch("/lighting/auto/rules/{area_id}")
 async def api_set_lighting_auto_rule(area_id: str, req: LightingAutoRuleRequest):
-    if not area_id:
-        raise HTTPException(status_code=400, detail="area_id is required")
-    if not (1 <= req.threshold <= 20):
-        raise HTTPException(status_code=400, detail="亮度門檻需在 1~20")
-    if not (1 <= req.brightness <= 100):
-        raise HTTPException(status_code=400, detail="開燈亮度需在 1~100")
-    if not _TIME_RE.match(req.start_time) or not _TIME_RE.match(req.end_time):
-        raise HTTPException(status_code=400, detail="時間格式需為 HH:MM")
-    if req.start_time == req.end_time:
-        raise HTTPException(status_code=400, detail="開始與結束時間不可相同")
-    if req.enabled and (not req.sensor_device_id or not req.scene_id):
-        raise HTTPException(status_code=400, detail="啟用時需選擇光感應器與場景")
-    try:
-        rule = await run_in_threadpool(lighting_auto.set_rule,
-            area_id,
-            enabled=req.enabled,
-            sensor_device_id=req.sensor_device_id,
-            sensor_name=req.sensor_name,
-            threshold=req.threshold,
-            scene_id=req.scene_id,
-            scene_name=req.scene_name,
-            scene_type=req.scene_type,
-            scene_action=req.scene_action,
-            brightness=req.brightness,
-            start_time=req.start_time,
-            end_time=req.end_time,
-            area_name=req.area_name,
-        )
-        return {"ok": True, "rule": rule}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=410, detail="HB 自動夜燈已停用，請在 Home Assistant 設定自動化")
 
 
 @router.delete("/lighting/auto/rules/{area_id}")
 async def api_delete_lighting_auto_rule(area_id: str):
-    try:
-        await run_in_threadpool(lighting_auto.delete_rule, area_id)
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=410, detail="HB 自動夜燈已停用；原設定保留於 Sheet")
 
 
 @router.get("/lighting/auto/sensors")
@@ -304,34 +265,17 @@ async def api_lighting_auto_sensors():
 
 @router.get("/lighting/auto/sensors/{device_id}/light-level")
 async def api_lighting_auto_sensor_light_level(device_id: str):
-    """系統當下可得的最新 lightLevel（1~20），給 UI 調門檻時參考。
+    """Legacy read-only probe: selected HA snapshot, otherwise native cloud status.
 
-    Hub 2 對雲端的回報是變化幅度驅動：小幅變化不會立刻更新 /status 雲端快取，
-    但任何 changeReport（含溫濕度觸發的）都帶當下 lightLevel。所以 webhook
-    近期報過就優先回快取值（附 age_seconds 資料年齡），否則才打 status
-    （雲端快取值，樣本時間未知 → age_seconds=null）。
-    light_level=null 表示該設備不回報亮度（不是 Hub 2）。"""
+    The old /auto/ URL remains compatible, but no longer reads a nightlight cache.
+    This endpoint cannot create or evaluate rules.
+    """
     import ha_sensors
     reading = ha_sensors.by_device_id(device_id)
     if reading is not None:
         return {k: reading.get(k) for k in ("light_level", "source", "age_seconds")}
-    cached = lighting_auto.get_cached_light_level(device_id)
-    now = time.time()
-    if cached and now - cached["at"] <= lighting_auto.WEBHOOK_FRESH_S:
-        return {
-            "light_level": cached["level"],
-            "source": "webhook",
-            "age_seconds": int(now - cached["at"]),
-        }
     status = await run_in_threadpool(switchbot_api.get_device_status, device_id)
     if not isinstance(status, dict) or "error" in status:
-        if cached:
-            # status 打不到但有舊 webhook 快取 → 還是給值，年齡誠實標示
-            return {
-                "light_level": cached["level"],
-                "source": "webhook",
-                "age_seconds": int(now - cached["at"]),
-            }
         detail = status.get("error") if isinstance(status, dict) else str(status)
         raise HTTPException(status_code=502, detail=str(detail))
     return {"light_level": status.get("lightLevel"), "source": "status", "age_seconds": None}
