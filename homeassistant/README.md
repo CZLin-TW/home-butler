@@ -10,6 +10,7 @@ Hub 2 光照可透過獨立 [光照等級整合](hub-light.md) 補入 HA；其 1
 補入可手動更換的溫度感測器。它不依賴本頁的 Render 連線，也不恢復回饋補償。
 
 同步選定存在／亮度感測器；1.1.0 可額外允許 HomeButler 操作已遷移的原生 SwitchBot Cloud 空調。
+1.4.0 新增 [感測器配對與 Hue 控制](sensors-and-hue.md)，保留原歷史與 Hue 區域 UUID；必須完成兩端設定才切換來源。
 1.2.0 可額外勾選 [IR 電扇按鈕](ir-buttons.md)，只接受 switchbot_ir_buttons 平台的明確選取。
 適用 HA OS；開發目標 Core 2026.9.2，實機驗證狀態見 [驗證紀錄](../docs/verification.md)。
 不需要 Aqara 開發者帳號、不需要把 HA 的 8123 port 對外開放，也不用重新配對 FP2。

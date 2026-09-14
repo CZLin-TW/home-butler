@@ -10,7 +10,8 @@ from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
 from .climates import ClimateCommands, snapshot as climate_snapshot
 from .ir_buttons import IRCommands, snapshot as ir_snapshot
-from . import hub_updates
+from . import hub_updates, environment
+from .hue import HueCommands
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
@@ -25,11 +26,15 @@ async def async_setup_entry(hass, entry):
     sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
     climates = entry.options.get("climates", [])
     buttons = entry.options.get("ir_buttons", [])
+    sensors = entry.options.get("environment", [])
+    groups = entry.options.get("hue_groups", [])
     link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
                         commands=ClimateCommands(hass, climates) if climates or buttons else None,
                         ir_buttons=(lambda: ir_snapshot(hass, buttons)) if buttons else None,
                         ir_commands=IRCommands(hass, buttons) if buttons else None,
+                        environment=(lambda: environment.snapshot(hass, sensors)) if sensors else None,
+                        hue_commands=HueCommands(hass, groups) if groups else None,
                         hub_devices=lambda: hub_updates.devices(hass),
                         hub_updates=lambda frame: hub_updates.receive(hass, frame))
 
@@ -41,7 +46,7 @@ async def async_setup_entry(hass, entry):
             link.notify()
             return
         from .observations import current_entity_ids
-        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates + buttons):
+        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates + buttons + sensors):
             link.notify()
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):

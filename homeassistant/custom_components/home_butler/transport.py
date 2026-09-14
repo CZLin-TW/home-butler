@@ -44,7 +44,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
@@ -55,6 +55,7 @@ class OutboundLink:
         self.ir_buttons, self.ir_commands = ir_buttons, ir_commands
         self.hub_devices, self.hub_updates = hub_devices, hub_updates
         self._hub_enabled = False
+        self.environment, self.hue_commands = environment, hue_commands
 
     async def _serve_climates(self, ws):
         """Receive commands while waiting for the next sensor heartbeat."""
@@ -62,7 +63,7 @@ class OutboundLink:
         command_task = None
 
         async def execute(frame):
-            controller = self.ir_commands if frame.get("type") == "ir_command" else self.commands
+            controller = {"ir_command": self.ir_commands, "climate_command": self.commands, "hue_command": self.hue_commands}[frame["type"]]
             response = await controller.execute(frame)
             await ws.send_json(response)
             self.notify()
@@ -79,7 +80,7 @@ class OutboundLink:
                     acknowledgements.put_nowait(frame)
                 elif frame.get("type") == "hub_update" and self._hub_enabled:
                     self.hub_updates(frame)
-                elif (frame.get("type") == "climate_command" and self.commands) or (frame.get("type") == "ir_command" and self.ir_commands):
+                elif (frame.get("type") == "climate_command" and self.commands) or (frame.get("type") == "ir_command" and self.ir_commands) or (frame.get("type") == "hue_command" and self.hue_commands):
                     if command_task and not command_task.done():
                         raise LinkError("Concurrent command rejected")
                     if command_task:
@@ -101,6 +102,8 @@ class OutboundLink:
                 sequence += 1
                 frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot(),
                          "climates": self.climates() if self.climates else []}
+                if self.environment:
+                    frame["environment"] = self.environment()
                 if self.ir_buttons:
                     frame["ir_buttons"] = self.ir_buttons()
                 if self._hub_enabled:
@@ -134,7 +137,7 @@ class OutboundLink:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
-                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None})
+                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None, "hue_control": self.hue_commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
@@ -148,7 +151,11 @@ class OutboundLink:
                             raise LinkError("Backend upgrade required")
                         if self.ir_commands and "ir_control" not in hello.get("capabilities", []):
                             raise LinkError("Backend IR upgrade required")
-                    if self.commands is not None or self._hub_enabled:
+                    if self.environment and "environment" not in hello.get("capabilities", []):
+                        raise LinkError("Backend sensor upgrade required")
+                    if self.hue_commands and "hue_control" not in hello.get("capabilities", []):
+                        raise LinkError("Backend Hue upgrade required")
+                    if self.commands is not None or self._hub_enabled or self.environment or self.hue_commands:
                         await self._serve_climates(ws)
                         delay = 5
                         continue

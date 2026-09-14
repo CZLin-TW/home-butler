@@ -47,7 +47,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates"]}
+    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control"]}
 
 
 class Observation(BaseModel):
@@ -120,6 +120,42 @@ class IRResult(BaseModel):
     status: Literal["success", "failed", "unknown"]
 
 
+class EnvironmentReading(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    entity_id: str = Field(pattern=r"^sensor\.[a-z0-9_]+$", max_length=160)
+    name: str = Field(min_length=1, max_length=160)
+    kind: Literal["temperature", "humidity", "co2", "light_level"]
+    value: float | None = Field(allow_inf_nan=False)
+    available: bool = Field(strict=True)
+    source_updated_at: float | None = Field(default=None, ge=0, le=253402214400, allow_inf_nan=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def check_value(cls, data):
+        if not isinstance(data, dict):
+            return data
+        bounds = {"temperature": (-100, 150), "humidity": (0, 100),
+                  "co2": (0, 100000), "light_level": (1, 20)}
+        value = data.get("value")
+        low, high = bounds.get(data.get("kind"), (0, 0))
+        if value is not None and (type(value) not in (int, float) or not low <= value <= high):
+            raise ValueError("Invalid sensor value or units")
+        if data.get("kind") == "light_level" and value is not None and value != int(value):
+            raise ValueError("Hub light level must be an integer")
+        if (data.get("available") is True) != (value is not None):
+            raise ValueError("Unknown sensor values must be null")
+        return data
+
+
+class HueResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["hue_result"]
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    status: Literal["success", "failed", "unknown"]
+    result: dict = Field(default_factory=dict)
+
+
 class Snapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["snapshot"]
@@ -127,11 +163,18 @@ class Snapshot(BaseModel):
     observations: list[Observation] = Field(max_length=128)
     climates: list[ClimateState] = Field(default_factory=list, max_length=20)
     ir_buttons: list[IRButtonState] = Field(default_factory=list, max_length=120)
+    environment: list[EnvironmentReading] = Field(default_factory=list, max_length=80)
 
     hub_devices: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def unique_entities(self):
+        for key in ("id", "entity_id"):
+            values = [getattr(item, key) for item in self.environment]
+            if len(values) != len(set(values)):
+                raise ValueError("Duplicate environmental sensors")
+        if len({(s.name, s.kind) for s in self.environment}) != len(self.environment):
+            raise ValueError("Ambiguous sensor mapping")
         if len(set(self.hub_devices)) != len(self.hub_devices) or any(
                 not re.fullmatch(r"[0-9A-F]{12}", device) for device in self.hub_devices):
             raise ValueError("Invalid Hub 2 subscriptions")
@@ -167,10 +210,12 @@ class LinkState:
         self.climate_capable = False
         self.ir_capable = False
         self.ir_buttons = []
+        self.environment = []
+        self.hue_capable = False
         self.uncertain = set()
         self.hub_updates = HubRelay(self)
 
-    def connect(self, socket, climate_capable=False, ir_capable=False, hub_capable=False):
+    def connect(self, socket, climate_capable=False, ir_capable=False, hub_capable=False, hue_capable=False):
         with self.lock:
             self._fail_pending()
             previous = self.socket
@@ -178,6 +223,7 @@ class LinkState:
             self.received_at = self.received_mono = None
             self.climate_capable = climate_capable
             self.ir_capable = ir_capable
+            self.hue_capable = hue_capable
             self.hub_updates.reset(hub_capable)
             try:
                 self.loop = asyncio.get_running_loop()
@@ -223,6 +269,7 @@ class LinkState:
                 fresh.append(state)
             self.climates = fresh
             self.ir_buttons = [s.model_dump() for s in snapshot.ir_buttons]
+            self.environment = [s.model_dump() for s in snapshot.environment]
             return True
 
     def climate_state(self, name):
@@ -310,7 +357,7 @@ class LinkState:
     def command_result(self, socket, result):
         with self.lock:
             pending = self.pending.get(result.request_id)
-            if socket is not self.socket or not pending or pending[0] is not socket or "button" in pending[1]:
+            if socket is not self.socket or not pending or pending[0] is not socket or "button" in pending[1] or pending[1].get("kind") == "hue":
                 return
             _, original, future = pending
             if future.done():
@@ -328,6 +375,39 @@ class LinkState:
                 "success": "HA 已執行", "failed": "HA 拒絕空調指令，請確認模式與設備設定",
                 "unknown": "HA 指令結果未確認；不會自動重送"}[status]})
 
+    async def hue_command(self, action, payload):
+        from lighting_transport import ha_enabled
+        error = {"status": "error", "agent_id": "home_assistant", "error": "HA 照明未就緒或指令處理中，未送出"}
+        actions = {"hue.list_areas", "hue.set_state", "hue.recall_scene", "hue.set_effect", "hue.notify", "hue.breathe"}
+        with self.lock:
+            if (not ha_enabled() or action not in actions or not isinstance(payload, dict)
+                    or not self.snapshot()["online"] or not self.hue_capable or self.pending):
+                return error
+            socket, request_id = self.socket, uuid4().hex
+            future = asyncio.get_running_loop().create_future()
+            self.pending[request_id] = (socket, {"name": "Hue", "kind": "hue"}, future)
+        try:
+            await socket.send_json({"type": "hue_command", "request_id": request_id, "action": action,
+                                    "payload": payload, "expires_at": time.time() + 15})
+            result = await asyncio.wait_for(future, 25)
+            if result.get("status") == "success":
+                return {"status": "ok", "agent_id": "home_assistant", "result": result.get("result", {})}
+            return {**error, "error": "HA 拒絕照明指令，未送出" if result.get("status") == "failed"
+                    else "HA 照明結果未確認，可能已部分執行；不會自動重送"}
+        except (Exception, asyncio.CancelledError):
+            return {**error, "error": "HA 照明結果未確認；不會自動重送"}
+        finally:
+            with self.lock:
+                self.pending.pop(request_id, None)
+
+    def hue_result(self, socket, result):
+        with self.lock:
+            pending = self.pending.get(result.request_id)
+            if (socket is not self.socket or not pending or pending[0] is not socket
+                    or pending[1].get("kind") != "hue" or pending[2].done()):
+                return
+            pending[2].set_result({"status": result.status, "result": result.result})
+
     def snapshot(self):
         with self.lock:
             try:
@@ -339,9 +419,13 @@ class LinkState:
             online = bool(configured and self.socket is not None and age is not None and age <= STALE_SECONDS)
             return {"configured": configured, "connected": self.socket is not None, "online": online,
                     "received_at": self.received_at, "age_seconds": age, "stale_after_seconds": STALE_SECONDS,
+                    "hue_available": online and self.hue_capable,
                     "observations": [{**item, "available": online and item["available"],
                                       "value": item["value"] if online and item["available"] else None}
-                                     for item in self.observations]}
+                                     for item in self.observations],
+                    "environment": [{**item, "available": online and item["available"],
+                                     "value": item["value"] if online and item["available"] else None}
+                                    for item in self.environment]}
 
 
 link = LinkState()
@@ -368,7 +452,7 @@ async def ha_websocket(websocket: WebSocket):
                 or not isinstance(token, str) or len(token) > 512):
             raise ValueError("Invalid hello")
         verify_ha_key(token)
-        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True, hello.get("hub_updates") is True)
+        previous = link.connect(websocket, hello.get("climate_control") is True, hello.get("ir_control") is True, hello.get("hub_updates") is True, hello.get("hue_control") is True)
         registered = True
         if previous is not None and previous is not websocket:
             try:
@@ -376,11 +460,14 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates"]})
+                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control"]})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.
             verify_ha_key(token)
+            if frame.get("type") == "hue_result" and link.hue_capable:
+                link.hue_result(websocket, HueResult.model_validate(frame))
+                continue
             if frame.get("type") == "climate_result" and link.climate_capable:
                 link.command_result(websocket, ClimateResult.model_validate(frame))
                 continue
@@ -391,6 +478,12 @@ async def ha_websocket(websocket: WebSocket):
             accepted = link.receive(websocket, snapshot)
             await websocket.send_json({"type": "snapshot_ack", "sequence": snapshot.sequence,
                                        "accepted": accepted})
+            if accepted and snapshot.environment:
+                import ha_sensor_events
+                try:
+                    ha_sensor_events.notify()
+                except Exception:
+                    pass  # Automation failures cannot disconnect the device transport.
     except WebSocketDisconnect:
         pass
     except (HTTPException, ValueError, ValidationError, asyncio.TimeoutError):

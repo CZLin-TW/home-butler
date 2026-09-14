@@ -465,10 +465,18 @@ def _sheet_bool(value):
 
 @router.get("/todos/light-reminders")
 def api_get_todo_light_reminders():
+    """Legacy PC reminder queue is empty after Hue ownership moves to HA."""
+    from lighting_transport import ha_enabled
+    if ha_enabled():
+        return {"count": 0, "reminders": [], "provider": "home_assistant"}
+    return collect_todo_light_reminders()
+
+
+def collect_todo_light_reminders():
     """Return due unfinished todos that should trigger Hue light reminders.
 
-    The local PC agent polls this endpoint every minute and performs at most
-    one Hue breathe action per poll, so multiple due todos do not overlap.
+    Shared by the legacy PC queue and the HA reminder worker. Each provider
+    groups by area; only the explicitly selected provider receives work.
     """
     ctx = RequestContext()
     ctx.load()

@@ -240,6 +240,8 @@ def _on_startup():
     jobs.add("sensors", 300, _sensor_tick)
     jobs.add("ac-temperature-feedback", 60, sensor_polling.feedback_tick)
     jobs.add("lighting", 300, lighting_auto.tick)
+    import lighting_reminders
+    jobs.add("lighting-reminders", 60, lighting_reminders.tick)
     jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
     jobs.add("notion", 300, lambda: _with_context(notify.sync_external_events, ["家庭成員"]))
     jobs.add("todo-reminders", 300, lambda: _with_context(notify.run_todo_tick))

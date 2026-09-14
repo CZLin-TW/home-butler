@@ -1,5 +1,9 @@
 # 家庭 AI 管家系統
 
+v1.51.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md) 提供明確切換設定。
+感測即時值改由 HA 回傳、原五分鐘歷史保留；Hue 控制與待辦燈光提醒可統一經 HA 的原生 Hue 連線。
+設定及實際啟用紀錄請看連結與驗證文件；未切換設備保持原路徑。
+
 v1.50.0：[Hub 2 光照與 Push](homeassistant/hub-light.md) 將既有 SwitchBot Webhook 通知轉送 HA，
 提前觸發原生 API 讀取，溫度／濕度／光照一起更新。1～20 級不是 lux；保留 10 分鐘輪詢備援。
 

@@ -10,8 +10,8 @@ HA 仍管理光照實體與夜燈規則；這條快速資料路徑依賴 Render�
 | 元件 | 長期責任 | 目前現況 |
 | --- | --- | --- |
 | Home Assistant（HA） | 本地設備狀態、基本控制、即時自動化、Apple Home 發布 | FP2、三台空調、IR 電扇按鈕及 Hub 光照已接入；Hue 已可本地控制 |
-| HomeButler（Render） | AI／LINE、家庭權限、待辦庫存、跨服務提醒、Dashboard API | 空調與選定電扇經 HA；Hue、除濕機及原感測輪詢仍有舊路徑 |
-| Dashboard | 家庭成員操作與資訊顯示 | 空間感測及 HA 空調已接通；不能直接管理 HA 自動化，原溫濕度／歷史仍需統一來源 |
+| HomeButler（Render） | AI／LINE、家庭權限、待辦庫存、跨服務提醒、Dashboard API | 空調與選定電扇經 HA；v1.51.0 可切換感測與 Hue 到 HA，除濕機控制仍保留 |
+| Dashboard | 家庭成員操作與資訊顯示 | 讀取 HB 的 HA 即時投影及原歷史；不能直接管理 HA 自動化 |
 | Apple Home／Siri | Apple 生態的操作入口 | FP2 與空調經 HA HomeKit Bridge；使用者已確認空調换新配件 |
 | Theater Agent | AVR、KEF、電視等具狀態的協調控制 | 維持独立程序與既有 HB／PC relay；本階段不移轉 |
 | PC Agent | 每台 PC 的系統監測 | 原 Hue／Theater relay 暫時保留；日後與家庭中樞連接職責分離 |
@@ -44,8 +44,8 @@ Dashboard 成員查看，kid 不開放此新資料；瀏覽器只存記憶體，
 
 ## 後续遷移與完成條件
 
-- 感測資料統一：擴充 HA 溫度／濕度／CO₂／光照等級，串回既有即時資料及歷史，再停已遷移來源的 HB 重複讀取。
-- Hue 控制統一：對照場景、效果、通知及人工介入行為，將 HB 照明入口移至 HA。
+- 感測資料統一：v1.51.0 已實作溫濕度／CO₂／光照等級映射與歷史續接，依 [切換步驟](../homeassistant/sensors-and-hue.md) 逐台啟用。
+- Hue 控制統一：v1.51.0 已實作場景、效果與通知的 HA 通道；同一份文件記載安裝、功能限制及驗收。
 - 自動化歸屬：逐條核對 HA／HB／Hue App 規則，只保留一個執行者，Dashboard 不假裝已能編輯 HA 規則。
 - 除濕機另行評估原生支援與既有濕度規則；Theater Agent 保留，HA 中繼僅為可選後續工作。
 - 補齊空調四模式與各房間電扇實機驗收；Apple Home 配件驗收後核對並停用剩餘重複 Homebridge 服務。

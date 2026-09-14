@@ -91,9 +91,16 @@ def snapshot(device_name: str = "") -> dict:
         else:
             result = {name: dict(status) for name, status in _statuses.items()}
     import ha_climate
+    import ha_sensors
     for name, state in result.items():
         if state.get("type") == "空調" and ha_climate.managed(name):
             state.update(ha_climate.status(name))
+        if state.get("type") == "感應器" and ha_sensors.managed(name):
+            rows = [r for r in catalog_rows() if r.get("名稱") == name]
+            reading = ha_sensors.reading(rows[0]) if len(rows) == 1 else {}
+            state.update({"temperature": reading.get("temperature"), "humidity": reading.get("humidity"),
+                          "co2": reading.get("co2"), "lightLevel": reading.get("light_level"),
+                          "source": "home_assistant", "available": bool(reading.get("available"))})
     return result
 
 

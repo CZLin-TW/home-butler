@@ -11,6 +11,8 @@ from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
 from .climates import select_climates
 from .ir_buttons import select_buttons
+from .environment import select_environment, current_mapping
+from .hue import group_options, select_groups
 
 
 def export_selector():
@@ -84,12 +86,18 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                 sources = select_sources(self.hass, user_input.get(CONF_EXPORT, []))
                 climates = select_climates(self.hass, user_input.get("climate_entities", []), entry.options.get("climates", []))
                 buttons = select_buttons(self.hass, user_input.get("ir_entities", []))
-                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons})
+                environment = select_environment(self.hass, user_input.get("sensor_mapping", current_mapping(self.hass, entry.options.get("environment", []))))
+                groups = await select_groups(self.hass, user_input.get("hue_groups", entry.options.get("hue_groups", [])), entry.options.get("hue_groups", []))
+                return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups})
             except ValueError:
                 errors["base"] = "invalid_input"
         sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
+        hue_options = await group_options(self.hass, entry.options.get("hue_groups", []))
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
             vol.Optional(CONF_EXPORT, default=current_entity_ids(self.hass, sources)): export_selector(),
+            vol.Optional("sensor_mapping", default=current_mapping(self.hass, entry.options.get("environment", []))): selector.ObjectSelector(),
+            vol.Optional("hue_groups", default=entry.options.get("hue_groups", [])):
+                selector.SelectSelector(selector.SelectSelectorConfig(multiple=True, options=hue_options)),
             vol.Optional("climate_entities", default=current_entity_ids(self.hass, entry.options.get("climates", []))):
                 selector.EntitySelector(selector.EntitySelectorConfig(multiple=True, filter=[
                     {"domain": "climate", "integration": "switchbot_cloud"}])),

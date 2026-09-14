@@ -32,11 +32,13 @@
     "step": {
       "init": {
         "title": "同步感測器與空調",
-        "description": "勾選空調即允許 HomeButler 控制該原生 SwitchBot Cloud 實體。先將 HA 空調名稱設為 Sheet 中的設備名稱，再勾選。Render 也須設定 HOME_ASSISTANT_AC_NAMES；之後改名不會變更既有對應。 電扇先用 SwitchBot IR Buttons 建立按鈕，再於此勾選，並於 Render 設 HOME_ASSISTANT_IR_NAMES。",
+        "description": "保留既有選項。感測器配對範例：{\"SwitchBot Hub 2 客廳\": {\"temperature\": \"sensor.hub_2_ke_ting_temperature\", \"humidity\": \"sensor.hub_2_ke_ting_humidity\", \"light_level\": \"sensor.guang_zhao_deng_ji\"}}。co2 使用 ppm；light_level 為 1–20 級，不是 lux。HB 的溫濕度補償只在 HB 套用，請勿另選已重複補償的模板。Hue 只允許勾選的區域、所屬場景及特效。",
         "data": {
           "export_entities": "要同步的感測器",
           "climate_entities": "交由 HA 管理、允許管家操作的空調",
-          "ir_entities": "允許管家操作的電扇遙控按鈕"
+          "ir_entities": "允許管家操作的電扇遙控按鈕",
+          "sensor_mapping": "感測器配對（HB 名稱 → 讀值種類 → HA 實體 ID）",
+          "hue_groups": "交給 Home Butler 控制的 Hue 區域"
         }
       }
     },

@@ -1,4 +1,4 @@
-"""Dashboard lighting API backed by the local PC agent."""
+"""Dashboard lighting API using the explicitly selected HA or legacy PC route."""
 
 import re
 import time
@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 import lighting_auto
 import switchbot_api
-from agent_ws import send_agent_command
+from lighting_transport import send_command as send_agent_command
 from auth import verify_api_key
 from hue_area_settings import apply_area_settings, upsert_area_setting
 from sheets import RequestContext
@@ -311,6 +311,10 @@ async def api_lighting_auto_sensor_light_level(device_id: str):
     近期報過就優先回快取值（附 age_seconds 資料年齡），否則才打 status
     （雲端快取值，樣本時間未知 → age_seconds=null）。
     light_level=null 表示該設備不回報亮度（不是 Hub 2）。"""
+    import ha_sensors
+    reading = ha_sensors.by_device_id(device_id)
+    if reading is not None:
+        return {k: reading.get(k) for k in ("light_level", "source", "age_seconds")}
     cached = lighting_auto.get_cached_light_level(device_id)
     now = time.time()
     if cached and now - cached["at"] <= lighting_auto.WEBHOOK_FRESH_S:

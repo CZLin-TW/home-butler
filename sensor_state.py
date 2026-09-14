@@ -1,10 +1,10 @@
 """SwitchBot 感測器溫濕度 in-memory state + Sheet backup（解 home-butler 重啟資料遺失）。
 
-最新讀值由 sensor_polling 共用更新；回饋使用中每分鐘，一般每 5 分鐘。
+HA 管理感測器的最新值由 ha_sensors 投影；未遷移設備仍由 sensor_polling 共用更新。
 歷史由 main.py sensors 工作每 300 秒取一筆快照，與即時讀取分開。
-（不需要 PC agent，因為 SwitchBot 是 cloud API、home-butler 自己就拿得到）。
+兩條路徑均不依賴 PC agent，且同一設備不會在 HA 失聯時自動切換來源。
 
-- 啟用中、類型=感應器 的設備全部 polling
+- 啟用中、類型=感應器 的設備每五分鐘採樣；已遷移設備不重新查詢 SwitchBot
 - in-memory: dict[device_name → { meta, history_dict[int(t) → point], current, last_polled_at }]
 - Sheet「感測器歷史」分頁背景 append + 定時 trim
 - 啟動時 backfill_from_sheet() 還原 24h
@@ -108,7 +108,8 @@ def snapshot(include_history: bool = True, name: str = "") -> dict:
                 "last_polled_at": s["last_polled_at"],
                 "online": online,
             }
-    return out
+    import ha_sensors
+    return ha_sensors.overlay(out, name)
 
 
 # ── Sheet I/O ──────────────────────────────────────────

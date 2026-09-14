@@ -125,3 +125,30 @@ async def test_hub_push_between_acknowledgements_without_control_permissions():
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_environment_and_hue_work_without_climate_permissions():
+    from unittest.mock import AsyncMock
+    incoming, sent = asyncio.Queue(), asyncio.Queue()
+    class Socket:
+        async def send_json(self, frame):
+            await sent.put(frame)
+        async def receive_json(self):
+            return await incoming.get()
+    hue = AsyncMock()
+    hue.execute.return_value = {"type": "hue_result", "status": "success", "result": {}}
+    link = OutboundLink(None, "https://example.invalid", "x" * 40, lambda: [],
+                        environment=lambda: [{"kind": "temperature", "value": 26}], hue_commands=hue)
+    task = asyncio.create_task(link._serve_climates(Socket()))
+    try:
+        first = await asyncio.wait_for(sent.get(), 2)
+        assert first["environment"][0]["value"] == 26
+        assert first["climates"] == [] and link.commands is None
+        await incoming.put({"type": "snapshot_ack", "sequence": 1, "accepted": True})
+        command = {"type": "hue_command", "request_id": "a" * 32}
+        await incoming.put(command)
+        assert (await asyncio.wait_for(sent.get(), 2))["type"] == "hue_result"
+        hue.execute.assert_awaited_once_with(command)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

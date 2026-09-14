@@ -19,9 +19,9 @@ HA／Hue App／Sheet 中各條規則的即時啟用狀態仍須在實際遷移�
 
 ### 感測資料統一（優先）
 
-**證據：** `main.py` 的 sensors 工作仍每 300 秒呼叫 `sensor_polling.refresh()`，後者直接讀
-SwitchBot；`home_butler/observations.py` 與 Dashboard `lib/home-assistant.ts` 目前只接受存在與 lux。
-因此 HA 的每分鐘更新不會自動變成 Dashboard 原有溫濕度卡片的每分鐘資料。
+**v1.51.0 進度：** 已新增 `environment` 通道、HA registry 配對及 `ha_sensors` 即時投影。
+`HOME_ASSISTANT_SENSOR_NAMES` 決定逐台停用直接讀取，五分鐘工作改採 HA 快照留歷史。
+安裝、切換與驗收見 [操作文件](../homeassistant/sensors-and-hue.md)；以下是驗收要求，家庭啟用狀態見 verification。
 
 - 擴充明確選取的溫度、濕度、CO₂（來源支援時）與 Hub 光照等級；光照等級獨立型別，不冒充 lux。
 - HA registry ID 對應 HB 既有設備名稱，保留改名、未知／離線、单位與資料時間語意。
@@ -32,8 +32,9 @@ SwitchBot；`home_butler/observations.py` 與 Dashboard `lib/home-assistant.ts` 
 
 ### Hue 控制統一（優先）
 
-**證據：** Hue 已加入 HA 並由使用者確認可控制，但 `lighting_api.py` 全部照明動作、
-`lighting_auto.py` 及既有通知仍經 `agent_ws` 的 Hue capability。HA transport 尚無燈光命令能力。
+**v1.51.0 進度：** `lighting_transport` 統一照明入口，新增 HA `hue_control` 與本地選定區域。
+`HOME_ASSISTANT_HUE_ENABLED` 開啟後，待辦燈光提醒也由 HB 經 HA 執行，舊 PC queue 回空。
+未啟用時保留舊通道；家庭切換／硬體驗收結果見 verification，以下限制仍須遵守。
 
 - 擴充受限 HA 燈光／場景能力，逐區域設定控制權；不要開放任意 HA service call。
 - 對照 Dashboard 現有功能：區域開關、亮度、場景、動態場景、效果、通知閃燈／呼吸、顯示名稱。

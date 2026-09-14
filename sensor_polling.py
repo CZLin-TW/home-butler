@@ -22,6 +22,13 @@ def refresh(row):
     id, name = row.get("Device ID"), row.get("名稱")
     if not id or not name or row.get("類型") != "感應器" or row.get("狀態") != "啟用":
         return {"error": "invalid sensor"}
+    import ha_sensors
+    if ha_sensors.managed(name):
+        result = ha_sensors.reading(row)
+        if all(result.get(k) is None for k in ("temperature", "humidity", "co2")):
+            return {"error": "HA sensor unavailable"}
+        sensor_state.update_current(name, row.get("位置", ""), result["temperature"], result["humidity"], result["co2"])
+        return result
     with _guard:
         lock = _locks.setdefault(id, Lock())
     with lock:

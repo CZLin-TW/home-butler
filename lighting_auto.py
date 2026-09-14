@@ -3,7 +3,8 @@
 每個 Hue 區域可獨立設定一條規則：光感應器（SwitchBot Hub 2 的 lightLevel
 1~20）+ 亮度門檻 + 觸發場景 + 開燈亮度（1~100）+ 啟用時段（支援跨午夜）。
 
-評估路徑兩條：
+HA 管理的感測器只接受已驗證 HA 快照變更，五分鐘 tick 也讀同一份快照。
+未遷移感測器的評估路徑兩條：
 - SwitchBot Webhook（主）：Hub 2 任一數值（溫度/濕度/亮度）變化都會推
   changeReport、皆附當下 lightLevel → 收到就評估，秒級反應。
 - 5min polling tick（輔）：處理時段開始（主動拉一次 status 評估）、時段結束
@@ -36,7 +37,7 @@
 Rule 設定持久化在 Sheet「照明自動規則」分頁；runtime state（window_active /
 last_light_level）只放 in-memory，重啟歸零，由下個 tick 重建。
 
-Hue 指令走 agent WebSocket（async），這裡的呼叫端是 sync thread（polling
+Hue 指令走 lighting_transport 選定的 HA／legacy WebSocket，這裡的呼叫端是 sync thread（polling
 thread / webhook 衍生 thread），用 run_coroutine_threadsafe 橋接——startup
 時 main.py 必須先呼叫 set_event_loop()。
 """
@@ -49,7 +50,7 @@ from datetime import datetime
 from threading import Lock
 
 import switchbot_api
-from agent_ws import send_agent_command
+from lighting_transport import send_command as send_agent_command
 from config import now_taipei
 from sheets import append_record, get_or_create_sheet, update_row_fields
 
@@ -145,7 +146,11 @@ def _agent_command(command_type, payload) -> dict:
         send_agent_command(command_type, payload, required_capability="hue", timeout=20.0),
         _loop,
     )
-    message = future.result(timeout=25.0)
+    try:
+        message = future.result(timeout=28.0)
+    except TimeoutError:
+        future.cancel()
+        raise
     if message.get("status") != "ok":
         raise RuntimeError(message.get("error") or "Hue command failed")
     result = message.get("result")
@@ -320,8 +325,16 @@ def _evaluate_rule(area_id, rule, light_level, source):
             print(f"[light-auto] {label} 關燈失敗: {e}")
 
 
-def on_light_report(device_id, light_level):
+def on_light_report(device_id, light_level, *, ha_source=False):
     """Webhook 主路徑：Hub 2 changeReport 進來呼叫。Sync、可在任意 thread 跑。"""
+    import ha_sensors
+    reading = ha_sensors.by_device_id(device_id)
+    if reading is not None:
+        if not ha_source:
+            return  # Unsigned webhook is only a refresh hint for migrated sensors.
+        light_level = reading.get("light_level")
+    elif ha_source:
+        return
     light_level = _int(light_level, None)
     if light_level is None:
         return
@@ -345,7 +358,7 @@ def on_light_report(device_id, light_level):
             continue   # 時段外不動作；時段結束的關燈交給 polling tick
         with _lock:
             _runtime[area_id]["window_active"] = True
-        _evaluate_rule(area_id, rule, light_level, "webhook")
+        _evaluate_rule(area_id, rule, light_level, "home_assistant" if ha_source else "webhook")
 
 
 def tick():
@@ -387,8 +400,12 @@ def tick():
             if not sensor_id:
                 continue
             if sensor_id not in levels:
+                import ha_sensors
+                reading = ha_sensors.by_device_id(sensor_id)
                 cached = get_cached_light_level(sensor_id)
-                if cached and time.time() - cached["at"] <= WEBHOOK_FRESH_S:
+                if reading is not None:
+                    levels[sensor_id] = reading.get("light_level")
+                elif cached and time.time() - cached["at"] <= WEBHOOK_FRESH_S:
                     # webhook 剛報過 → 比 status 雲端快取新鮮，且省一次 API 呼叫
                     levels[sensor_id] = cached["level"]
                 else:
@@ -420,7 +437,10 @@ def _probe_and_evaluate(area_id):
         rule = dict(_rules.get(area_id) or {})
     if not rule.get("enabled") or not _in_window(rule, now_taipei()):
         return
-    status = switchbot_api.get_device_status(str(rule.get("sensor_device_id") or ""))
+    import ha_sensors
+    sensor_id = str(rule.get("sensor_device_id") or "")
+    reading = ha_sensors.by_device_id(sensor_id)
+    status = {"lightLevel": reading.get("light_level")} if reading is not None else switchbot_api.get_device_status(sensor_id)
     light = _int(
         status.get("lightLevel") if isinstance(status, dict) and "error" not in status else None,
         None,

@@ -1,5 +1,14 @@
 # 接手入口
 
+v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md)。
+`HOME_ASSISTANT_SENSOR_NAMES` 按名稱指定唯一 HA 即時來源；`ha_sensors` 套原 Sheet 補償一次，
+五分鐘歷史保持，不可在 HA 失聯時 fallback 雲端或把 1–20 光照等級當 lux。
+`HOME_ASSISTANT_HUE_ENABLED` 將所有照明入口切到 `lighting_transport`，HA 本機選定 Hue 區域。
+Hue 沿用原生 aiohue 4.9.0 公開連線；不得抄金鑰、任意 URL／service、未知結果換 payload 重試。
+`hue_model` 是 legacy agent 純呈現投影的相容副本，修改需同步契約／測試，不可 import PC agent。
+HA Hue 啟用時 legacy 待辦燈光 queue 必須為空；`lighting_reminders` 每分鐘執行，不傳私人待辦到 HA。
+生產切換狀態以 verification 紀錄為準，不能由合併／CI 推定已安裝。Theater／除濕機控制不在本次遷移。
+
 v1.50.0：Hub 2 Push 見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
 Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 Hub 的刷新提示。
 無簽章 payload 不能寫進 HA 狀態；值只能來自 native authenticated refresh，新增事件 I/O 是明確需求。
