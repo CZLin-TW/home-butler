@@ -27,7 +27,7 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   狀態                str   "啟用" | "停用"
   溫度補償            float 感測器溫度 offset，會加到讀值上（負值=讀數偏高）
   濕度補償            float 感測器濕度 offset，clamp 到 [0,100]
-  自動關機小時數      int   AC 自動關機 timer，0 = 停用
+  自動關機小時數      int   AC 自動關機 timer，0 = 停用；Dashboard 可設 0–168，HA 空調由 HB 觀察計時
   最後電源            str   "on" | "off" | ""（AC 用，由 handlers/device.py 維護）
   最後溫度            int   16~30
   最後模式            str   "自動" | "冷氣" | "除濕" | "送風" | "暖氣"

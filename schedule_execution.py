@@ -58,11 +58,14 @@ def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, an
             from ha_climate import managed
             if row.get("動作") == "control_ac":
                 ha_managed = managed(device_name)
-                ha_manual = row.get("來源") == HA_MANUAL_SOURCE
+                from ac_auto_off import SOURCE, dispatch_allowed
+                ha_manual = row.get("來源") in (HA_MANUAL_SOURCE, SOURCE)
                 if ha_managed != ha_manual:
                     update_fields(sheet, row_number, {"狀態": "已取消", RESULT_COLUMN: "空調控制來源已變更或為舊排程；請確認設備後重新建立手動排程"})
                     processed.add(device_name)
                     continue
+                if row.get("來源") == SOURCE and not dispatch_allowed(row, ctx, [r for _, r in live]):
+                    continue  # Offline/unknown is not permission to send or rearm.
             if (now - trigger).total_seconds() > 7200 and row.get("來源") != antimold_source:
                 update_fields(sheet, row_number, {"狀態": "已過期"})
                 processed.add(device_name)
@@ -99,6 +102,7 @@ def execute_pending(now, ctx, *, tz, handlers, ensure_columns, update_fields, an
                         if not exists:
                             outcome = CommandResult.failed("找不到啟用中的排程設備，未送出指令。")
                         else:
+                            params = {k: v for k, v in params.items() if not k.startswith("_auto_")}
                             params["device_name"] = device_name
                             kwargs = {"from_auto_schedule": row.get("來源") == "自動"} if action == "control_ac" else {}
                             outcome = handler(params, ctx, **kwargs)

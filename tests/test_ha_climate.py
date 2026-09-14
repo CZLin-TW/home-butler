@@ -17,6 +17,12 @@ AC = {"id": "c" * 32, "entity_id": "climate.living", "name": "客廳空調",
 
 class HaClimateTests(unittest.TestCase):
     def test_manual_schedule_dispatch_reaches_real_ha_websocket_without_legacy(self):
+        self._schedule_dispatch()
+
+    def test_automatic_schedule_dispatch_reaches_real_ha_websocket_without_legacy(self):
+        self._schedule_dispatch(automatic=True)
+
+    def _schedule_dispatch(self, automatic=False):
         from datetime import datetime, timezone
         import ac_feedback
         from schedule_execution import execute_pending, HA_MANUAL_SOURCE
@@ -24,6 +30,10 @@ class HaClimateTests(unittest.TestCase):
         sheet = Sheet([schedule(**{"設備名稱": AC["name"], "來源": HA_MANUAL_SOURCE})])
         ctx = Context(sheet)
         ctx.data["智能居家"] = [{"名稱": AC["name"], "類型": "空調", "狀態": "啟用"}]
+        if automatic:
+            from ac_auto_off import SOURCE, HOURS_COLUMN
+            sheet.rows[0].update({"來源": SOURCE, "參數": json.dumps({"power":"off", "_auto_hours":3})})
+            ctx.data["智能居家"][0][HOURS_COLUMN] = 3
         legacy = Mock(side_effect=AssertionError("Must not use direct IR"))
         def tick():
             return execute_pending(datetime(2026, 9, 6, 12, 5, tzinfo=timezone.utc), ctx,

@@ -315,6 +315,7 @@ def _archive_processed_schedules(processed_devices, ctx):
       1. 多次 get_all_records 之間外部來源（LINE bot 同時操作）造成索引不一致
       2. 邊刪邊讀導致 row 偏移
     """
+    from ac_auto_off import keep_cycle, SOURCE
     if not processed_devices:
         return
 
@@ -328,7 +329,8 @@ def _archive_processed_schedules(processed_devices, ctx):
         if any(r.get("狀態") == "待執行" for r in device_records):
             continue  # 還有排程，這台先不封存
         for i, r in enumerate(current_records):
-            if r.get("設備名稱") == device_name and r.get("狀態") in ("已執行", "已過期"):
+            eligible = r.get("狀態") in ("已執行", "已過期") or (r.get("來源") == SOURCE and r.get("狀態") == "已取消")
+            if r.get("設備名稱") == device_name and eligible and not keep_cycle(r):
                 rows_to_archive.append((i + 2, r))  # +2: header row + 0-index
 
     if rows_to_archive:
@@ -340,8 +342,12 @@ def _archive_processed_schedules(processed_devices, ctx):
 
 
 def run_schedule_tick(ctx, now=None):
-    with _schedule_cycle_lock:
-        processed = _execute_pending_schedules(now or now_taipei(), ctx)
+    import ac_auto_off
+    with _schedule_cycle_lock, ac_auto_off.LOCK:
+        ctx.load(["智能居家", "排程指令"])
+        when = now or now_taipei()
+        processed = ac_auto_off.reconcile(ctx, when)
+        processed |= _execute_pending_schedules(when, ctx)
         _archive_processed_schedules(processed, ctx)
 
 

@@ -34,6 +34,8 @@ from web_api import router as web_api_router
 app.include_router(web_api_router)
 from ac_feedback_api import router as ac_feedback_router
 app.include_router(ac_feedback_router)
+from ac_auto_off_api import router as ac_auto_off_router
+app.include_router(ac_auto_off_router)
 
 # A separate router prevents the restricted key from entering the owner API.
 from device_voice_api import router as device_voice_router
@@ -239,7 +241,7 @@ def _on_startup():
     jobs.add("ac-temperature-feedback", 60, sensor_polling.feedback_tick)
     import lighting_reminders
     jobs.add("lighting-reminders", 60, lighting_reminders.tick)
-    jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, ["智能居家", "排程指令"]))
+    jobs.add("schedules", 60, lambda: _with_context(notify.run_schedule_tick, []))
     jobs.add("notion", 300, lambda: _with_context(notify.sync_external_events, ["家庭成員"]))
     jobs.add("todo-reminders", 300, lambda: _with_context(notify.run_todo_tick))
     jobs.add("daily-push", 300, lambda: _with_context(notify.run_daily_push_if_due))

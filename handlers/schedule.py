@@ -138,6 +138,9 @@ def handle_modify_schedule(data, user_name, ctx):
         return "❌ 找不到符合條件的排程"
 
     old_action = target_row.get("動作", "")
+    from ac_auto_off import keep_cycle
+    if keep_cycle(target_row):
+        return "❌ 請在空調的自動關機設定調整時數或停用"
     from ha_climate import managed
     ha_manual = (new_action or old_action) == "control_ac" and managed(new_device or device_name)
     if ha_manual and target_row.get("來源") not in ("使用者", HA_MANUAL_SOURCE):
@@ -199,6 +202,9 @@ def handle_delete_schedule(data, ctx):
         return "❌ 找不到符合條件的排程"
 
     any_user_ac_deleted = False
+    from ac_auto_off import keep_cycle
+    if any(keep_cycle(row) for _, row in matches):
+        return "❌ 請在空調的自動關機設定停用；本次計時紀錄不可直接移除"
     # 倒序刪，避免刪一列後其餘列號位移。封存內容直接用即時讀到的 row。
     for row_number, row in sorted(matches, key=lambda x: x[0], reverse=True):
         # 記錄是否刪到了使用者手動設的 AC 排程 → 決定之後要不要重算 auto
