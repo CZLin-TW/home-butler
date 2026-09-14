@@ -1,5 +1,8 @@
 # 三個 repo 的系統導覽
 
+架構為何長成這樣（環境式 Siri → FP2 → Aqara 實名制 → 只剩 HomeKit → 需要本地橋接）見
+[動機與限制](why-home-assistant.md)。
+
 後續工作與驗收缺口見 [2026-09-14 HA 遷移盤點](ha-migration-audit.md)。
 新建置先讀 [README](../Readme.md)，設定／API 見 [後端參考](backend-guide.md)。
 不裝 HA 或固定 v1.44.0 的成套 SHA 與指令見 [版本選擇](version-selection.md)。

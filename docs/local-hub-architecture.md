@@ -1,5 +1,8 @@
 # 家庭中樞架構與遷移順序
 
+**為什麼是 HA、而不是繼續用 Homebridge，見 [動機與限制](why-home-assistant.md)。**
+那條推導鏈不在程式碼裡，簡化架構前先讀。
+
 2026-09-14 現況與待辦以 [HA 遷移盤點](ha-migration-audit.md) 為準。
 
 v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
