@@ -57,7 +57,14 @@ Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，�
 ### 劇院中繼
 
 `THEATER_VIA_HA=true` 時 `theater_api.py` 改走 HA（`home_assistant_api.link.theater_command`），
-否則走 PC agent。兩條的回傳形狀相同，Dashboard 契約不變。
+否則走 PC agent。兩條的回傳**欄位相同，但 `agent_id` 不同**：PC agent 那條回該台的 hostname，
+HA 那條固定回 `home_assistant`。Dashboard 用 `agent_id` 決定劇院卡掛在哪張電腦卡上，所以這
+不是純粹的內部差異——v1.57.0 切換時整個劇院區塊因此消失（Dashboard 1.58.1 才修好，見該 repo
+的 AGENTS）。改動 `agent_id` 語意前先確認 Dashboard 那端。
+
+`link.snapshot()` 的 **`theater_available`** 表示 HA 已宣告 `theater_relay` 且連線在線。
+**切換 `THEATER_VIA_HA` 前先看這個值**：這條路徑刻意不 fallback，設定沒做好的話開了旗標
+才會發現，而症狀是劇院整區失效。
 
 **HA 那條走獨立的 in-flight 車道**（`theater_pending`，不是 `pending`）。這不是潔癖：
 `/api/theater/summary` 每次開裝置頁就打一次，而 HA 端對同一車道的並發指令會丟

@@ -472,6 +472,10 @@ class LinkState:
             return {"configured": configured, "connected": self.socket is not None, "online": online,
                     "received_at": self.received_at, "age_seconds": age, "stale_after_seconds": STALE_SECONDS,
                     "hue_available": online and self.hue_capable,
+                    # Exposed so the theater relay can be verified before THEATER_VIA_HA
+                    # is switched on; without it a misconfigured relay only shows up as
+                    # the Dashboard theater card failing after the flag is already live.
+                    "theater_available": online and self.theater_capable,
                     "observations": [{**item, "available": online and item["available"],
                                       "value": item["value"] if online and item["available"] else None}
                                      for item in self.observations],

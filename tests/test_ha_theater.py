@@ -73,6 +73,17 @@ class HaTheaterTests(unittest.TestCase):
                               "status": "success", "result": SUMMARY})
                 self.assertEqual(first.result(5)["status"], "success")
 
+    def test_snapshot_reports_whether_the_relay_is_usable(self):
+        """Checkable before THEATER_VIA_HA is switched on, not only after."""
+        with self.client.websocket_connect("/api/home-assistant/ws") as ws:
+            self.connect(ws)
+            self.assertTrue(self.api.link.snapshot()["theater_available"])
+        # A dropped link makes the relay unusable even though HA declared it.
+        self.assertFalse(self.api.link.snapshot()["theater_available"])
+        with self.client.websocket_connect("/api/home-assistant/ws") as ws:
+            self.connect(ws, theater=False)
+            self.assertFalse(self.api.link.snapshot()["theater_available"])
+
     def test_relay_unavailable_without_the_capability(self):
         with self.client.websocket_connect("/api/home-assistant/ws") as ws:
             self.connect(ws, theater=False)
