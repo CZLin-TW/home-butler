@@ -4,14 +4,16 @@
     "step": {
       "user": {
         "title": "加入 Hub 2 光照等級",
-        "description": "選取各 Hub 2 原生溫度實體以辨識裝置。沿用 SwitchBot Cloud 的更新資料，不增加 API 查詢。光照為 1～20 級，不是 lux；資料缺失顯示未知。",
+        "description": "選取 Hub 2 原生溫度實體。溫度、濕度與光照共用原生查詢；Push 保留，備援更新預設 60 秒。請停用舊的每分鐘更新自動化，避免重複查詢。光照為 1～20 級，不是 lux。",
         "data": {
-          "hub_sensors": "Hub 2 溫度實體"
+          "hub_sensors": "Hub 2 溫度實體",
+          "poll_interval": "備援更新間隔（秒，60～3600）"
         }
       }
     },
     "error": {
-      "invalid_source": "請選取已載入的原生 SwitchBot Cloud Hub 2 溫度實體，不可重複。"
+      "invalid_source": "請選取已載入的原生 SwitchBot Cloud Hub 2 溫度實體，不可重複。",
+      "invalid_poll_interval": "請輸入 60～3600 的整數秒數。"
     },
     "abort": {
       "already_configured": "已設定此整合，請用設定選項調整 Hub 2 清單。"
@@ -21,14 +23,16 @@
     "step": {
       "init": {
         "title": "選取 Hub 2",
-        "description": "保留想顯示光照等級的 Hub 2；不改動原有溫度、濕度或空調。",
+        "description": "選取 Hub 2 原生溫度實體。溫度、濕度與光照共用原生查詢；Push 保留，備援更新預設 60 秒。請停用舊的每分鐘更新自動化，避免重複查詢。光照為 1～20 級，不是 lux。",
         "data": {
-          "hub_sensors": "Hub 2 溫度實體"
+          "hub_sensors": "Hub 2 溫度實體",
+          "poll_interval": "備援更新間隔（秒，60～3600）"
         }
       }
     },
     "error": {
-      "invalid_source": "請選取已載入的原生 SwitchBot Cloud Hub 2 溫度實體，不可重複。"
+      "invalid_source": "請選取已載入的原生 SwitchBot Cloud Hub 2 溫度實體，不可重複。",
+      "invalid_poll_interval": "請輸入 60～3600 的整數秒數。"
     }
   }
 }

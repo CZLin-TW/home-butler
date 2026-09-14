@@ -2,15 +2,18 @@
 from homeassistant.const import Platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from .push import PushRefresh, UPDATE_SIGNAL, SOURCES_SIGNAL
+from .const import DEFAULT_POLL_INTERVAL
 
 DOMAIN = "switchbot_hub_light"
 
 
 async def async_setup_entry(hass, entry):
-    manager = PushRefresh(hass, entry.options.get("sources", entry.data["sources"]))
+    manager = PushRefresh(hass, entry.options.get("sources", entry.data["sources"]),
+                          entry.options.get("poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)))
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = manager
     entry.async_on_unload(async_dispatcher_connect(hass, UPDATE_SIGNAL, manager.receive))
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    manager.start()
     async_dispatcher_send(hass, SOURCES_SIGNAL)
     entry.async_on_unload(entry.add_update_listener(reload_entry))
     return True

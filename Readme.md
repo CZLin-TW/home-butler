@@ -5,7 +5,7 @@ v1.51.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md) 提供明�
 設定及實際啟用紀錄請看連結與驗證文件；未切換設備保持原路徑。
 
 v1.50.0：[Hub 2 光照與 Push](homeassistant/hub-light.md) 將既有 SwitchBot Webhook 通知轉送 HA，
-提前觸發原生 API 讀取，溫度／濕度／光照一起更新。1～20 級不是 lux；保留 10 分鐘輪詢備援。
+提前觸發原生 API 讀取，溫度／濕度／光照一起更新。1～20 級不是 lux；光照整合 1.2.0 內建備援更新，預設 60 秒，可在 HA 設為 60～3600 秒；安裝後停用原每分鐘更新自動化。
 
 v1.48.0：[電扇遙控按鈕](homeassistant/ir-buttons.md) 可在 HA 操作電源／風速＋／風速－，
 並將 Dashboard／LINE 的選定電扇改走 HA。沿用原生 SwitchBot 連線，不新增金鑰；IR 無實體狀態回讀。

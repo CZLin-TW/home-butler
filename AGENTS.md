@@ -1,5 +1,10 @@
 # 接手入口
 
+v1.52.0／switchbot_hub_light 1.2.0：Hub 備援查詢由整合管理，預設 60 秒、可設 60–3600 整數秒。
+Push 與定時刷新共用單台工作／原生 coordinator；請求結束後延後該台的下一次輪詢，保留最後一筆提示。
+不 monkey patch core、不取出憑證、不新增 HB 查詢；Render 斷線仍能輪詢。卸載／options reload 清理計時與 pending。
+家庭安裝後停用舊自動化 1789319755253，尚未操作前不可記成已停用。詳見光照文件及 verification。
+
 v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md)。
 `HOME_ASSISTANT_SENSOR_NAMES` 按名稱指定唯一 HA 即時來源；`ha_sensors` 套原 Sheet 補償一次，
 五分鐘歷史保持，不可在 HA 失聯時 fallback 雲端或把 1–20 光照等級當 lux。
@@ -15,7 +20,7 @@ Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 
 保留訂閱白名單、事件時間驗證、合併最後一筆、舊版 capability 相容、卸載與斷線清理測試。
 既有 HB 夜燈本來就走 Webhook；不搶占 URL、不新增 HA 夜燈規則。
 家庭 HA 另有「Hub 2 每分鐘更新感測資料」自動化（1789319755253），每台只刷新一個原生溫度實體。
-它保留 Push，整合預設仍 10 分鐘；勿再新增重複輪詢工作。設定與還原見同一份光照文件。
+這是 1.1.0 的家庭備援設定；1.2.0 以整合內計時取代，切換時停用這條自動化。設定與還原見同一份光照文件。
 
 v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
 原 switchbot_hub_light 1.0.0 僅共享原生 SwitchBot Cloud coordinator 的 lightLevel，不新增 I/O、

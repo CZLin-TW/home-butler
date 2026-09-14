@@ -7,7 +7,7 @@
 
 HA → 既有 outbound WSS → HB 即時快照 → Dashboard、查詢及除濕控制。
 HB 每五分鐘從同一份快照取一筆歷史，保留原 Sheet 名稱、補償、24 小時曲線與歷史回填。
-不新增 HA 感測輪詢：沿用原生整合、Hub Push 刷新及家庭現有每分鐘更新自動化。
+感測同步本身不新增輪詢；Hub 沿用原生連線、Push 刷新與 switchbot_hub_light 1.2.0 內建備援更新（預設 60 秒），取代家庭每分鐘更新自動化。
 
 在 HA「設定 → 裝置與服務 → Home Butler → 設定」填寫「感測器配對」。例如：
 
@@ -70,7 +70,7 @@ Hue App 的「喚醒自動化」不等於可呼叫場景，本 adapter 不讀取
 ## 部署、驗收與還原
 
 1. 先部署後端且確認 CI（包含 Linux 真 HA framework）通過；切換環境變數先保留未啟用。
-2. 以 `install.sh <完整 commit SHA> home_butler` 更新 HA，重啟後設定感測配對及 Hue 區域。
+2. 以 `install.sh <完整 commit SHA> home_butler` 及 `install.sh <完整 commit SHA> switchbot_hub_light` 安裝兩個整合，再重啟一次。確認 Hub 設定為 60 秒並停用舊每分鐘更新自動化；設定感測配對及 Hue 區域。
 3. 從 owner `/api/home-assistant/observations` 確認 environment 的配對／值／可用性，以及 hue_available。
 4. 再啟用 Render 的兩個切換設定。Dashboard 照明連線來源會顯示 Home Assistant。
 5. 對照 HA、Dashboard 的溫濕度／CO₂／光照，確認歷史續接；測試 Hue 開關、亮度、場景、效果、通知及人工調光。

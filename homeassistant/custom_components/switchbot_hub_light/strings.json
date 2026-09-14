@@ -4,14 +4,16 @@
     "step": {
       "user": {
         "title": "Add Hub 2 light levels",
-        "description": "Select native Hub 2 temperature entities to identify the devices. Reuses existing SwitchBot Cloud samples with no additional API requests. Light is a 1–20 level, not lux; missing data stays unknown.",
+        "description": "Select native Hub 2 temperature entities. Temperature, humidity and light share one native read. Push remains enabled; backup refresh defaults to 60 seconds. Disable any previous refresh automation to avoid duplicate requests. Light is a 1–20 level, not lux.",
         "data": {
-          "hub_sensors": "Hub 2 temperature entities"
+          "hub_sensors": "Hub 2 temperature entities",
+          "poll_interval": "Backup refresh interval (seconds, 60–3600)"
         }
       }
     },
     "error": {
-      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices."
+      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices.",
+      "invalid_poll_interval": "Enter a whole number of seconds from 60 to 3600."
     },
     "abort": {
       "already_configured": "Already configured. Use options to change the selected hubs."
@@ -21,14 +23,16 @@
     "step": {
       "init": {
         "title": "Select Hub 2 devices",
-        "description": "Select hubs to expose their light levels. Existing temperature, humidity and AC entities are unchanged.",
+        "description": "Select native Hub 2 temperature entities. Temperature, humidity and light share one native read. Push remains enabled; backup refresh defaults to 60 seconds. Disable any previous refresh automation to avoid duplicate requests. Light is a 1–20 level, not lux.",
         "data": {
-          "hub_sensors": "Hub 2 temperature entities"
+          "hub_sensors": "Hub 2 temperature entities",
+          "poll_interval": "Backup refresh interval (seconds, 60–3600)"
         }
       }
     },
     "error": {
-      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices."
+      "invalid_source": "Select distinct native temperature entities from loaded SwitchBot Cloud Hub 2 devices.",
+      "invalid_poll_interval": "Enter a whole number of seconds from 60 to 3600."
     }
   }
 }
