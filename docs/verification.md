@@ -1,9 +1,16 @@
 # 驗證方式與範圍
 
 2026-09-14 v1.52.0／switchbot_hub_light 1.2.0：內建可設定 60～3600 秒的備援更新，預設 60 秒。
-定时／Push 共用工作，新增週期、合併、失敗恢復、卸載與選項重載測試；結果待本次 CI 補記。
+定時／Push 共用工作，新增週期、合併、失敗恢復、卸載與選項重載測試。
+`c6f00ce9d941ae4377c316a4156dc67a3569576f` 的 [CI](https://github.com/CZLin-TW/home-butler/actions/runs/34813483894)
+全部通過：211 項後端測試、HA Core 2026.9.2／Python 3.14 的 53 項框架測試及 Homebridge 測試。
+Dashboard `ea5cb72106369fa65fa0ae248d1500c2da18bee7` 的 [CI](https://github.com/CZLin-TW/Dashboard/actions/runs/34813495573)
+測試／lint／build 與 Vercel 部署成功，公開 `/api/version` 已實際確認 1.52.0。
+Render 公開健康頁回 200，但沒有取得本次 runtime SHA，因此尚未確認最新程序部署。
 使用者同意與感測器／Hue 統一一起上線，實體操作留待使用者稍後測試。
-目前 Chrome 尚未連線，家庭 HA 安裝、旧定時自動化停用與來源切換仍待執行，不能標示已完成。
+目前 Chrome 尚未連線，家庭 HA 安裝、舊定時自動化停用與來源切換仍待執行，不能標示已完成。
+可使用上述完整測試 SHA 一起安裝 `home_butler` 1.4.0 與 `switchbot_hub_light` 1.2.0，再重啟一次。
+後續設定步驟見 [感測器與 Hue 統一](../homeassistant/sensors-and-hue.md)；不必再向使用者要求實機測試後才部署。
 
 2026-09-14 v1.51.0／home_butler 1.4.0：新增感測環境快照與 Hue 選定區域控制通道。
 本機 211 項後端離線測試通過，新增 HA 來源失聯／補償一次／歷史保留、光照型別、Hue 分流與提醒去重。
