@@ -1,0 +1,62 @@
+{
+  "title": "Theater Agent",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Theater Agent",
+        "description": "Reads existing settings without changing flags during setup or restart. In a HA VM, use the host LAN address, for example http://192.168.68.55:8080.",
+        "data": {
+          "url": "Theater Agent address",
+          "api_key": "Theater Agent API key"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Theater Agent",
+        "description": "Reads existing settings without changing flags during setup or restart. In a HA VM, use the host LAN address, for example http://192.168.68.55:8080.",
+        "data": {
+          "url": "Theater Agent address",
+          "api_key": "Theater Agent API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Check the Theater Agent key.",
+      "cannot_connect": "Cannot read valid state. Check the address, network and agent.",
+      "invalid_input": "Enter an HTTP(S) origin and key, without a path."
+    },
+    "abort": {
+      "already_configured": "Theater Agent is already configured.",
+      "reauth_successful": "Authentication updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Theater Agent",
+        "description": "Reads existing settings without changing flags during setup or restart. In a HA VM, use the host LAN address, for example http://192.168.68.55:8080.",
+        "data": {
+          "url": "Theater Agent address",
+          "api_key": "Theater Agent API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Check the Theater Agent key.",
+      "cannot_connect": "Cannot read valid state. Check the address, network and agent.",
+      "invalid_input": "Enter an HTTP(S) origin and key, without a path."
+    }
+  },
+  "entity": {
+    "switch": {
+      "kef_link": {
+        "name": "KEF power link"
+      },
+      "tv_screen_auto": {
+        "name": "TV screen auto restore"
+      },
+      "tv_avr_sync": {
+        "name": "TV and AVR power sync"
+      }
+    }
+  }
+}

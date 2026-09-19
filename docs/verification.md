@@ -1,5 +1,10 @@
 # 驗證方式與範圍
 
+2026-09-19 HA 本地劇院開關（部署前分支）：新增 `theater_agent` 1.0.0 與 Home Butler 1.7.0。
+本機後端 217 項離線測試及 HA 程式／測試語法編譯通過。真實 HA framework 測試待執行，
+案例位於 `homeassistant/tests/test_theater_agent.py`，Agent I/O 全部模擬。
+未更新家庭 HA、未變更 Render 旗標、未操作實體家電；正式切換順序見 [部署說明](../homeassistant/theater-agent.md)。
+
 2026-09-14 v1.57.0：時數僅由 Sheet 管理，Dashboard 使用原排程區編輯／刪除自動產生的本輪排程。
 238 項後端測試與 34 項 Dashboard 測試、lint、正式 build 通過；涵蓋編輯後重啟保留、刪除不補回、off 清理不碰未來手動排程、改成 on 保留、未知不重送及舊 paused 相容。
 封存測試確認已關閉 cycle 可清理而不等待同設備的未來手動排程；舊設定 POST 回 410 且不讀寫 Sheet。

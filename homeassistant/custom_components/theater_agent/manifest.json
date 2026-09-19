@@ -1,0 +1,12 @@
+{
+  "domain": "theater_agent",
+  "name": "Theater Agent",
+  "version": "1.0.0",
+  "codeowners": ["@CZLin-TW"],
+  "config_flow": true,
+  "single_config_entry": true,
+  "documentation": "https://github.com/CZLin-TW/home-butler/blob/main/homeassistant/theater-agent.md",
+  "issue_tracker": "https://github.com/CZLin-TW/home-butler/issues",
+  "iot_class": "local_polling",
+  "requirements": []
+}

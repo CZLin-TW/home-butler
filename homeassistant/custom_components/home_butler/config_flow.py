@@ -6,7 +6,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_THEATER_KEY, CONF_THEATER_URL, CONF_URL, DOMAIN
+from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_THEATER_ENTRY, CONF_THEATER_KEY, CONF_THEATER_URL, CONF_URL, DOMAIN
 from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
 from .climates import select_climates
@@ -91,16 +91,31 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                 groups = await select_groups(self.hass, user_input.get("hue_groups", entry.options.get("hue_groups", [])), entry.options.get("hue_groups", []))
                 theater_url = str(user_input.get(CONF_THEATER_URL, "")).strip()
                 theater_key = str(user_input.get(CONF_THEATER_KEY, "")).strip()
-                if theater_url:
+                theater_entry = user_input.get(CONF_THEATER_ENTRY, entry.options.get(CONF_THEATER_ENTRY, ""))
+                if theater_entry:
+                    local_entry = self.hass.config_entries.async_get_entry(theater_entry)
+                    if local_entry is None or local_entry.domain != "theater_agent":
+                        raise ValueError("Select a local Theater Agent integration")
+                    # One control path. Never retain hidden legacy credentials
+                    # that could silently become active after deselection.
+                    theater_url = theater_key = ""
+                elif theater_url:
                     theater_url = normalize_theater_url(theater_url)
                     if not theater_key:
                         raise ValueError("Theater key required")
                 return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups,
+                                                               CONF_THEATER_ENTRY: theater_entry,
                                                                CONF_THEATER_URL: theater_url, CONF_THEATER_KEY: theater_key if theater_url else ""})
             except ValueError:
                 errors["base"] = "invalid_input"
         sources = entry.options.get(CONF_SOURCES, entry.data.get(CONF_SOURCES, []))
         hue_options = await group_options(self.hass, entry.options.get("hue_groups", []))
+        theater_options = [{"value": "", "label": "不使用本地劇院整合 / No local integration"}]
+        theater_options += [{"value": item.entry_id, "label": item.title}
+                            for item in self.hass.config_entries.async_entries("theater_agent")]
+        selected_theater = entry.options.get(CONF_THEATER_ENTRY, "")
+        if selected_theater and not any(item["value"] == selected_theater for item in theater_options):
+            theater_options.append({"value": selected_theater, "label": "原劇院整合已移除 / Removed integration"})
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
             vol.Optional(CONF_EXPORT, default=current_entity_ids(self.hass, sources)): export_selector(),
             vol.Optional("sensor_mapping", default=current_mapping(self.hass, entry.options.get("environment", []))): selector.ObjectSelector(),
@@ -114,4 +129,6 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                     {"domain": "button", "integration": "switchbot_ir_buttons"}])),
             vol.Optional(CONF_THEATER_URL, default=entry.options.get(CONF_THEATER_URL, "")): str,
             vol.Optional(CONF_THEATER_KEY, default=entry.options.get(CONF_THEATER_KEY, "")): password(),
+            vol.Optional(CONF_THEATER_ENTRY, default=selected_theater):
+                selector.SelectSelector(selector.SelectSelectorConfig(options=theater_options)),
         }), errors=errors)

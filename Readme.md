@@ -103,7 +103,7 @@ IR 的「最後指令」不等於設備真實狀態，API 成功也不代表硬�
 | 感測器 | 溫濕度／CO₂ 即時值與 24 小時歷史；Hub 2 光照等級、FP2 存在／lux 為即時觀測 |
 | Hue | 區域開關、亮度、場景、支援的燈效與通知；HA Hue 啟用時待辦燈光提醒也經 HA |
 | 除濕機 | Panasonic／LG 原 API 與 HB 濕度自動模式；依目前需求保留 HB 控制，不列 HA 遷移待辦 |
-| PC／劇院 | PC 狀態與歷史、Agent 失聯告警；劇院專用連動仍由獨立 Agent 執行 |
+| PC／劇院 | PC 狀態與歷史、Agent 失聯告警；[HA 本地劇院開關](homeassistant/theater-agent.md)管理功能啟用，專用連動仍由獨立 Agent 執行 |
 
 **自動化在哪裡設定：** HA 管理空調的自動開關、冷卻等待、固定時間等規則在 HA 設定。
 Dashboard 不會編輯 HA 自動化；新建的手動排程由 HB 經 HA 執行。

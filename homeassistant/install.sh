@@ -3,7 +3,7 @@
 set -eu
 revision="${1:-}"
 component="${2:-home_butler}"
-case "$component" in home_butler|ac_room_temperature|switchbot_ir_buttons|switchbot_hub_light) ;; *) echo "Unsupported integration"; exit 1;; esac
+case "$component" in home_butler|theater_agent|ac_room_temperature|switchbot_ir_buttons|switchbot_hub_light) ;; *) echo "Unsupported integration"; exit 1;; esac
 case "$revision" in *[!a-f0-9]*|"") echo "Supply a full 40-character commit SHA"; exit 1;; esac
 [ "${#revision}" -eq 40 ] || exit 1
 [ -d /config ] || { echo "Run this in the Home Assistant Terminal app"; exit 1; }

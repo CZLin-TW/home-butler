@@ -39,13 +39,14 @@
           "ir_entities": "IR buttons HomeButler may press",
           "sensor_mapping": "Sensor mapping (HB name → metric → HA entity ID)",
           "hue_groups": "Hue areas controlled by Home Butler",
-          "theater_url": "Theater agent address (leave empty to keep using the PC agent)",
-          "theater_key": "Theater agent API key"
+          "theater_url": "Legacy theater address (cleared when selecting the local integration)",
+          "theater_key": "Legacy theater API key",
+          "theater_entry": "Local Theater Agent integration (recommended)"
         }
       }
     },
     "error": {
-      "invalid_input": "Select valid sensors or uniquely named native SwitchBot Cloud ACs; Celsius is required."
+      "invalid_input": "Select valid sensors or uniquely named native SwitchBot Cloud ACs; Celsius is required. Add the Theater Agent integration before selecting it."
     }
   }
 }
