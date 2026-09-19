@@ -158,7 +158,7 @@ async def test_hb_shared_state_and_missing_entry(hass, controller):
 async def test_hb_unknown_and_allowlist(hass, controller):
     entry, client = controller
     relay = LocalTheaterRelay(hass, entry.entry_id)
-    for bad in [frame("restart"), frame(payload={"url": "http://other.invalid"}),
+    for bad in [frame("restart"), frame([]), frame(payload={"url": "http://other.invalid"}),
         {**frame(), "expires_at": time.time()-1}, {**frame(), "extra": True}, frame("summary", {"kef_link": True})]:
         assert (await relay.execute(bad))["status"] == "failed"
     client.async_set_flags.assert_not_called()
@@ -276,3 +276,73 @@ def test_client_input_validation():
     for bad in ({}, {"kef_link": 1}, {"unknown": True}):
         with pytest.raises(ValueError):
             validate_flags(bad)
+
+
+@pytest.mark.parametrize("data", [None, {"success": False, "flags": SUMMARY["flags"]},
+    {"success": True, "flags": {"kef_link": False}}, {"success": True, "flags": SUMMARY["flags"]},
+    ValueError("Invalid JSON")])
+async def test_client_unconfirmed_write_is_unknown(data):
+    session = Mock(request=Mock(return_value=Response(data)))
+    with pytest.raises(TheaterUnknownError):
+        await TheaterClient(session, "http://theater.invalid", "key").async_set_flags({"kef_link": False})
+    assert session.request.call_count == 1
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_client_auth_error(status):
+    session = Mock(request=Mock(return_value=Response({}, status)))
+    with pytest.raises(TheaterAuthError):
+        await TheaterClient(session, "http://theater.invalid", "key").async_set_flags({"kef_link": False})
+    assert session.request.call_count == 1
+
+
+async def test_user_flow_is_read_only_and_single_entry(hass):
+    client = Mock(async_summary=AsyncMock(return_value=deepcopy(SUMMARY)), async_set_flags=AsyncMock())
+    with (patch("custom_components.theater_agent.config_flow.TheaterClient", return_value=client),
+          patch("custom_components.theater_agent.async_setup_entry", return_value=True)):
+        result = await hass.config_entries.flow.async_init(DOMAIN,
+            context={"source": config_entries.SOURCE_USER}, data={"url": "http://theater.invalid/", "api_key": " key "})
+        await hass.async_block_till_done()
+        assert result["type"] == "create_entry"
+        assert result["data"] == {"url": "http://theater.invalid", "api_key": "key"}
+        second = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        assert second["type"] == "abort" and second["reason"] == "single_instance_allowed"
+    client.async_set_flags.assert_not_called()
+
+
+async def test_hb_re_resolves_reloaded_controller(hass, controller):
+    entry, client = controller
+    relay = LocalTheaterRelay(hass, entry.entry_id)
+    old = entry.runtime_data
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data is not old
+    with patch.object(old, "async_get_summary", side_effect=AssertionError("Stale controller")):
+        assert (await relay.execute(frame("summary")))["status"] == "success"
+    await hass.config_entries.async_unload(entry.entry_id)
+    assert (await relay.execute(frame()))["status"] == "failed"
+    # Restore entry for fixture cleanup; reloading never writes flags.
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    client.async_set_flags.assert_not_called()
+
+
+async def test_local_offline_does_not_disable_home_butler(hass):
+    local = MockConfigEntry(domain=DOMAIN, data={"url": "http://theater.invalid", "api_key": "key"})
+    local.add_to_hass(hass)
+    hb = MockConfigEntry(domain="home_butler", data={"url": "https://example.invalid", "api_key": "x"*40},
+        options={"theater_entry": local.entry_id,
+                 "theater_url": "http://legacy.invalid", "theater_key": "old-key"})
+    hb.add_to_hass(hass)
+    client = Mock(async_summary=AsyncMock(side_effect=TheaterError("Offline")))
+    with (patch("custom_components.theater_agent.TheaterClient", return_value=client),
+          patch("custom_components.home_butler.validate_connection", new=AsyncMock()),
+          patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock()),
+          patch("custom_components.home_butler.TheaterRelay", side_effect=AssertionError("No fallback"))):
+        assert not await hass.config_entries.async_setup(local.entry_id)
+        assert await hass.config_entries.async_setup(hb.entry_id)
+        await hass.async_block_till_done()
+        link, _ = hass.data["home_butler"][hb.entry_id]
+        assert isinstance(link.theater_commands, LocalTheaterRelay)
+        assert (await link.theater_commands.execute(frame()))["status"] == "failed"
+        assert await hass.config_entries.async_unload(hb.entry_id)

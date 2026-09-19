@@ -26,7 +26,8 @@
     },
     "abort": {
       "already_configured": "Theater Agent is already configured.",
-      "reauth_successful": "Authentication updated."
+      "reauth_successful": "Authentication updated.",
+      "single_instance_allowed": "Theater Agent is already configured."
     }
   },
   "options": {

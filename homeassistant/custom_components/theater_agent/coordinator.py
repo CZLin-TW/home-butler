@@ -35,12 +35,10 @@ class TheaterCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(str(exc)) from None
 
     async def _async_update_data(self):
-        # Keep the lock through publication: a pre-write poll cannot later
-        # overwrite the confirmed result of a switch command.
+        # DataUpdateCoordinator publishes the returned value without another
+        # await, before a waiting command can acquire this lock.
         async with self.command_lock:
-            data = await self._read()
-            self.async_set_updated_data(data)
-            return data
+            return await self._read()
 
     async def async_get_summary(self):
         async with self.command_lock:

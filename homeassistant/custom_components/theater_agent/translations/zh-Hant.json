@@ -26,7 +26,8 @@
     },
     "abort": {
       "already_configured": "已設定 Theater Agent。",
-      "reauth_successful": "已更新驗證資訊。"
+      "reauth_successful": "已更新驗證資訊。",
+      "single_instance_allowed": "已設定 Theater Agent。"
     }
   },
   "options": {

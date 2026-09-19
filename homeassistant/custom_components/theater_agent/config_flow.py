@@ -55,7 +55,11 @@ class TheaterFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 data = await validate(self.hass, user_input)
-                return self.async_update_reload_and_abort(entry, data_updates=data, options_updates=data)
+                # Loaded entries already reload through their update listener.
+                # Failed initial setup has no listener yet and needs a reload.
+                if entry.update_listeners:
+                    return self.async_update_and_abort(entry, data_updates=data, options=data)
+                return self.async_update_reload_and_abort(entry, data_updates=data, options=data)
             except TheaterAuthError:
                 errors["base"] = "invalid_auth"
             except TheaterError:
