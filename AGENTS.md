@@ -27,7 +27,7 @@
 | FP2 存在／光照 | HA → HB 記憶體快照 → Dashboard | 斷線或超過 90 秒即未知；無雲端備援（Aqara API 需實名制，已放棄） |
 | 除濕機 | **完整留在 HB**（Panasonic／LG 直連） | 使用者 2026-09-14 決定不遷移，新家改中央除濕 |
 | 自動夜燈規則 | 已退役（v1.53.0） | 舊 Sheet 保留不執行，規則寫入回 410 |
-| 劇院連動 | theater-agent 獨立負責；中繼可選 PC agent 或 HA | `THEATER_VIA_HA`（預設 false）；HA 只中繼，不重寫同一套連動 |
+| 劇院連動 | theater-agent 執行規則；HA 本地 Theater Agent 管三個功能開關，HB 可委派給同一控制器 | `THEATER_VIA_HA`（預設 false）；需安裝本地整合並於 Home Butler 選取，既有部署不自動切換 |
 | PC 指標 | PC agent heartbeat | 與劇院中繼無關；拿掉 PC agent 會一併失去這張卡與失聯告警 |
 | Apple Home | HA HomeKit Bridge | `homebridge/` 插件降為歷史相容，不列入驗收 |
 
@@ -55,6 +55,12 @@
 Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，不會被執行。
 
 ### 劇院中繼
+
+新增本地 `theater_agent` 整合（1.0.0），Home Butler 1.7.0 選取其 config entry 後，
+HB 與三個 HA switch 共用控制器。Render 中斷不影響本地 switch；Agent 仍唯一執行連動規則。
+初始及重載只讀，寫入後回讀，未知不重送；不從 HA restore state 覆寫原旗標。
+改位址使用 options 保留 entry／entity ID。舊 URL/key 中繼僅相容保留，選本地整合會清空，
+本地整合失聯不 fallback。部署與回復見 [HA 劇院開關](homeassistant/theater-agent.md)。
 
 `THEATER_VIA_HA=true` 時 `theater_api.py` 改走 HA（`home_assistant_api.link.theater_command`），
 否則走 PC agent。兩條的回傳**欄位相同，但 `agent_id` 不同**：PC agent 那條回該台的 hostname，

@@ -39,13 +39,14 @@
           "ir_entities": "允許管家操作的電扇遙控按鈕",
           "sensor_mapping": "感測器配對（HB 名稱 → 讀值種類 → HA 實體 ID）",
           "hue_groups": "交給 Home Butler 控制的 Hue 區域",
-          "theater_url": "劇院 agent 位址（留空則繼續走 PC agent）",
-          "theater_key": "劇院 agent API 金鑰"
+          "theater_url": "舊版劇院直連位址（選本地整合後會清除）",
+          "theater_key": "舊版劇院直連金鑰",
+          "theater_entry": "本地 Theater Agent 整合（建議）"
         }
       }
     },
     "error": {
-      "invalid_input": "請選取有效感測器或名稱唯一的 SwitchBot Cloud 空調，並使用攝氏溫度。"
+      "invalid_input": "請選取有效感測器或名稱唯一的 SwitchBot Cloud 空調，並使用攝氏溫度。 劇院整合必須先加入 HA。"
     }
   }
 }

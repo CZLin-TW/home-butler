@@ -1,5 +1,21 @@
 # 驗證方式與範圍
 
+2026-09-19 HA 本地劇院開關：新增 `theater_agent` 1.0.0 與 Home Butler 1.7.0。
+本機後端 217 項離線測試及 HA 程式／測試語法編譯通過。
+Python 3.14.7、官方 Home Assistant 2026.9.2、pytest-homeassistant-custom-component 0.13.365
+於 macOS 執行完整 HA 測試：108 項通過，其中 39 項為新增劇院測試。
+涵蓋三個 switch、HB 共用控制器、未知不重送、輪詢／寫入互斥、移除不 fallback、
+改址保留實體、重新驗證，以及劇院離線不阻止 Home Butler 載入。
+案例位於 `homeassistant/tests/test_theater_agent.py`，Agent I/O 全部模擬。
+提交 `3054213c7793a275bb207a76f6d52f0e00c2dbc0` 的 [Linux CI](https://github.com/CZLin-TW/home-butler/actions/runs/35444138747)
+三項工作均通過。家庭 HA 完整備份後安裝兩個整合，設定檢查及重啟成功；
+新增本地整合並在 Home Butler 選取共用控制器。Safari 確認 HA 三個 switch 可用，
+Dashboard 劇院卡在線，摘要 API 回傳 `agent_id=home_assistant`，旗標與遷移前一致
+（KEF=true、電視畫面自動關閉=false、AVR 隨電視開啟=true）。Render 既有 HA 路徑無需變更。
+本次未送出 flags 寫入、未操作實體家電、未中斷 Render 測試；不能宣稱實際連動或斷網操作已驗收。
+畫面核對時修正兩個開關的中英文名稱，與 Agent 實際功能及 Dashboard 一致。
+正式切換與回復順序見 [部署說明](../homeassistant/theater-agent.md)。
+
 2026-09-14 v1.57.0：時數僅由 Sheet 管理，Dashboard 使用原排程區編輯／刪除自動產生的本輪排程。
 238 項後端測試與 34 項 Dashboard 測試、lint、正式 build 通過；涵蓋編輯後重啟保留、刪除不補回、off 清理不碰未來手動排程、改成 on 保留、未知不重送及舊 paused 相容。
 封存測試確認已關閉 cycle 可清理而不等待同設備的未來手動排程；舊設定 POST 回 410 且不讀寫 Sheet。

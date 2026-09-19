@@ -35,7 +35,8 @@ v1.58.0 已移除舊來源「自動」「防黴」、半度目標與室溫回饋
 瀏覽器 → Dashboard（Session／API 邊界）→ home-butler
 LINE／Siri 捷徑 ─────────────────────→ home-butler
                                        ├→ HA → SwitchBot Cloud（已遷移空調／電扇）
-                                       │     └→ Hue Bridge（啟用 HA Hue 後）
+                                       │     ├→ Hue Bridge（啟用 HA Hue 後）
+                                       │     └→ 本地 Theater Agent 整合 → theater-agent（選配）
                                        ├→ Sheets／其他設備雲端（未遷移功能）
                                        └→ PC agent WebSocket
                                             ├→ Hue Bridge（僅未切換 HA Hue 時）

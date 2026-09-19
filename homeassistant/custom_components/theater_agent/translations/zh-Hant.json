@@ -1,0 +1,63 @@
+{
+  "title": "Theater Agent",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Theater Agent",
+        "description": "只讀取現有設定，不會在新增或重啟時改動開關。HA 虛擬機請填主機的內網位址，例如 http://192.168.68.55:8080。",
+        "data": {
+          "url": "Theater Agent 位址",
+          "api_key": "Theater Agent API 金鑰"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Theater Agent",
+        "description": "只讀取現有設定，不會在新增或重啟時改動開關。HA 虛擬機請填主機的內網位址，例如 http://192.168.68.55:8080。",
+        "data": {
+          "url": "Theater Agent 位址",
+          "api_key": "Theater Agent API 金鑰"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "金鑰不正確。",
+      "cannot_connect": "無法取得有效狀態，請檢查位址、網路及 Agent。",
+      "invalid_input": "請填有效的 HTTP(S) 位址及金鑰，不要包含路徑。"
+    },
+    "abort": {
+      "already_configured": "已設定 Theater Agent。",
+      "reauth_successful": "已更新驗證資訊。",
+      "single_instance_allowed": "已設定 Theater Agent。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Theater Agent",
+        "description": "只讀取現有設定，不會在新增或重啟時改動開關。HA 虛擬機請填主機的內網位址，例如 http://192.168.68.55:8080。",
+        "data": {
+          "url": "Theater Agent 位址",
+          "api_key": "Theater Agent API 金鑰"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "金鑰不正確。",
+      "cannot_connect": "無法取得有效狀態，請檢查位址、網路及 Agent。",
+      "invalid_input": "請填有效的 HTTP(S) 位址及金鑰，不要包含路徑。"
+    }
+  },
+  "entity": {
+    "switch": {
+      "kef_link": {
+        "name": "KEF 電源連動"
+      },
+      "tv_screen_auto": {
+        "name": "電視畫面自動關閉"
+      },
+      "tv_avr_sync": {
+        "name": "AVR 自動隨電視開啟"
+      }
+    }
+  }
+}

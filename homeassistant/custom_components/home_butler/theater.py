@@ -19,6 +19,8 @@ import time
 from urllib.parse import urlsplit
 
 import aiohttp
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.exceptions import HomeAssistantError
 
 # action -> (method, path). Adding an entry is a deliberate capability change.
 ACTIONS = {"summary": ("GET", "/summary"), "set_flags": ("POST", "/flags")}
@@ -26,6 +28,57 @@ FLAGS = {"kef_link", "tv_screen_auto", "tv_avr_sync"}
 # Shorter than the backend's 25s wait so a slow theater agent surfaces as this
 # relay's failure, with a reason, rather than as a blank timeout upstream.
 REQUEST_TIMEOUT = 15
+
+
+class LocalTheaterRelay:
+    """Delegate to the selected local integration's switch controller.
+
+    Resolve the entry on every call so reload, removal and address changes do
+    not leave a second client with stale credentials. Never use the legacy
+    HTTP relay as a fallback when the local integration is unavailable.
+    """
+
+    def __init__(self, hass, entry_id):
+        self.hass, self.entry_id = hass, entry_id
+        self.lock = asyncio.Lock()
+
+    async def execute(self, frame):
+        request_id = frame.get("request_id", "")
+        if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise ValueError("Invalid request ID")
+        result = {"type": "theater_result", "request_id": request_id, "status": "failed"}
+        if self.lock.locked():
+            return {**result, "message": "劇院中繼忙碌中"}
+        async with self.lock:
+            if set(frame) != {"type", "request_id", "action", "payload", "expires_at"} or frame["type"] != "theater_command":
+                return result
+            expiry = frame["expires_at"]
+            if type(expiry) not in (int, float) or not time.time() < expiry <= time.time() + 60:
+                return {**result, "message": "指令已逾期"}
+            action = frame["action"]
+            if not isinstance(action, str) or action not in ACTIONS:
+                return {**result, "message": "不支援的劇院動作"}
+            if action == "set_flags":
+                try:
+                    validate_flags(frame["payload"])
+                except ValueError:
+                    return {**result, "message": "只接受三個已知布林功能開關"}
+            elif frame["payload"] not in (None, {}):
+                return result
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry is None or entry.domain != "theater_agent" or entry.state != ConfigEntryState.LOADED:
+                return {**result, "message": "HA Theater Agent 整合尚未載入"}
+            coordinator = entry.runtime_data
+            try:
+                if action == "summary":
+                    data = await coordinator.async_get_summary()
+                else:
+                    data = await coordinator.async_set_flags(frame["payload"], expires_at=expiry)
+            except HomeAssistantError as exc:
+                # Local integration exceptions contain safe, fixed messages.
+                status = "unknown" if getattr(exc, "status", "failed") == "unknown" else "failed"
+                return {**result, "status": status, "message": str(exc)}
+            return {**result, "status": "success", "result": data}
 
 
 def normalize_url(value):
