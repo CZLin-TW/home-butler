@@ -53,10 +53,10 @@
         "name": "KEF 電源連動"
       },
       "tv_screen_auto": {
-        "name": "電視畫面自動恢復"
+        "name": "電視畫面自動關閉"
       },
       "tv_avr_sync": {
-        "name": "電視與 AVR 電源同步"
+        "name": "AVR 自動隨電視開啟"
       }
     }
   }

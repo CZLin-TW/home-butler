@@ -53,10 +53,10 @@
         "name": "KEF power link"
       },
       "tv_screen_auto": {
-        "name": "TV screen auto restore"
+        "name": "TV screen auto off"
       },
       "tv_avr_sync": {
-        "name": "TV and AVR power sync"
+        "name": "AVR auto on with TV"
       }
     }
   }

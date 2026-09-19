@@ -1,7 +1,7 @@
 # HA 本地劇院功能開關
 
 Theater Agent 1.0.0 是獨立 HA 整合；Home Butler 1.7.0 可選擇透過它控制劇院。
-本次是部署前實作，不代表家庭 HA 已安裝或切換。目標測試框架為 HA Core 2026.9.2。
+2026-09-19 已於家庭 HA Core 2026.9.2 安裝並完成唯讀路徑核對，範圍見 [驗證紀錄](../docs/verification.md)。
 
 ## 分工與狀態
 
@@ -18,8 +18,8 @@ Dashboard → HB → HA Home Butler ─┤
 | 旗標 | HA 顯示用途 |
 | --- | --- |
 | `kef_link` | KEF 電源連動 |
-| `tv_screen_auto` | 電視畫面自動恢復 |
-| `tv_avr_sync` | 電視與 AVR 電源同步 |
+| `tv_screen_auto` | 電視畫面自動關閉（Apple TV 播音樂時） |
+| `tv_avr_sync` | AVR 自動隨電視開啟（電視從待機開啟時） |
 
 這些開關表示「啟用該連動規則」，不表示電視／喇叭現在的電源，也不是啟停 Agent 程序。
 HA 不保存另一份期望旗標，不從 HA restore state 覆寫 Agent。啟動、設定與重載只讀取。
