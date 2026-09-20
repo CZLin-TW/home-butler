@@ -353,6 +353,8 @@ def _build_light_data(item, time_str, data):
         ld["light_area"] = data.get("light_area")
     if data.get("light_area_id") is not None:
         ld["light_area_id"] = data.get("light_area_id")
+    if data.get("light_area_ids") is not None:
+        ld["light_area_ids"] = data["light_area_ids"]
     return ld
 
 
@@ -392,7 +394,10 @@ def handle_add_recurring_todo(data, user_name, ctx):
 
     light_data = _build_light_data(item, time_str, data)
     light_notify = resolve_light_notify(light_data) if time_str else False
-    light_area = resolve_light_area(light_data, light_notify)
+    try:
+        light_area = resolve_light_area(light_data, light_notify)
+    except ValueError as exc:
+        return f"❌ {exc}"
 
     rule = {
         RULE_ID_COLUMN: _gen_rule_id(),
@@ -546,17 +551,16 @@ def handle_modify_recurring_todo(data, user_name, ctx):
         updates["起始日期"] = str(data.get("start_date") or "").strip()
     if data.get("end_date") is not None:
         updates["結束日期"] = str(data.get("end_date") or "").strip()
-    if "light_notify" in data and data.get("light_notify") is not None:
-        ln = parse_bool(data.get("light_notify"), default=False)
-        updates[LIGHT_NOTIFY_COLUMN] = "TRUE" if ln else "FALSE"
-        ld = {
-            "item": updates.get("事項", r.get("事項", "")),
-            "time": updates.get("時間", str(r.get("時間", "") or "")),
-            "light_notify": ln,
-        }
-        if data.get("light_area") is not None:
-            ld["light_area"] = data.get("light_area")
-        area = resolve_light_area(ld, ln, existing_area_id=str(r.get(LIGHT_AREA_ID_COLUMN, "") or ""))
+    if any(data.get(key) is not None for key in ("light_notify", "light_area_ids", "light_area_id", "light_area")):
+        ln = parse_bool(data.get("light_notify", r.get(LIGHT_NOTIFY_COLUMN)), default=False)
+        if data.get("light_notify") is not None:
+            updates[LIGHT_NOTIFY_COLUMN] = "TRUE" if ln else "FALSE"
+        ld = _build_light_data(updates.get("事項", r.get("事項", "")),
+                               updates.get("時間", str(r.get("時間", "") or "")), data)
+        try:
+            area = resolve_light_area(ld, ln, existing_area_id=str(r.get(LIGHT_AREA_ID_COLUMN, "") or ""))
+        except ValueError as exc:
+            return f"❌ {exc}"
         updates[LIGHT_AREA_ID_COLUMN] = area.get("id", "")
 
     if not updates:

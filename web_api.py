@@ -53,6 +53,7 @@ import dehumidifier_driver
 import dehumidifier_history
 import device_status
 from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
+from todo_light_areas import decode_area_ids
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
@@ -498,19 +499,32 @@ def collect_todo_light_reminders():
             continue
         if due_at > now:
             continue
-        light_area_id = str(r.get("燈光區域ID", "") or "").strip()
-        light_area = resolve_area(area_id=light_area_id) if light_area_id else resolve_area(DEFAULT_LIGHT_AREA_NAME)
-        reminders.append({
-            "item": r.get("事項", ""),
-            "date": date_str,
-            "time": time_str,
-            "person": r.get("負責人", ""),
-            "type": r.get("類型", "公開"),
-            "light_area_id": light_area.get("id", ""),
-            "light_area_name": light_area.get("name", "") or DEFAULT_LIGHT_AREA_NAME,
-            "light_area_resource_type": light_area.get("resource_type", "grouped_light"),
-            "due_at": due_at.isoformat(),
-        })
+        try:
+            area_ids = decode_area_ids(r.get("燈光區域ID", ""))
+        except ValueError:
+            print("[WARN] 無法解析待辦燈光提醒區域，略過該筆，不改送預設區域")
+            continue
+        # An empty legacy cell means the original default; explicit [] means no targets.
+        if not area_ids and not str(r.get("燈光區域ID", "") or "").strip():
+            area_ids = [resolve_area(DEFAULT_LIGHT_AREA_NAME).get("id", "")]
+        for area_id in area_ids:
+            if not area_id:
+                continue
+            light_area = resolve_area(area_id=area_id)
+            # Never redirect a removed/unknown ID to the default room.
+            if light_area.get("id") != area_id:
+                continue
+            reminders.append({
+                "item": r.get("事項", ""),
+                "date": date_str,
+                "time": time_str,
+                "person": r.get("負責人", ""),
+                "type": r.get("類型", "公開"),
+                "light_area_id": area_id,
+                "light_area_name": light_area.get("name", "") or area_id,
+                "light_area_resource_type": light_area.get("resource_type", "grouped_light"),
+                "due_at": due_at.isoformat(),
+            })
     return {"count": len(reminders), "reminders": reminders}
 
 
@@ -521,6 +535,7 @@ class TodoAddRequest(BaseModel):
     person: str
     type: Optional[str] = "私人"
     light_notify: Optional[bool] = None
+    light_area_ids: Optional[list[str]] = Field(default=None, max_length=32)
     light_area_id: Optional[str] = None
     light_area: Optional[str] = None
 
@@ -539,6 +554,8 @@ def api_add_todo(req: TodoAddRequest, request: Request = None):
     }
     if req.light_notify is not None:
         data["light_notify"] = req.light_notify
+    if req.light_area_ids is not None:
+        data["light_area_ids"] = req.light_area_ids
     if req.light_area_id is not None:
         data["light_area_id"] = req.light_area_id
     if req.light_area is not None:
@@ -563,6 +580,7 @@ class TodoModifyRequest(BaseModel):
     person: Optional[str] = None
     type: Optional[str] = None
     light_notify: Optional[bool] = None
+    light_area_ids: Optional[list[str]] = Field(default=None, max_length=32)
     light_area_id: Optional[str] = None
     light_area: Optional[str] = None
     requester: str
@@ -582,6 +600,7 @@ def api_modify_todo(req: TodoModifyRequest, request: Request = None):
     if req.person is not None: data["person"] = req.person
     if req.type is not None: data["type"] = req.type
     if req.light_notify is not None: data["light_notify"] = req.light_notify
+    if req.light_area_ids is not None: data["light_area_ids"] = req.light_area_ids
     if req.light_area_id is not None: data["light_area_id"] = req.light_area_id
     if req.light_area is not None: data["light_area"] = req.light_area
     result = handle_modify_todo(data, actor or req.requester, ctx)
@@ -634,6 +653,7 @@ class RecurringTodoAddRequest(BaseModel):
     type: Optional[str] = "私人"
     light_notify: Optional[bool] = None
     light_area: Optional[str] = None
+    light_area_ids: Optional[list[str]] = Field(default=None, max_length=32)
     light_area_id: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -646,7 +666,7 @@ def api_add_recurring_todo(req: RecurringTodoAddRequest, request: Request = None
     actor = _set_actor(ctx, request)
     data = {"item": req.item, "recur_type": req.recur_type}
     for field in ("weekdays", "month_day", "interval_days", "time", "person",
-                  "type", "light_notify", "light_area", "light_area_id",
+                  "type", "light_notify", "light_area", "light_area_id", "light_area_ids",
                   "start_date", "end_date"):
         value = getattr(req, field)
         if value is not None:
@@ -672,6 +692,7 @@ class RecurringTodoModifyRequest(BaseModel):
     type: Optional[str] = None
     light_notify: Optional[bool] = None
     light_area: Optional[str] = None
+    light_area_ids: Optional[list[str]] = Field(default=None, max_length=32)
     light_area_id: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -686,7 +707,7 @@ def api_modify_recurring_todo(req: RecurringTodoModifyRequest, request: Request 
     data = {}
     for field in ("rule_id", "item", "recur_type", "item_new", "recur_type_new",
                   "weekdays", "month_day", "interval_days", "time", "person",
-                  "type", "light_notify", "light_area", "light_area_id",
+                  "type", "light_notify", "light_area", "light_area_id", "light_area_ids",
                   "start_date", "end_date"):
         value = getattr(req, field)
         if value is not None:

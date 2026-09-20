@@ -4,10 +4,11 @@
 自動判斷」與「布林解析」邏輯，而不必跨模組 import todo.py 的私有函式
 （把私有當公有 API 用、日後 refactor 會炸到別人）。
 
-行為與原本 todo.py 內的版本逐字相同——只是搬家 + 改成公開命名。
+同時處理舊單區域與新多區域提醒的儲存和選取驗證。
 """
 
-from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area
+from hue_area_settings import DEFAULT_LIGHT_AREA_NAME, resolve_area, load_area_settings
+from todo_light_areas import decode_area_ids, encode_area_ids, normalize_area_ids
 
 
 LIGHT_NOTIFY_COLUMN = "燈光提醒"
@@ -62,14 +63,32 @@ def resolve_light_notify(data):
 
 
 def resolve_light_area(data, light_notify, existing_area_id=""):
+    """Return the storage cell and display label for one or more reminder targets."""
     time_value = data.get("time") if "time" in data else data.get("時間")
     if not light_notify or not time_value:
         return {"id": "", "name": ""}
+
+    if "light_area_ids" in data:
+        ids = normalize_area_ids(data["light_area_ids"])
+        if not ids:
+            raise ValueError("開啟燈光提醒時，請至少選擇一個提醒區域")
+        settings = load_area_settings()
+        for area_id in ids:
+            row = settings.get(area_id)
+            if (row is None or str(row.get("狀態", "啟用")).strip() == "停用"
+                    or (row.get("資源類型") or "grouped_light") != "grouped_light"):
+                raise ValueError("選取的提醒區域已不可用，請重新選擇")
+        names = [settings[i].get("顯示名稱") or settings[i].get("Hue 名稱") or i for i in ids]
+        return {"id": encode_area_ids(ids), "name": "、".join(names)}
 
     explicit_id = str(data.get("light_area_id") or "").strip()
     explicit_name = str(data.get("light_area") or "").strip()
     if explicit_id or explicit_name:
         return resolve_area(explicit_name, area_id=explicit_id)
     if existing_area_id:
-        return resolve_area(area_id=existing_area_id)
+        ids = decode_area_ids(existing_area_id)
+        # Preserve every existing target for unrelated edits, including unavailable IDs.
+        settings = load_area_settings()
+        names = [settings.get(i, {}).get("顯示名稱") or settings.get(i, {}).get("Hue 名稱") or i for i in ids]
+        return {"id": encode_area_ids(ids), "name": "、".join(names)}
     return resolve_area(DEFAULT_LIGHT_AREA_NAME)

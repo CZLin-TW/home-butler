@@ -27,7 +27,10 @@ def handle_add_todo(data, user_name, ctx):
     person = data.get("person") or user_name
     todo_type = data.get("type", "私人")
     light_notify = _resolve_light_notify(data)
-    light_area = _resolve_light_area(data, light_notify)
+    try:
+        light_area = _resolve_light_area(data, light_notify)
+    except ValueError as exc:
+        return f"❌ {exc}"
     append_record(sheet, {
         TODO_ID: new_todo_id(),
         "事項": data.get("item", ""),
@@ -106,19 +109,15 @@ def handle_modify_todo(data, user_name, ctx):
             updates["類型"] = data.get("type")
         if "light_notify" in data:
             updates[LIGHT_NOTIFY_COLUMN] = _bool_cell(data.get("light_notify"))
-            light_notify_next = _parse_bool(data.get("light_notify"), default=False)
-            updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
-                {**row, **data},
-                light_notify_next,
-                existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
-            ).get("id", "")
-        elif "light_area_id" in data or "light_area" in data:
-            light_notify_next = _parse_bool(row.get(LIGHT_NOTIFY_COLUMN), default=False)
-            updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
-                {**row, **data},
-                light_notify_next,
-                existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
-            ).get("id", "")
+        if any(key in data for key in ("light_notify", "light_area_ids", "light_area_id", "light_area")):
+            light_notify_next = _parse_bool(data.get("light_notify", row.get(LIGHT_NOTIFY_COLUMN)), default=False)
+            try:
+                updates[LIGHT_AREA_ID_COLUMN] = _resolve_light_area(
+                    {**row, **data}, light_notify_next,
+                    existing_area_id=str(row.get(LIGHT_AREA_ID_COLUMN, "") or ""),
+                ).get("id", "")
+            except ValueError as exc:
+                return f"❌ {exc}"
         update_count = update_row_fields(sheet, row_number, updates)
         row.update(updates)
         new_person = data.get("person")
