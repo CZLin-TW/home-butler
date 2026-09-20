@@ -49,7 +49,7 @@ Sheet 欄位對照表（資料來源、欄位名稱、值的範例）
   外部ID              str   Notion page id（外部項目才有）← calendar_sync 的主鍵，
                             改標題/日期/時間都不變；空值退回舊的 事項+日期+時間 比對
   燈光提醒            str   "TRUE" | "FALSE"
-  燈光區域ID          str   Hue grouped_light id（照明提醒用）
+  燈光區域ID          str   單一 Hue grouped_light ID 或 JSON ID 陣列（照明提醒用）
   封存表：待辦封存（同欄位）
 
 【對話暫存】（BATCH_SHEETS）

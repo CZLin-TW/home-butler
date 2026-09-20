@@ -97,8 +97,8 @@ Render／Vercel 設定及服務限制可能變動，選擇能符合自己可用�
 - 類型值：公開 / 私人
 - 來源值：本地 / Notion（程式自動填入，本地新增的待辦填「本地」，外部行事曆同步的填來源名稱）
 - 屬性值：讀寫 / 唯讀（本地項目為「讀寫」，外部項目依成員的權限設定填入）
-- 燈光提醒：TRUE/FALSE。只有有「時間」且已到期、狀態仍為待辦時，PC agent 會每分鐘觸發 Hue breathe 一次，直到該待辦完成
-- 燈光區域ID：Hue grouped_light id。Dashboard 用顯示名稱下拉選擇，Sheet 內保存穩定 ID；LINE Bot 未指定區域時預設使用「客廳」
+- 燈光提醒：TRUE/FALSE。只有有「時間」且已到期、狀態仍為待辦時，HB 經選定的 HA／PC 路徑提醒；固定 Hue breathe，每區域每分鐘最多一次，直到完成或關閉提醒。
+- 燈光區域ID：沿用既有欄位，單區域為 Hue grouped_light ID，多區域為 JSON 字串陣列。Dashboard 以顯示名稱勾選一或多個區域，API 傳 `light_area_ids`；舊 `light_area_id`／`light_area` 相容。週期模板與生成待辦保留全部選取；LINE Bot 未指定區域時仍預設「客廳」。明確的空清單、未知或停用區域在開啟提醒時拒絕，不改送其他房間。
 - 規則ID：程式自動加欄（`ensure_columns`）。由「週期待辦模板」生成的當次待辦會帶上模板的規則ID（list 上以 🔁 標記、完成後同日不重生靠它去重），一般待辦留空，手動建 sheet 時不需填
 
 **待辦封存**
@@ -423,10 +423,10 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/dehumidifier/auto-rule | GET | 列出所有除濕機的自動規則 + runtime state，並回傳後端計算的 `humidity_on_threshold` / `humidity_off_threshold`，供 Dashboard 共用同一組 hysteresis |
 | /api/dehumidifier/auto-rule | POST | 設定 / 更新除濕機自動規則（device_name, auto_mode, sensor_name, duration_min, threshold, on_mode）。toggle ON 時會立即評估 sensor 當下值決定要不要 fire ON/OFF |
 | /api/todos | GET | 依可信 `X-Dashboard-User` 過濾私人事項；無此 header 的 API-key 系統呼叫維持家庭級權限 |
-| /api/todos | POST | 新增待辦事項 |
+| /api/todos | POST | 新增待辦事項，燈光提醒可傳 `light_area_ids` 複選區域 |
 | /api/todos | PATCH | 依 `todo_id` 定位並重驗權限；舊呼叫可用明確名稱／日期／時間，重名拒絕 |
 | /api/todos | DELETE | 完成可操作的待辦；Notion 項目保留完成記號 |
-| /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦（含 light_area_id/name），HA Hue 啟用時回空避免重複通知；否則供 PC agent 每分鐘依區域觸發 Hue breathe |
+| /api/todos/light-reminders | GET | 回傳已到期、未完成、且燈光提醒=TRUE 的待辦（每個目標區域一筆，含 light_area_id/name），HA Hue 啟用時回空避免重複通知；否則供 PC agent 每分鐘依區域觸發 Hue breathe |
 | /api/food | GET | 列出所有有效食品庫存 |
 | /api/food | POST | 新增食品 |
 | /api/food | PATCH | 修改食品 |
@@ -438,7 +438,7 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 | /api/weather | GET | 查詢天氣（date, location） |
 | /api/members | GET | 列出所有啟用的家庭成員 |
 | /api/recurring-todos | GET | 依同一可信使用者邊界過濾啟用模板，附人類可讀「摘要」；系統呼叫維持家庭級權限 |
-| /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/每季/半年/每年/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/start_date/end_date；每季/半年/每年用 start_date 當錨點） |
+| /api/recurring-todos | POST | 新增週期待辦模板（item, recur_type 每天/每週/每月/每季/半年/每年/間隔天，選填 weekdays/month_day/interval_days/time/person/type/light_notify/light_area/light_area_ids/start_date/end_date；每季/半年/每年用 start_date 當錨點） |
 | /api/recurring-todos | PATCH | 修改週期待辦模板（Dashboard 走 rule_id 精準定位，或用 item + recur_type 消歧） |
 | /api/recurring-todos | DELETE | 停整個週期（模板狀態 → 停用，不刪除；可帶 rule_id 或 item + recur_type） |
 | /api/auth/device/create | POST | Dashboard 裝置配對登入：發一組 6 位 user_code + device_token（device_token 由 PWA 保管）給前端顯示與輪詢用 |
@@ -909,3 +909,5 @@ AI 解析成本與效果的既有實測見 [評估紀錄](../evals/README.md)。
 
 照明 state PATCH 可另帶互斥的 hs_color 或 color_temp_kelvin；需要 HA home_butler 1.5.0。
 詳見 [光色控制契約](../homeassistant/sensors-and-hue.md#光色控制home_butler-150)。
+
+多區域提醒部署先後端再 Dashboard。回復先退前端；若已存入多區域資料，後端必須保留 JSON 陣列解析／派送支援，不能直接退至只懂單一 ID 的版本。無需更新 HA 自訂整合或控制實體家電。
