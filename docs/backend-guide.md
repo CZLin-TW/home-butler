@@ -587,8 +587,8 @@ HA 空調的到期關機由 HB 每分鐘觀察 HA 狀態、依 Sheet 時數產�
 | action | 說明 | 欄位 |
 |--------|------|------|
 | add_todo | 新增待辦（指派他人時自動通知） | item, date，選填：time, person, type, light_notify, light_area |
-| modify_todo | 修改待辦（唯讀項目會被拒絕） | item，選填：item_new, date, time, person, type, light_notify, light_area |
-| delete_todo | 標記完成，移至封存（唯讀項目會被拒絕） | item |
+| modify_todo | 修改待辦（唯讀項目會被拒絕） | item, todo_id；無 ID 時用 date_orig, time_orig 定位；選填新值：item_new, date, time, person, type, light_notify, light_area |
+| delete_todo | 本地待辦封存；Notion／唯讀項目留本地完成記號，不回寫來源 | item, todo_id；無 ID 時用 date_orig, time_orig 定位 |
 | query_todo | 查詢待辦（自動同步外部行事曆） | 無 |
 | add_recurring_todo | 新增週期提醒（系統維持一筆「下一次要做的」待辦，完成後才出現再下一次） | item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填：weekdays（每週，[1,3,5]，一=1…日=7）, month_day（每月，1~31）, interval_days（間隔天，>=1）, time, person, type, light_notify, light_area, start_date（每季/半年/每年的錨點）, end_date |
 | modify_recurring_todo | 修改週期提醒（多筆同名加 recur_type 消歧） | item，選填：item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date |
@@ -889,7 +889,7 @@ AI 解析成本與效果的既有實測見 [評估紀錄](../evals/README.md)。
 
 - 待辦寫入：`todo_coordination.todo_write` 將即時讀取、ID 補齊、權限檢查、定位和寫入放在同一個 RLock。一般待辦、週期生成與 Notion 同步共用；Notion 網路查詢在鎖外，另有同步鎖避免舊結果覆蓋新結果。
 - 私人待辦：Dashboard BFF 驗證 session，轉送 `X-Dashboard-User` 的 LINE ID；後端以啟用家庭成員精確匹配，不接受前端姓名前綴當權限。私人事項與週期規則在回應之前過濾，修改／完成也重驗。LINE 的 request context 同樣帶 actor。沒有此 header 的既有 API-key 系統呼叫仍有家庭級權限；API key 只能留在受信任伺服器／agent，不能交給瀏覽器。
-- 穩定身分：Sheet 新增「待辦ID」欄，舊資料在首次讀取或寫入時補 UUID；Dashboard 修改／完成傳 `todo_id`，舊呼叫仍可用明確的名稱日期時間。匹配多筆一律拒絕，不能取第一筆。
+- 穩定身分：Sheet 新增「待辦ID」欄，舊資料在首次讀取或寫入時補 UUID；Dashboard 與 LINE／Siri 修改／完成優先傳 `todo_id`；模型清單提供可見待辦的 ID，schema 同步開放 `todo_id`、`date_orig`、`time_orig`。舊呼叫仍可用明確的名稱與原日期時間。匹配多筆時列出可見候選的日期時間澄清，不預設今天或第一筆；明確 ID 失效不退回名稱。
 - 天氣：`weather_budget` 的單次查詢預算 10 秒，HTTP timeout 使用剩餘時間；`weather_service` 最多 4 個工作、同日期地點共享進行中請求、滿載立即 503，整批最多等 12 秒後回 504。已開始的同步 HTTP 不能強制中止，但不會無限排隊；失敗不進成功快取。生活摘要 `include_weather=false` 完全不等天氣。
 - 工作健康：帶 API key 的 `GET /api/system/jobs` 提供週期、執行中、開始／成功／下次時間、耗時及最近錯誤類別。這表示 callback 的完成情況，不是每個外部裝置已成功；子流程自行捕捉的錯誤仍需看服務 log。狀態在重啟後重建；業務去重仍在 Sheet。
 - 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。

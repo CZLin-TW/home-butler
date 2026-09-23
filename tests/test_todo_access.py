@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from threading import Event, Thread
 import unittest
 from unittest.mock import patch
-from todo_access import actor_from_members, visible, select_todo
+from todo_access import actor_from_members, visible, select_todo, todo_selection_message
 from todo_coordination import todo_write, todo_write_lock
 from test_callback_concurrency import endpoint
 
@@ -76,7 +76,8 @@ class TodoAccessTests(unittest.TestCase):
         ctx = SimpleNamespace(actor_name="Alice", get=lambda _: self.rows, get_worksheet=lambda _: sheet)
         update = Mock()
         fn = endpoint("handlers/todo.py", "handle_delete_todo", {
-            "select_todo": select_todo, "update_row_fields": update})
+            "select_todo": select_todo, "todo_selection_message": todo_selection_message,
+            "update_row_fields": update})
         self.assertIn("❌", fn({"todo_id": "b"}, ctx))
         update.assert_not_called()
         self.rows[0].update({"來源": "Notion", "屬性": "讀寫"})

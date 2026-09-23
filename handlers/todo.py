@@ -1,4 +1,4 @@
-from todo_access import select_todo, visible, TODO_ID, new_todo_id
+from todo_access import select_todo, todo_selection_message, visible, TODO_ID, new_todo_id
 from todo_coordination import todo_write
 import threading
 from linebot.models import TextSendMessage
@@ -140,7 +140,7 @@ def handle_modify_todo(data, user_name, ctx):
         if update_count == 0:
             return f"❌ 找到「{data.get('item')}」但沒收到任何要更新的欄位（收到參數：{list(data.keys())}）"
         return f"✅ 已更新「{data.get('item')}」"
-    return f"❌ 找不到「{data.get('item')}」"
+    return todo_selection_message(records, data, getattr(ctx, "actor_name", None))
 
 
 def _locate_todo_row(values, item_name, date_orig, time_orig):
@@ -258,7 +258,7 @@ def handle_delete_todo(data, ctx, user_name=""):
     row_number, selected = select_todo(records, data, getattr(ctx, "actor_name", None))
     if selected is None:
         if data.get("todo_id") or getattr(ctx, "actor_name", None):
-            return "❌ 找不到可操作的待辦，或條件不夠明確。"
+            return todo_selection_message(records, data, getattr(ctx, "actor_name", None))
         return _explain_missing_todo(sheet.get_all_values(), item_name, ctx, user_name)
     item_name = selected.get("事項", item_name)
     prop = selected.get("屬性")

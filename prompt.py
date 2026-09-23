@@ -33,8 +33,8 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_food：name（必填，找目標）, 選填 name_new(改名), quantity(更新後數量,自行計算), unit, expiry
 - query_food：無參數
 - add_todo：item, date(YYYY-MM-DD), 選填 time(HH:MM), person(留空=自動填), type(「私人」或「公開」，預設私人), light_notify(true/false，燈光/閃燈/呼吸燈提醒用；未指定時通常 false，但有 time 且是家事/起身處理類待辦時預設 true), light_area(選填，照明區域名稱，例如「客廳」「主臥」；只有 light_notify=true 時使用)
-- modify_todo：item（必填，找目標）, 選填 item_new(改名), date, time, person, type, light_notify(true/false), light_area(照明區域名稱)
-- delete_todo：item
+- modify_todo：item, todo_id（沿用目前待辦的 ID 找目標），選填 date_orig(原日期), time_orig(原時間), item_new(改名), date(新日期), time(新時間), person, type, light_notify(true/false), light_area(照明區域名稱)
+- delete_todo：item, todo_id（沿用目前待辦的 ID），舊資料沒有 ID 時用 item + date_orig(YYYY-MM-DD) + time_orig(HH:MM) 定位；date/time 不用來定位
 - query_todo：無參數
 - add_recurring_todo：建立週期性待辦（系統會自動維持一筆「下一次要做的」待辦，完成後才出現再下一次）。item, recur_type（每天/每週/每月/每季/半年/每年/間隔天），選填 weekdays（每週時把「一三五」正規化成 [1,3,5]，週一=1…週日=7）, month_day（每月時 1~31）, interval_days（間隔天時，>=1）, time(HH:MM), person(留空=發話者), type(私人/公開,預設私人), light_notify(同 add_todo 規則), light_area, start_date(留空=今天), end_date(選填)。每季/半年/每年以 start_date 當錨點、每 3/6/12 個月重複同一天：使用者講「每年3月15日繳稅」就把 start_date 設成該起始日（2026-03-15）、講「每季/每半年」沒明講日期就用今天當起始日
 - modify_recurring_todo：item（必填，找目標；多筆同名時加 recur_type 消歧）, 選填 item_new, recur_type_new, weekdays, month_day, interval_days, time, person, type, end_date
@@ -63,6 +63,8 @@ modify_* 欄位規則：item/name 是找目標的識別碼（必填）；item_ne
 - modify_todo 不要用 delete+add 替代
 - modify_schedule 不要用 delete+add 替代（即使跨裝置或跨 action 類型也用單一 modify_schedule）
 - 所有待辦都可用 delete_todo 標記完成。外部行事曆項目無法 modify_todo，系統會自動判斷
+- 完成／修改待辦優先傳目前待辦清單中的 todo_id，不可編造 ID，也不要把 ID 顯示給使用者。同名任務用使用者明確指定的日期、時間選擇；不能預設今天、最近一筆、第一筆或把全部同名任務一起完成。
+- 「已完成／好了」只能在對話上下文與目前待辦能唯一對應時執行。提醒只有名稱與時間，仍須確認日期；跨日提醒或同名同時無法確認時不得猜測。若仍有多筆可能，用 unclear 列出可見候選的日期、時間請使用者選擇，此輪不可送 delete_todo／modify_todo。日期時間也相同時請使用者到 Dashboard 選取該筆。
 - 週期 vs 單次：使用者說「每天/天天/每週X/每月N號/每季/每半年/每年/每隔N天…提醒」用 add_recurring_todo；說「明天/下週一/某個日期」這種單一日期用 add_todo
 - 「完成這次」（如「收衣服好了」「垃圾倒完了」）對週期產生出來的當次待辦，用 delete_todo（只完成當次，週期模板不受影響、下次照常出現）；使用者說「不要再…了/停掉每天的X/取消週期提醒」才用 stop_recurring_todo
 - stop_recurring_todo 是永久停止整個週期、不可逆，執行前務必先用 reply 反問確認（例：要永久停掉「倒垃圾」每週提醒嗎？回「是」我就停掉），等使用者確認後的下一輪才送出 stop_recurring_todo，不要一次就停。這是「no 問句結尾」規則的例外
@@ -123,6 +125,7 @@ ARG_KEY_TYPES = {
     "name": "str", "name_new": "str", "quantity": "num", "unit": "str", "expiry": "str",
     # 待辦（單次＋週期共用）
     "item": "str", "item_new": "str", "date": "str", "time": "str",
+    "todo_id": "str", "date_orig": "str", "time_orig": "str",
     "person": "str", "type": "str", "light_notify": "bool", "light_area": "str",
     # 週期待辦
     "recur_type": "str", "recur_type_new": "str", "weekdays": "intlist",
@@ -264,7 +267,8 @@ def get_current_todo(ctx):
     for r in valid:
         time_part = f" {r['時間']}" if r.get("時間") else ""
         type_part = "（私人）" if r.get("類型") == "私人" else "（公開）"
-        lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}")
+        id_part = f"／todo_id={r['待辦ID']}" if r.get("待辦ID") else ""
+        lines.append(f"{r['事項']}／{r['負責人']}／{r['日期']}{time_part}{type_part}{id_part}")
     return "、".join(lines)
 
 
