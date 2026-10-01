@@ -6,6 +6,8 @@
 
 使用者重開 Mac 後，未用 SSH／共享螢幕登入前，MBP 讀到 HA HTTP 200 與劇院健康／Apple TV 查詢。未操作實際家電作回歸測試、未發 LINE、未改 Sheets；停電復電、實體劇院連動及長期異機備份仍待驗收。實際 theater-agent 發布／CI／更新由該 repo 記錄，不以本文推定新版本已部署。
 
+發布追記：文件提交 `4834826` 已推送 main，[CI 三項工作通過](https://github.com/CZLin-TW/home-butler/actions/runs/36892349157)。本次沒有後端程式變更；未取得 Render 正式程序 SHA，不以 CI 代替部署確認。
+
 ## 2026-09-23 同名待辦定位（系統 v1.61.2，未部署）
 
 Python 3.12.14 臨時 venv 依 requirements.lock 安裝 FastAPI／HTTPX 後，完整 231 項後端離線測試與 compileall 通過。
