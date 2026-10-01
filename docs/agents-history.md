@@ -77,7 +77,7 @@ Push 與定時刷新共用單台工作／原生 coordinator；請求結束後延
 家庭已於 2026-09-14 安裝並停用舊自動化 1789319755253（保留供還原）；60 秒備援已讀到實際請求紀錄。
 感測器與 Hue 切換旗標已啟用，Dashboard 讀取已驗證；燈光實體操作仍待使用者驗收。詳見 verification。
 
-v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](homeassistant/sensors-and-hue.md)。
+v1.51.0／home_butler 1.4.0：[感測器與 Hue 統一](../homeassistant/sensors-and-hue.md)。
 `HOME_ASSISTANT_SENSOR_NAMES` 按名稱指定唯一 HA 即時來源；`ha_sensors` 套原 Sheet 補償一次，
 五分鐘歷史保持，不可在 HA 失聯時 fallback 雲端或把 1–20 光照等級當 lux。
 `HOME_ASSISTANT_HUE_ENABLED` 將所有照明入口切到 `lighting_transport`，HA 本機選定 Hue 區域。
@@ -86,7 +86,7 @@ Hue 沿用原生 aiohue 4.9.0 公開連線；不得抄金鑰、任意 URL／serv
 HA Hue 啟用時 legacy 待辦燈光 queue 必須為空；`lighting_reminders` 每分鐘執行，不傳私人待辦到 HA。
 生產切換狀態以 verification 紀錄為準，不能由合併／CI 推定已安裝。Theater／除濕機控制不在本次遷移。
 
-v1.50.0：Hub 2 Push 見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
+v1.50.0：Hub 2 Push 見 [homeassistant/hub-light.md](../homeassistant/hub-light.md)。
 Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 Hub 的刷新提示。
 無簽章 payload 不能寫進 HA 狀態；值只能來自 native authenticated refresh，新增事件 I/O 是明確需求。
 保留訂閱白名單、事件時間驗證、合併最後一筆、舊版 capability 相容、卸載與斷線清理測試。
@@ -94,12 +94,12 @@ Home Butler 1.3.0 + 光照 1.1.0 透過現有 Render Webhook／WSS 轉送選定 
 家庭 HA 另有「Hub 2 每分鐘更新感測資料」自動化（1789319755253），每台只刷新一個原生溫度實體。
 這是 1.1.0 的家庭備援設定；1.2.0 以整合內計時取代，切換時停用這條自動化。設定與還原見同一份光照文件。
 
-v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](homeassistant/hub-light.md)。
+v1.49.0：Hub 2 光照見 [homeassistant/hub-light.md](../homeassistant/hub-light.md)。
 原 switchbot_hub_light 1.0.0 僅共享原生 SwitchBot Cloud coordinator 的 lightLevel，不新增 I/O、
 不讀金鑰、不 monkey patch 核心。1–20 級不得標成 lux 或匯入現有 illuminance 通道。
 保留 native reload／registry identity／缺值未知／單獨光照更新及卸載 listener 清理測試。
 
-v1.48.0：IR 電扇按鈕見 [HA IR 按鈕](homeassistant/ir-buttons.md)。獨立 switchbot_ir_buttons 本地整合
+v1.48.0：IR 電扇按鈕見 [HA IR 按鈕](../homeassistant/ir-buttons.md)。獨立 switchbot_ir_buttons 本地整合
 只沿用明確選取的原生 SwitchBot Remote 連線，建立 momentary button，不推測 fan／power 狀態。
 home_butler 1.2.0 的 ir_control 能力只接受本機勾選的該平台 button；HB HOME_ASSISTANT_IR_NAMES
 逐台分流共用 IR handler，離線／錯誤不得 fallback 直接 IR。相對按鍵未知結果不重送；registry ID、
@@ -114,9 +114,9 @@ v1.47.0 室溫配對：`homeassistant/custom_components/ac_room_temperature` 為
 registry ID 固定來源與唯一實體；options 只換 sensor、不換空調 ID、不發指令。
 Apple Home 匯出配對 climate、排除原生 climate；HB 仍只選原生 SwitchBot 平台。
 感測事件只更新室溫，禁止控制迴圈、改 native state 或 monkey patch；失聯配對實體 unavailable。
-安裝、更換與限制見 [室溫配對](homeassistant/room-temperature.md)，驗證使用 HA CI。
+安裝、更換與限制見 [室溫配對](../homeassistant/room-temperature.md)，驗證使用 HA CI。
 
-HA 架構以 [docs/local-hub-architecture.md](docs/local-hub-architecture.md) 為準。
+HA 架構以 [docs/local-hub-architecture.md](local-hub-architecture.md) 為準。
 v1.46.0：`HOME_ASSISTANT_AC_NAMES` 明確決定逐台控制權；設定錯誤或 HA 失聯不可 fallback 到直接 IR。
 `ha_climate.py` 在原 handler／回饋 wrapper 前分流；HA 管理空調不寫 Sheet last-state，
 不跑補償、防黴、自動关機與 HB 排程。使用者已取消半度與回饋，溫度為整數。
@@ -138,9 +138,9 @@ v1.43.0 半度目標：`ac_temperature.py` 是 16–30°C、0.5°C 步進和 hal
 
 v1.42.1 回饋 API 的 `evaluate_now: true` 可在保存後立即評估；省略 config 時只讀現有設定，不寫回舊設定。明確評估略過背景週期／啟動等待，仍保留上次命令的間隔、持久化樣本與待確認檢查；不可把它實作成強制 IR 或清除 blocked。純 config POST 保持不送指令的相容契約。
 
-空調室溫回饋（v1.42.0）見 [docs/ac-temperature-feedback.md](docs/ac-temperature-feedback.md)：`最後溫度` 永遠保留舒適目標，IR 補償另存 JSON。設定僅 Dashboard 成員／owner Key 可操作，預設關閉；背景工作不可開關機、重置計時或呼叫一般 handler。所有 AC 命令共用 `ac_feedback.CONTROL_LOCK`，發送前持久化待確認、未知不重送；手動成功保存才解除。修改時同步 controller／API／Dashboard demo 與文件，不把補償 IR 值投影成 HomeKit 目標。
+空調室溫回饋（v1.42.0）見 [docs/ac-temperature-feedback.md](https://github.com/CZLin-TW/home-butler/blob/cffe7358e1ec84e66bac4c5ce3e1df40848c45c0/docs/ac-temperature-feedback.md)：`最後溫度` 永遠保留舒適目標，IR 補償另存 JSON。設定僅 Dashboard 成員／owner Key 可操作，預設關閉；背景工作不可開關機、重置計時或呼叫一般 handler。所有 AC 命令共用 `ac_feedback.CONTROL_LOCK`，發送前持久化待確認、未知不重送；手動成功保存才解除。修改時同步 controller／API／Dashboard demo 與文件，不把補償 IR 值投影成 HomeKit 目標。
 
-Homebridge 見 [homebridge/README.md](homebridge/README.md)。`homebridge_api.py` 獨立 router 與
+Homebridge 見 [homebridge/README.md](../homebridge/README.md)。`homebridge_api.py` 獨立 router 與
 `HOMEBRIDGE_API_KEY`，只允許 JSON `HOMEBRIDGE_DEVICE_NAMES` 的唯一啟用 AC；不得把此 Key 加入
 owner／device-voice verifier。GET 僅既有快取，POST 重新驗證 Sheet，ctx 限定精確 ID 後才呼叫原 handler。
 局部設定保留其他欄位，沒有歷史狀態則拒絕，不暗中套用 defaults。`_ac_state_saved` 表示保存完成，
@@ -163,7 +163,7 @@ v1.39.2 I/O 精簡：`get_lighting_area_info` 以 `load_area_settings(read_only=
 
 Siri 獨立指令（v1.39.1）：`process_message(..., voice=True)` 使用 `ask_claude(..., include_history=False)`，一般與降級請求都只送當句；初始讀取五張表，略過對話暫存。背景存檔保留，LINE 預設歷史不變。不得因共用解析器把 LINE 歷史一併關閉；Siri 跨輪省略／確認不再依賴上一句，文件與測試見 README、`tests/test_voice_history.py`。未重写完整 SYSTEM_PROMPT。
 
-語音請求計時見 [docs/voice-timing.md](docs/voice-timing.md)。`request_timing.py` 只在兩個 Siri 路由啟用，以 ContextVar 串起 `[TIMING]`；總時間從路由函式進入算起，不包含代理／threadpool 等待。新計時不可寫入輸入、身分、設備參數或金鑰；`completed` 不是硬體成功。原有模型設定、降級／重試與 `{reply}` 契約保持不變。純觀測不 bump Dashboard 版本。
+語音請求計時見 [docs/voice-timing.md](voice-timing.md)。`request_timing.py` 只在兩個 Siri 路由啟用，以 ContextVar 串起 `[TIMING]`；總時間從路由函式進入算起，不包含代理／threadpool 等待。新計時不可寫入輸入、身分、設備參數或金鑰；`completed` 不是硬體成功。原有模型設定、降級／重試與 `{reply}` 契約保持不變。純觀測不 bump Dashboard 版本。
 
 # 歷史設計：自動夜燈場景指紋（v1.53.0 已退役）
 

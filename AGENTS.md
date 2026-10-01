@@ -56,6 +56,8 @@ Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，�
 
 ### 劇院中繼
 
+2026-10-02 部署分工已核對：HAOS VM 與兩劇院程序在 Mac mini；Windows PC agent 僅保留 pc_monitor。HB 經既有 HA 中繼，不需把本機劇院規則搬進 HB 或新增 Mac PC agent。macOS 常駐與更新由 theater-agent repo 管理；部署端憑證／配對不複製到共同文件。
+
 新增本地 `theater_agent` 整合（1.0.0），Home Butler 1.7.0 選取其 config entry 後，
 HB 與三個 HA switch 共用控制器。Render 中斷不影響本地 switch；Agent 仍唯一執行連動規則。
 初始及重載只讀，寫入後回讀，未知不重送；不從 HA restore state 覆寫原旗標。

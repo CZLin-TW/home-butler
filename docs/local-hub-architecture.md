@@ -63,7 +63,7 @@ v1.55.0 恢復 Dashboard 一次性手動排程，由 HB 到期經 HA 執行；�
 禁止同一自動化在兩邊同時執行。命令被接受、最後送出的 IR 與實體觀察值必須分開；
 未知結果不自動重送。空調下行命令的權限、去重、結果與超時契約見 homeassistant/README.md。
 
-Mac mini 第一階段定位為本地 Agent／Bridge 中心，HB 保留 Render。
+2026-10-02 已核對 Mac mini 同時運行 HAOS VM 與本地 theater-agent／Apple TV monitor，HB 保留 Render、Dashboard 保留雲端部署。劇院功能開關經 HA 中繼到獨立控制器；舊 Windows 只保留 PC 指標，停機不影響家庭控制。程序、無人登入開機與唯讀連線已核對；實體連動、停電復電及長期異機備份仍另行驗收。
 相機分析未實作；未來由本地分析輸出區域存在等狀態，再進 HA 與 HB，不將連續影像傳回 HB。
 
 ## 參考與維護

@@ -182,6 +182,8 @@ agent start: Xeon-1230V2 (192.168.68.55) → https://home-butler.onrender.com  l
 
 ## Theater-agent 轉送（選配，只在劇院 PC 設定）
 
+使用 `THEATER_VIA_HA=true` 且已選取 HA 本地 Theater Agent 整合時，劇院不依賴 PC agent。搬到 Mac 後，舊 PC 若只需指標回報，移除 `THEATER_AGENT_URL`／`THEATER_AGENT_KEY` 與 `HUE_*` 控制設定，明確設 `HUE_LIGHT_REMINDERS_ENABLED=False`，備份設定後完整重啟原 agent。從 `/api/agent/status` 核對能力只剩 `pc_monitor`；保留 ButlerAgent 排程，停用搬走的兩劇院排程與舊 HA／Homebridge VM 自動啟動。不要只關排程卻留下自我重啟的孤兒程序。
+
 同一台 PC 如果也跑著 [theater-agent](https://github.com/CZLin-TW/theater-agent)（家庭劇院控制服務，純內網 :8080），在 `agent_config.py` 加：
 
 ```python

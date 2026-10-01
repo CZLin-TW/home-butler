@@ -23,6 +23,8 @@ v1.58.0 已移除舊來源「自動」「防黴」、半度目標與室溫回饋
 
 本頁記錄目前的責任與接手入口；設備位址、配對資料與憑證以各部署端設定為準，不複製到公開文件。
 
+2026-10-02 部署分工已核對：HAOS VM 與獨立 theater-agent／Apple TV monitor 常駐於 Mac mini；HB 與 Dashboard 仍在各自雲端。劇院入口經 HA，本地規則仍由 theater-agent 執行。舊 Windows 只保留 PC 指標 agent，家庭控制不再依賴該 PC；舊 HA／Homebridge VM 及兩劇院排程已停用。詳細驗證與未完成實機驗收見各 repo 驗證紀錄。
+
 | Repo | 責任 | 主要入口 |
 | --- | --- | --- |
 | [Dashboard](https://github.com/CZLin-TW/Dashboard) | UI、LINE 配對登入、JWT Session、可信使用者身分與 API 代理、瀏覽器快取、獨立 demo | [README](https://github.com/CZLin-TW/Dashboard/blob/main/README.md)、[AGENTS](https://github.com/CZLin-TW/Dashboard/blob/main/AGENTS.md)、[demo](https://github.com/CZLin-TW/Dashboard/blob/main/docs/demo-mode.md) |

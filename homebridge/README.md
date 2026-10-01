@@ -10,7 +10,7 @@ Apple「家庭」/ Siri → 家中 Homebridge → Render HomeButler → SwitchBo
 除濕／送風則使用同一配件內的模式開關。實際可執行的功能仍以空調機型為準。
 不呼叫 Claude，不提供待辦、食品、身分或任意 action 入口。
 
-插件 1.2.0 的冷／暖目標皆以半度調整。回饋啟用時保留 26.5°C 舒適目標，IR 仍下發整數；未啟用時後端將 26.5°C 四捨五入為 27°C，插件在 SET 完成後套用後端結果，Apple Home 會回到 27°C。停用回饋時目標也歸整，但不立即發 IR。詳見[溫度回饋說明](../docs/ac-temperature-feedback.md)。2026-09-09 使用者實測：Dashboard／Siri 可設定半度，Apple Home 能顯示半度，但其調溫按鈕仍跳 1°C。這不代表協定不能接受半度，也尚不能確定是 Apple Home 介面或舊步幅快取；下方診斷可用新配件比較。
+插件 1.2.0 的冷／暖目標皆以半度調整。回饋啟用時保留 26.5°C 舒適目標，IR 仍下發整數；未啟用時後端將 26.5°C 四捨五入為 27°C，插件在 SET 完成後套用後端結果，Apple Home 會回到 27°C。停用回饋時目標也歸整，但不立即發 IR。詳見[溫度回饋說明](https://github.com/CZLin-TW/home-butler/blob/cffe7358e1ec84e66bac4c5ce3e1df40848c45c0/docs/ac-temperature-feedback.md)。2026-09-09 使用者實測：Dashboard／Siri 可設定半度，Apple Home 能顯示半度，但其調溫按鈕仍跳 1°C。這不代表協定不能接受半度，也尚不能確定是 Apple Home 介面或舊步幅快取；下方診斷可用新配件比較。
 
 ## 部署順序
 

@@ -1,5 +1,11 @@
 # 驗證方式與範圍
 
+## 2026-10-02 Mac mini 遷移與 PC 指標分離
+
+本 repo 僅更新文件、維護既有發布紀錄，沒有改 HB／HA 程式、API 或模型提示。HA 備份恢复到 Mac HAOS VM 後，使用者確認原有控制可用；本次另完成兩劇院程序遷移，HA 保留原 Theater Agent entry 改址。HB 唯讀劇院摘要回 `agent_id=home_assistant`，Mac 兩程序版本與新鮮心跳、Apple TV 查詢正常；Windows agent 僅宣告 `pc_monitor`，原劇院排程及舊 HA／Homebridge VM 自動啟動已停用。
+
+使用者重開 Mac 後，未用 SSH／共享螢幕登入前，MBP 讀到 HA HTTP 200 與劇院健康／Apple TV 查詢。未操作實際家電作回歸測試、未發 LINE、未改 Sheets；停電復電、實體劇院連動及長期異機備份仍待驗收。實際 theater-agent 發布／CI／更新由該 repo 記錄，不以本文推定新版本已部署。
+
 ## 2026-09-23 同名待辦定位（系統 v1.61.2，未部署）
 
 Python 3.12.14 臨時 venv 依 requirements.lock 安裝 FastAPI／HTTPX 後，完整 231 項後端離線測試與 compileall 通過。
@@ -11,6 +17,8 @@ Python 3.12.14 臨時 venv 依 requirements.lock 安裝 FastAPI／HTTPX 後，�
 口語上下文辨識仍待上線觀察。系統 Python 3.9.6 與初始 bundled Python 缺少測試依賴，初次完整測試未通過；
 上述成功結果來自補齊依賴的臨時 Python 3.12 環境。Dashboard 僅更新版本至 1.61.2，UI／API／demo 契約不變。
 兩個 repo 尚未 push／部署。
+
+2026-09-23 發布進度：使用者授權上線後，功能提交 `723a69646d3b378de2cdee7e73cba24478af0259` 已推送 main；GitHub Actions 35820925967 三項工作全部成功。公開後端 `/` 回傳 `{"status":"ok"}`，但此端點不提供 SHA；Render 管理頁待登入，尚未確認該提交已在正式程序執行。未發 LINE 或操作正式待辦。
 
 ## 2026-09-20 ToDo 多區域提醒（系統 v1.61.0）
 
@@ -255,7 +263,7 @@ HA 安裝、FP2 進出／離線／重連均待實機驗收。未呼叫 Sheets、
 
 2026-09-08 立即評估（v1.42.1）：162 項離線測試及變更模組編譯通過。新增保存後立即評估、略過背景週期／啟動等待、僅評估指定設備且不覆寫設定、同樣本跨重啟不重送、剛手動控制後等待、關機／非冷暖模式／過期／達標不發送、保存失敗不評估及未知結果不重試的測試。外部服務皆為 fake，未操作真實家電。
 
-2026-09-08 空調室溫補償（系統 v1.42.0）：Python 3.12 的 157 項離線測試及變更模組編譯檢查通過，Homebridge 18 項測試通過。新測試涵蓋冷暖補償方向、保持舒適目標、死區與上限、同樣本去重、過期／關機／送風除濕不調整、重啟等待、未知結果持久化暫停、與手動關機共用鎖、設定不送 IR、獨立 API Key 邊界，以及缺欄拒絕部分保存。未發送真實家電指令，實際室溫穩定性仍待家庭環境觀察。詳見[功能說明](ac-temperature-feedback.md)。
+2026-09-08 空調室溫補償（系統 v1.42.0）：Python 3.12 的 157 項離線測試及變更模組編譯檢查通過，Homebridge 18 項測試通過。新測試涵蓋冷暖補償方向、保持舒適目標、死區與上限、同樣本去重、過期／關機／送風除濕不調整、重啟等待、未知結果持久化暫停、與手動關機共用鎖、設定不送 IR、獨立 API Key 邊界，以及缺欄拒絕部分保存。未發送真實家電指令，實際室溫穩定性仍待家庭環境觀察。詳見[功能說明](https://github.com/CZLin-TW/home-butler/blob/cffe7358e1ec84e66bac4c5ce3e1df40848c45c0/docs/ac-temperature-feedback.md)。
 
 2026-09-07 Homebridge 第一版（系統 v1.40.0）：本機 Python 3.12 完整 137 項離線測試、
 Python 編譯檢查通過；Node 24 / Homebridge 2.4.0 的 11 項插件測試通過。

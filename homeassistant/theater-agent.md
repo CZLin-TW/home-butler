@@ -68,7 +68,7 @@ HB summary 亦透過相同控制器即時讀取。共享互斥鎖避免輪詢與
 不要刪除後重新加入：保留 config entry 才會保留三個 switch 的 unique ID、使用者命名與引用。
 HB 記住的是此 entry 的 ID，不是舊 IP，也不需要另外改一次 HB 劇院位址。
 HA VM 必須能存取主機 API；使用橋接網路或可達主機的位址與防火牆設定。
-本次不處理 macOS launchd、Windows 排程器、Apple TV monitor 或 Mac mini 的休眠策略。
+macOS launchd、Windows 排程停用與 Apple TV monitor 由 theater-agent repo 的常駐部署文件管理，不在 HA 複製第二套程序管理。2026-10-02 已完成本次 Mac 遷移及无人工登入開機核對；runtime／配對／金鑰留在私人部署端。
 
 ## 退回與限制
 
