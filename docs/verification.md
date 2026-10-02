@@ -1,6 +1,6 @@
 # 驗證方式與範圍
 
-## 2026-10-03 主臥 Apple Home 固定自動風速（待發布／安裝）
+## 2026-10-03 主臥 Apple Home 固定自動風速
 
 使用者指定只調整主臥，Apple 家庭移除風速控制、固定自動，Dashboard／HA 原生空調保留手動風速。
 `ac_room_temperature` 1.1.0 新增逐配對 `fixed_auto_fan` 選項，預設關閉；啟用後移除 FAN_MODE 與
@@ -19,6 +19,17 @@ macOS Python 3.14.7／HA Core 2026.9.2／pytest-homeassistant-custom-component 0
 家庭 UI 唯讀確認當時主臥風速為自動；這不代表新版選項已生效或實際設備已驗收。
 發布後需用通過 CI 的 SHA 更新本整合、重啟 HA，僅主臥啟用選項，確認 HomeKit 風扇服務移除與溫度卡，
 再由使用者驗收 Siri／Apple 家庭與 Dashboard 手動風速的互動。
+
+發布／安裝追記：使用者同意後，功能提交 `eabf44a9bec7a7800a8bc6394e97fcb55e9d6672` 已推送 main，
+[GitHub CI 三項工作通過](https://github.com/CZLin-TW/home-butler/actions/runs/37035003116)。
+家庭 HA 2026.9.4 的 Terminal & SSH 已以同一固定 SHA 安裝本整合，舊版保存於
+`/config/ac_room_temperature-backup-20261003-003859-205`。HA Core 重啟後管理頁正常，
+整合頁顯示 1.1.0；主臥保存固定自動選項成功，重開選項確認勾選值為 1，室溫來源仍為主臥 Hub 2 溫度。
+未修改客廳／次臥選項。配對重載後 Apple Home 曾保留舊風扇服務；在既有 HomeKit Bridge 重新載入，
+管理頁回報「整合已重新載入」，macOS 家庭主臥房間確認「主臥空調風速」卡片移除，
+「主臥空調」仍顯示「降溫到26.0°」。HA HTTP 200，這是服務／UI 回讀，不擴張為實體設備驗收。
+本次沒有發送空調電源、模式、溫度或風速指令；手機同步、Siri 原句型與跨入口風速效果仍由使用者驗收。
+回復時取消主臥固定自動選項並重載 HomeKit Bridge；程式回版可使用上述本地整合備份，再重啟 HA。
 
 ## 2026-10-02 主臥 HomeKit 溫控器對照試驗
 
