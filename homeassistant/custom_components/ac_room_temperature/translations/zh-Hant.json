@@ -21,15 +21,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "更換室溫感測器",
-        "description": "更換感測器會保留空調實體與 Apple Home 配對。保存不會送出空調指令。感測器離線時，此配對空調會顯示無法使用；原生空調仍可從 HA 或 Dashboard 控制。",
+        "title": "空調配對設定",
+        "description": "保留空調實體與 Apple Home 配對；保存不會送出指令。固定自動風速會移除配對空調的風速控制，操作此配對空調時使用自動風速。原生 HA／Dashboard 空調仍可調風速，感測器事件不控制空調。",
         "data": {
-          "temperature_sensor": "室溫感測器"
+          "temperature_sensor": "室溫感測器",
+          "fixed_auto_fan": "配對空調固定自動風速（隱藏風速控制）"
         }
       }
     },
     "error": {
-      "invalid_source": "請選擇已登記且單位為攝氏或華氏的溫度感測器。"
+      "invalid_source": "請選擇已登記且單位為攝氏或華氏的溫度感測器。",
+      "auto_fan_unavailable": "原生空調目前未宣告自動風速，請確認來源與連線。"
     }
   }
 }

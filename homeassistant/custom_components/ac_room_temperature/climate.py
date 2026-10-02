@@ -38,6 +38,10 @@ class RoomTemperatureClimate(ClimateEntity):
 
     def __init__(self, entry):
         self.entry = entry
+        self._auto_fan = entry.options.get("fixed_auto_fan", False)
+        if self._auto_fan:
+            self._attr_supported_features &= ~ClimateEntityFeature.FAN_MODE
+        self._command_lock = asyncio.Lock()
         self._attr_unique_id = entry.data["source_id"]
         self._attr_name = entry.title
         self._source = None
@@ -118,11 +122,11 @@ class RoomTemperatureClimate(ClimateEntity):
 
     @property
     def fan_mode(self):
-        return self._attr("fan_mode")
+        return None if self._auto_fan else self._attr("fan_mode")
 
     @property
     def fan_modes(self):
-        return self._attr("fan_modes", ["auto", "low", "medium", "high"])
+        return None if self._auto_fan else self._attr("fan_modes", ["auto", "low", "medium", "high"])
 
     @property
     def extra_state_attributes(self):
@@ -130,12 +134,30 @@ class RoomTemperatureClimate(ClimateEntity):
                 "state_source": "native_ir_last_command"}
 
     async def _call(self, service, data=None):
+        async with self._command_lock:
+            await self._relay(service, data)
+
+    async def _relay(self, service, data=None):
         # Resolve again at dispatch; never address a newly created namesake.
         self._refresh()
         if not self._source or self._source.state not in MODES:
             raise HomeAssistantError("原生空調目前無法使用")
+        turning_off = service == "turn_off" or (data or {}).get("hvac_mode") == HVACMode.OFF
+        needs_auto = self._auto_fan and not turning_off and self._attr("fan_mode") != "auto"
+        if needs_auto and "auto" not in (self._attr("fan_modes") or []):
+            raise HomeAssistantError("原生空調不支援自動風速，未送出指令")
         try:
             async with asyncio.timeout(25):
+                # This presentation entity only: native HA/Dashboard control stays
+                # unrestricted. No commands on setup, options or sensor events.
+                if needs_auto:
+                    await self.hass.services.async_call("climate", "set_fan_mode",
+                        {"entity_id": self._source_entity_id, "fan_mode": "auto"},
+                        blocking=True, context=self._context)
+                    # The registry may change while awaiting the first command.
+                    self._refresh()
+                    if not self._source or self._source.state not in MODES:
+                        raise HomeAssistantError("原生空調目前無法使用")
                 await self.hass.services.async_call("climate", service,
                     {"entity_id": self._source_entity_id, **(data or {})}, blocking=True, context=self._context)
         except Exception:
@@ -161,6 +183,8 @@ class RoomTemperatureClimate(ClimateEntity):
         await self._call("set_temperature", data)
 
     async def async_set_fan_mode(self, fan_mode):
+        if self._auto_fan:
+            raise HomeAssistantError("此配對空調固定自動風速，請從原生空調調整風速")
         if fan_mode not in self.fan_modes:
             raise HomeAssistantError("空調風速不支援")
         await self._call("set_fan_mode", {"fan_mode": fan_mode})

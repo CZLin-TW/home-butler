@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Pair AC with room thermometer",
-        "description": "Choose a native SwitchBot Cloud AC and a temperature sensor. This creates a local presentation entity; it never adjusts the AC automatically. Export this paired entity to HomeKit and exclude the original AC. A missing sensor makes this entity unavailable instead of displaying a default room temperature.",
+        "description": "Choose a native SwitchBot Cloud AC and a temperature sensor. This creates a local presentation entity; sensor events never control the AC. Export this paired entity to HomeKit and exclude the original AC. A missing sensor makes this entity unavailable instead of displaying a default room temperature.",
         "data": {
           "climate_entity": "Native air conditioner",
           "temperature_sensor": "Room temperature sensor"
@@ -21,15 +21,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "Change room temperature sensor",
-        "description": "Changing the thermometer preserves this AC entity and HomeKit pairing. Saving does not send an AC command. If a sensor is unavailable, this paired entity becomes unavailable; you can still control the native AC directly in HA or Dashboard.",
+        "title": "AC presentation options",
+        "description": "Preserves the AC entity and HomeKit pairing. Saving sends no command. Fixed automatic fan hides fan controls on this paired AC and restores automatic fan when it is operated. Native HA/Dashboard fan controls remain available. Sensor events never control the AC.",
         "data": {
-          "temperature_sensor": "Room temperature sensor"
+          "temperature_sensor": "Room temperature sensor",
+          "fixed_auto_fan": "Fixed automatic fan on paired AC (hide fan controls)"
         }
       }
     },
     "error": {
-      "invalid_source": "Select a registered temperature sensor with Celsius or Fahrenheit units."
+      "invalid_source": "Select a registered temperature sensor with Celsius or Fahrenheit units.",
+      "auto_fan_unavailable": "The native AC does not currently advertise automatic fan. Check the source and connection."
     }
   }
 }

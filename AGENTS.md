@@ -29,9 +29,15 @@
 | 自動夜燈規則 | 已退役（v1.53.0） | 舊 Sheet 保留不執行，規則寫入回 410 |
 | 劇院連動 | theater-agent 執行規則；HA 本地 Theater Agent 管三個功能開關，HB 可委派給同一控制器 | `THEATER_VIA_HA`（預設 false）；需安裝本地整合並於 Home Butler 選取，既有部署不自動切換 |
 | PC 指標 | PC agent heartbeat | 與劇院中繼無關；拿掉 PC agent 會一併失去這張卡與失聯告警 |
-| Apple Home | HA HomeKit Bridge | `homebridge/` 插件降為歷史相容，不列入驗收 |
+| Apple Home | HA HomeKit Bridge | `homebridge/` 插件降為歷史相容；室溫配對 1.1.0 可逐台固定自動風速，實際啟用見驗證紀錄 |
 
 ## HB 與 HA 的分工原則
+
+Apple Home 的室溫配對 climate 是原生空調的呈現層。`ac_room_temperature` 1.1.0 的
+`fixed_auto_fan` 預設關閉；啟用後移除該配對的風速能力，開機／調溫／非關機模式指令先視需要
+恢復原生自動風速，關機不附帶風速指令。原生 HA／Dashboard 仍可調風速；儲存選項、重載與
+感測事件不發送設備命令。失敗／未知不重送，不能擴張成背景風速規則。詳見
+[室溫配對](homeassistant/room-temperature.md)。
 
 - **即時互動與連續條件判斷歸 HA**：存在感測、夜燈、日出、亮度觸發、設備冷卻等待。
   這些要在本地毫秒級反應，不該繞 Render。

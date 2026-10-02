@@ -1,4 +1,4 @@
-"""One native AC per pairing. Options replace the sensor, never its identity."""
+"""One native AC per pairing. Options preserve its identity and native controls."""
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -61,10 +61,21 @@ class PairingOptions(config_entries.OptionsFlow):
         if user_input is not None:
             try:
                 sensor_id = selected(self.hass, user_input["temperature_sensor"])
-                return self.async_create_entry(title="", data={"sensor_id": sensor_id})
+                fixed_auto = user_input.get("fixed_auto_fan", entry.options.get("fixed_auto_fan", False))
+                if fixed_auto:
+                    source = er.async_get(self.hass).async_get(entry.data["source_id"])
+                    state = self.hass.states.get(source.entity_id) if source else None
+                    if not state or "auto" not in (state.attributes.get("fan_modes") or []):
+                        return self.async_show_form(step_id="init", data_schema=self._schema(entry),
+                            errors={"base": "auto_fan_unavailable"})
+                return self.async_create_entry(title="", data={"sensor_id": sensor_id, "fixed_auto_fan": fixed_auto})
             except ValueError:
                 errors["base"] = "invalid_source"
+        return self.async_show_form(step_id="init", data_schema=self._schema(entry), errors=errors)
+
+    def _schema(self, entry):
         sensor_id = entry.options.get("sensor_id", entry.data["sensor_id"])
         sensor = er.async_get(self.hass).async_get(sensor_id)
         field = vol.Required("temperature_sensor", default=sensor.entity_id) if sensor else vol.Required("temperature_sensor")
-        return self.async_show_form(step_id="init", data_schema=vol.Schema({field: sensor_selector()}), errors=errors)
+        return vol.Schema({field: sensor_selector(),
+            vol.Optional("fixed_auto_fan", default=entry.options.get("fixed_auto_fan", False)): bool})
