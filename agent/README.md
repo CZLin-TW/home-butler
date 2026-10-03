@@ -1,6 +1,6 @@
 # home-butler PC monitoring agent
 
-跑在每台要監控的 Windows PC 上，每 60 秒讀本機指標（CPU/RAM/GPU/CPU 溫/F@H 狀態）push 到 home-butler `/api/computers/heartbeat`。Dashboard 那邊會顯示成「電腦」區塊的卡片，含當下值 + 24h 折線圖。
+Windows 版本跑在每台要監控的 Windows PC 上，每 60 秒讀本機指標（CPU/RAM/GPU/CPU 溫/F@H 狀態）push 到 home-butler `/api/computers/heartbeat`。Dashboard 那邊會顯示成「電腦」區塊的卡片，含當下值 + 24h 折線圖。
 
 ```
 PC ──60s heartbeat──→ home-butler /api/computers/heartbeat
@@ -11,6 +11,8 @@ Dashboard ←─pull──── /api/computers/status
 ```
 
 ---
+
+macOS 可使用獨立、預設僅本機採樣的 [macos_metrics.py](macos.md)，不需啟動 Windows agent 或劇院／相機服務。正式接入與常駐尚未部署。
 
 ## 前置需求
 

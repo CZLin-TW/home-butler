@@ -1,5 +1,15 @@
 # 驗證方式與範圍
 
+## 2026-10-03 Mac mini 獨立 telemetry collector（未部署）
+
+基於 GitHub main `fe67e52` 獨立 checkout 新增 `agent/macos_metrics.py`，沿用既有 heartbeat/status schema，不修改後端 API、Sheet 欄位、Windows agent 或設備控制。預設只 stdout；外送須指定 --send/--url 和既有 key，禁止 redirect／環境 proxy，HTTP 僅 literal loopback。沒有常駐安裝、自我更新或秘密讀取。
+
+Apple M6、12 核心、24 GiB、macOS 27.0.1 真實無 sudo 採樣：CPU 62.6%、RAM 56.6%、GPU Device Utilization 54%；load average 約 3.38/2.51/2.08 只保留本機。這是單點採樣，不是性能評測。可靠無特權攝氏來源未驗證，CPU/GPU 溫度固定 null。
+
+Python 3.12.14 後端 `unittest discover -s tests -v` **249 項通過**（既有 243＋新增 6），新增測試涵蓋 driver counter 合法值／0／缺值、預設不外送、HTTPS 與 key 邊界、loopback 收件器、redirect 拒絕，以及真實 PCHeartbeatRequest schema → pc_state snapshot（阻止 Sheet writer）。編譯檢查、git diff --check 通過。真實取樣使用獨立 venv 的 psutil 7.2.2，套件由 PyPI 下載；未裝特權 helper。
+
+沙箱最初阻止 GitHub DNS、sysctl 與 localhost bind，限定動作核准後完成，不是系統需要 sudo。沒有修改相機 task-4／8768／8771、HA、家電、DNS 或 VPN；沒有正式 heartbeat、Sheets／LINE 寫入、push、部署、launchd 或 persistent credentials。Dashboard 對應 v1.62.0 模擬驗證見其 repo。正式外送目的地與 key 供應、常駐方案仍需使用者核對授權。
+
 ## 2026-10-03 LINE 家庭成員入口驗證（發布前離線驗證）
 
 以 GitHub main `a54066f356b92020e43560a2f1bfc25d640a3f0b` 建立獨立修復 checkout。

@@ -1,5 +1,9 @@
 # home-butler 版本變更紀錄
 
+## 2026-10-03 Mac mini 指標 collector（未部署）
+
+新增独立 `agent/macos_metrics.py`：CPU/RAM、可選 AGX GPU 使用率，溫度 null；預設本機 JSON，明確開啟才外送。沿用 PC heartbeat 契約，與 vision／劇院／Windows agent 分離。正式 key、目的地與常駐尚未配置；見 [接入說明](../agent/macos.md)。
+
 ## 2026-10-03 LINE 啟用成員入口驗證
 
 所有 LINE 文字分支先核對發話者 ID 與啟用家庭成員，補上一般 assistant／控制、風格與 `@all` 的缺口。
