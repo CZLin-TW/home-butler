@@ -1,5 +1,23 @@
 # 驗證方式與範圍
 
+## 2026-10-03 LINE 家庭成員入口驗證（發布前離線驗證）
+
+以 GitHub main `a54066f356b92020e43560a2f1bfc25d640a3f0b` 建立獨立修復 checkout。
+`main.py:handle_message` 在所有文字分支前要求非空發話者 ID、家庭成員精確匹配與啟用狀態；
+驗證失敗早退，不進 assistant、控制、廣播、配對、全家庭資料載入或對話存檔。
+合法成員配對、兒童角色、風格查詢與廣播維持；group／room 仍只使用發話者 ID。
+新成員的 ID 由管理者從拒絕 log 核對登錄，不再依賴未授權對話寫入。
+
+macOS／Python 3.12.14 的獨立 venv，依 requirements.lock 安裝 CI 所需 FastAPI／HTTPX：
+`python -m unittest discover -s tests -v` **243 項通過**（既有 231＋新增 12）；
+`python -m compileall -q .` 與 `git diff --check` 通過。
+新增 `tests/test_line_member_auth.py` 執行真實 handler 函式、以 fake LINE／Sheets／assistant／thread 隔離；
+涵蓋啟用、未知、停用、姓名冒充／ID 非精確匹配、所有文字分支拒絕、group／room、缺 ID、空表／欄位、
+worksheet／records 讀取失敗、錯誤資料、合法廣播收件人、成人／兒童配對與失效碼、拒絕回覆失敗不落入存檔。
+沒有 import／啟動正式 app、沒有付費模型呼叫、真實 LINE、家庭 Sheets 或家電操作。
+本次未改 HA／Homebridge，未重跑其獨立 framework suites；未取得修復版 GitHub CI／部署結果。
+上述離線驗證階段未 push、建立 PR、merge、部署或重啟服務；未修改 Dashboard 顯示版本。
+
 ## 2026-10-03 全部空調套用 Apple Home 恆溫器與自動風速
 
 使用者在主臥完成後授權全部空調採相同設定，並要求省略非必要測試。本次沿用已安裝的

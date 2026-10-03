@@ -339,8 +339,12 @@ curl -X POST https://home-butler.onrender.com/notify -H "X-API-Key: <key>"
 每位家庭成員：
 1. 掃 QR Code 加管家好友
 2. 傳任何一則訊息
-3. 從「對話暫存」分頁複製 User ID（U 開頭）
-4. 填入「家庭成員」分頁
+3. 請管理者從後端服務 log 的 `[LINE AUTH] denied user_id=...` 複製 User ID（U 開頭），並核對本人
+4. 填入「家庭成員」分頁的 `Line User ID`，設定 `狀態=啟用` 後再傳訊息
+
+未登錄或停用者會收到拒絕回覆，不會寫入「對話暫存」，也不能進入 AI、控制、廣播、風格或配對流程。
+群組／聊天室只核對發話者的 User ID；沒有 User ID 或家庭資料讀取失敗時停止處理。
+Webhook 簽章驗證 LINE 來源，不代表發話者已獲家庭授權。
 
 ---
 

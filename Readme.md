@@ -156,6 +156,10 @@ HA 自訂整合以 HA OS／Core 2026.9.2 為目前測試基準；各整合有獨
 
 ### Siri 與家人權限
 
+LINE 的對話、家電控制、風格查詢、`@all` 與 Dashboard 配對均限 Sheet 中已啟用、
+LINE User ID 相符的家庭成員。群組／聊天室仍驗證發話者；缺 ID 或讀表失敗時拒絕執行。
+新增家人的 ID 取得方式見 [家庭成員設定](docs/backend-guide.md#十五取得家庭成員-line-user-id)。
+
 Apple Home／Siri 可直接控制 HA 已匯出的配件；「管家」捷徑則把文字送到 HB，提供自然語言家庭功能。
 完整 `/api/assistant` 使用 owner Key，傳入 User ID 只作身分，不是降低權限的機制。
 長輩／小孩若只需家電，改用 `/api/assistant/devices` 與獨立 `DEVICE_VOICE_API_KEY`，

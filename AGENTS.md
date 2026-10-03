@@ -109,6 +109,12 @@ HA 端的 `theater.py` 是**白名單不是 proxy**：action 對應寫死的 met
 專用 schema、驗證、handler 白名單、README 與 `tests/test_device_voice.py`。
 完整 prompt 的動作擴充**不會**自動授權家電捷徑。
 
+LINE 文字入口在所有分支前，以 webhook 發話者 `user_id` 精確匹配「家庭成員」的
+`Line User ID` 且 `狀態=啟用`。一般對話／控制、風格、`@all`、Dashboard 配對共用此邊界；
+group／room 不以群組 ID 代替，缺 ID、非成員、停用或讀表失敗一律早退，且不存家庭對話。
+LINE 簽章只驗證來源，`prompt.get_user_name` 的 fallback 不是授權機制。
+新成員由管理者從服務 log 的 `[LINE AUTH] denied user_id=...` 取得 ID 後手動登錄。
+
 ## 背景工作（以 `main.py:jobs.add` 為準）
 
 - **每 60 秒**：`schedules`（設備排程／封存，也是 HA 空調自動關機 reconcile 的入口）、

@@ -419,9 +419,31 @@ async def callback(request: Request):
 
 @webhook_handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_id = event.source.user_id
+    user_id = getattr(event.source, "user_id", None)
     text = event.message.text
     reply = "抱歉，發生未知錯誤。"
+
+    # LINE 簽章只驗證訊息來源；所有文字分支都要先驗證啟用家庭成員。
+    # group/room 也只認發話者 user_id，絕不以群組 ID 或姓名代替。
+    # 失敗在此早退，不進 assistant、廣播、配對或背景對話存檔。
+    try:
+        members = get_sheet("家庭成員").get_all_records() if user_id else []
+        member = next(
+            (m for m in members
+             if str(m.get("Line User ID", "")) == user_id and m.get("狀態") == "啟用"),
+            None,
+        )
+    except Exception:
+        print("[LINE AUTH] 家庭成員驗證資料無法讀取")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text="⚠️ 暫時無法驗證家庭成員身分，請稍後再試。"))
+        return
+    if not member:
+        # 管理者可從服務 log 取得新成員 ID；未授權訊息不寫入家庭對話。
+        print(f"[LINE AUTH] denied user_id={user_id}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(
+            text="❌ 僅限已啟用的家庭成員使用。"))
+        return
 
     try:
         print(f"[1] user_id={user_id}, text={text}")
@@ -442,29 +464,20 @@ def handle_message(event):
         login_code = re.sub(r"\D", "", _code_src) if requested_role else ""
         if len(login_code) == 6:
             code = login_code
-            members = get_sheet("家庭成員").get_all_records()
-            member = next(
-                (m for m in members
-                 if str(m.get("Line User ID", "")) == user_id and m.get("狀態") == "啟用"),
-                None,
-            )
-            if not member:
-                reply = "❌ 你不是家庭成員，無法登入 Dashboard。"
+            name = member.get("名稱", "")
+            picture = ""
+            try:
+                profile = line_bot_api.get_profile(user_id)
+                picture = getattr(profile, "picture_url", "") or ""
+            except Exception as e:
+                print(f"[LOGIN] get_profile failed: {e}")
+            final_role = device_auth.approve(code, user_id, name, picture, requested_role=requested_role)
+            if final_role == "kid":
+                reply = "✅ 已授權這台為兒童遙控器（只能進裝置頁），回到網頁就會自動進入 🧒"
+            elif final_role:
+                reply = f"✅ 已授權登入 Dashboard（以 {name} 的身分），回到網頁就會自動進入 🏠"
             else:
-                name = member.get("名稱", "")
-                picture = ""
-                try:
-                    profile = line_bot_api.get_profile(user_id)
-                    picture = getattr(profile, "picture_url", "") or ""
-                except Exception as e:
-                    print(f"[LOGIN] get_profile failed: {e}")
-                final_role = device_auth.approve(code, user_id, name, picture, requested_role=requested_role)
-                if final_role == "kid":
-                    reply = "✅ 已授權這台為兒童遙控器（只能進裝置頁），回到網頁就會自動進入 🧒"
-                elif final_role:
-                    reply = f"✅ 已授權登入 Dashboard（以 {name} 的身分），回到網頁就會自動進入 🏠"
-                else:
-                    reply = "❌ 驗證碼錯誤或已過期，請回 Dashboard 重新取得一組。"
+                reply = "❌ 驗證碼錯誤或已過期，請回 Dashboard 重新取得一組。"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
@@ -472,13 +485,7 @@ def handle_message(event):
         if text.strip().startswith("@all"):
             broadcast_msg = text.strip()[4:].strip()
             if broadcast_msg:
-                members_sheet = get_sheet("家庭成員")
-                members = members_sheet.get_all_records()
-                sender_name = user_id
-                for m in members:
-                    if m.get("Line User ID") == user_id and m.get("狀態") == "啟用":
-                        sender_name = m.get("名稱", user_id)
-                        break
+                sender_name = member.get("名稱", user_id)
                 push_text = f"📢 {sender_name}：{broadcast_msg}"
                 for member in members:
                     if member.get("狀態") == "啟用":
