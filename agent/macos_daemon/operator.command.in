@@ -1,0 +1,26 @@
+#!/bin/zsh -f
+unsetopt XTRACE VERBOSE
+set -eu
+package="${0:A:h}"
+check() {
+  local actual
+  actual=$(/usr/bin/shasum -a 256 "$package/$1")
+  [[ "${actual%% *}" == "$2" ]] || { print 'Package checksum mismatch; stop.'; exit 2; }
+}
+check manifest.json __MANIFEST_SHA256__
+__SUPPORT_CHECKS__
+/usr/bin/python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' || { print 'System Python 3.11+ required; do not substitute a generic credential reader.'; exit 2; }
+print 'INSTALL: fresh reviewed package / RESUME: existing item / ROLLBACK: stop daemon, restore previous agent / STATUS: read-only'
+read -r 'action?Action: '
+set +e
+case "$action" in
+  INSTALL) /usr/bin/sudo /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 /usr/bin/python3 -I "$package/install.py" ;;
+  RESUME) /usr/bin/sudo /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 /usr/bin/python3 -I "$package/resume.py" ;;
+  ROLLBACK) /usr/bin/sudo /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 /usr/bin/python3 -I "$package/install.py" --rollback ;;
+  STATUS) /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=en_US.UTF-8 /usr/bin/python3 -I "$package/diagnose.py" ;;
+  *) print 'Cancelled.' ;;
+esac
+result=$?
+print "Finished (status $result). Keep this result; press Enter to close."
+read -r reply
+exit "$result"

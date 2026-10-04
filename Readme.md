@@ -84,7 +84,7 @@ HA／Hue／FP2 的本地互動不需經 Render；Hub 2 快速刷新提示目前�
 | 本 repo：HomeButler | LINE／Siri 意圖、家庭權限、待辦庫存、Sheets、提醒、設備 API 及選定 HA 能力轉送 |
 | [Dashboard](https://github.com/CZLin-TW/Dashboard) | UI、配對登入、Session、使用者身分驗證與後端 API 代理；不是直接持有家電金鑰的純靜態頁面 |
 | [HA 自訂整合](homeassistant/README.md) | 主動連接 HB，同步選定觀測／狀態，執行有限的空調、IR 按鈕及 Hue 控制 |
-| [PC Agent](agent/README.md) | Windows PC 健康指標與舊劇院／Hue 中繼；[macOS collector](agent/macos.md) 獨立只讀指標，預設不外送，未部署 |
+| [PC Agent](agent/README.md) | Windows PC 健康指標與舊劇院／Hue 中繼；[macOS collector](agent/macos.md) 獨立只讀指標，預設不外送；可選 [macOS daemon](agent/macos_daemon/README.md) 提供原生 Keychain sender 與使用者操作的部署工具 |
 | [Theater Agent](https://github.com/CZLin-TW/theater-agent)（私人 repo、選配） | AVR／KEF／電視／Apple TV 的專用連動；不需要劇院功能就不需存取此 repo |
 | Homebridge（舊路徑、選配） | 讓未遷移 HA 的 HB 空調進 Apple Home；新 HA 配置使用 HA HomeKit Bridge，無需同時安裝 |
 

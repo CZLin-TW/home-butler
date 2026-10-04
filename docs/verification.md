@@ -442,3 +442,26 @@ Optional smc_temperature={tcmb_c,tcmz_c} travels collector -> strict backend sch
 Backend: 253 offline tests passed; after adding the child-timeout/invalid-value case, all 7 targeted collector/schema tests passed. Dashboard: 39 tests, typecheck, lint and production build passed. Native staged sender fake-only tests passed for strict nested fields, ranges, booleans, nulls and unknown fields; no Keychain/network access. Actual localhost demo UI confirmed TCMb value/line, TCMz unavailable and source/retention labels. IAB screenshot tool failed, so no pixel screenshot verification claimed. No push, deployment, runtime/LaunchAgent/Keychain changes.
 
 Mobile DOM verification: 390px viewport, document scrollWidth390; TCMb label/value, TCMz unavailable and source text present. Real collector Python -I sample (stdout only, no send): TCMb46.3C, TCMznull.
+
+
+## 2026-10-04 macOS daemon source consolidation（未部署整理版）
+
+基準為 GitHub `main` e7246a9，獨立 feature branch；既有 collector／後端 API 不變。
+收斂原生 sender、source-only builder、範例設定、System LaunchDaemon 安裝、續接、回滾及唯讀診斷。
+實際設定、機器識別、cdhash、runtime、二進位、log、Keychain 與秘密不加入新增檔案。
+
+驗證：27 項 Python fake OS／生命週期回歸（含 partition 被 helper 重置的拒絕、legacy/modern/unknown
+格式、已成功續接不重送、未完成紀錄停止、SIGHUP／切換失敗回復、未知 job 不碰、並行操作拒絕）；
+原生 Swift fake-only tests（payload、UTF-8 假 key roundtrip、採樣先於 key、明確 acknowledgement、
+redirect、partition policy、非 root launchd）；完整 Python 後端 281 項測試通過、編譯、Black 格式、shell 語法、
+`git diff --check` 與 `.invalid` 範例的本機完整套件建置。沒有以新版執行真 Keychain、採樣或 heartbeat。
+Security SDK deprecated 警告保留。macOS CI 工作僅編譯／跑假測試，尚未在 GitHub 執行。
+
+先前部署的本機版本已由使用者完成切換，收尾唯讀確認 system job／非 root UID／60 秒／exit 0、
+自然 acknowledged、舊 GUI job 停用及實際 System database 0x100／唯一 sender ACL。
+該證據不等於本次重構 binary 已部署，亦不等於 reboot-before-login 已驗收；本次不重啟、不改服務。
+
+秘密檢查範圍為本次 staged additions／新增檔案與 shallow clone 中可見的相關 collector 歷史；
+採 token/private-key/credential-assignment 特徵與本機識別規則、路徑／產物清單及人工 diff 審查。
+不讀真正 API key 進行比對，沒有宣稱完整上游歷史或所有高熵值皆無秘密。
+既有上游文件已有先前设备資訊；本次未擴散新的本機識別，也不改寫上游歷史。

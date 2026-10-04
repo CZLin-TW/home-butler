@@ -95,3 +95,7 @@ HA 空調的到期關機由 `ac_auto_off` 以「自動（HA）」排程負責，
 4. 在報告中分開寫靜態檢查、離線測試、瀏覽器 demo、部署觀察與實機功能驗證；只有實際做過的項目才能列為通過。
 
 驗證入口：[home-butler](verification.md)、[Dashboard](https://github.com/CZLin-TW/Dashboard/blob/main/docs/verification.md)、[theater-agent](https://github.com/CZLin-TW/theater-agent/blob/main/docs/verification.md)（私人）。
+
+## macOS 指標常駐
+
+`agent/macos_daemon/` 是獨立 telemetry sender 的 source 與部署工具，沿用 heartbeat 契約；不連相機／theater／家電。System LaunchDaemon 使用非 root UID、60 秒新採樣，System Keychain 限定 sender。repo 更新不自動部署；實際二進位／設定／憑證留部署端。操作與中斷恢復見 [macOS daemon](../agent/macos_daemon/README.md)。

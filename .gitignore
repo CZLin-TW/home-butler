@@ -5,3 +5,17 @@ __pycache__/
 agent/agent_config.py
 homebridge/node_modules/
 homebridge/*.tgz
+
+# macOS telemetry: source/examples only; keep all deployment material local.
+agent/macos_daemon/.local/
+agent/macos_daemon/.build/
+agent/macos_daemon/deployment.json
+agent/macos_daemon/config.local.json
+agent/macos_daemon/manifest.json
+agent/macos_daemon/bundle/
+agent/macos_daemon/runtime/
+agent/macos_daemon/*.log
+agent/macos_daemon/*.keychain*
+agent/macos_daemon/*.p12
+agent/macos_daemon/*.pem
+agent/macos_daemon/*.mobileprovision

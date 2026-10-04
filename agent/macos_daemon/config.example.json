@@ -1,0 +1,15 @@
+{
+  "label": "org.homebutler.telemetry.boot",
+  "service": "org.homebutler.telemetry.api-key.boot-v1",
+  "account": "192.0.2.20",
+  "hostname": "Mac mini",
+  "origin": "https://butler.example.invalid",
+  "user": "example",
+  "group": "staff",
+  "uid": 502,
+  "gid": 20,
+  "home": "/Users/example",
+  "install": "/Library/Application Support/HomeButlerTelemetry",
+  "python": "bin/python3.12",
+  "previous": null
+}

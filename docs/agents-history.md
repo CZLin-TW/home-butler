@@ -228,3 +228,7 @@ recall 別的場景 → auto 完全不碰。另外這個機制**救不到**「�
 ## 2026-10-04 SMC temperature integration (unpublished)
 
 Added independent optional TCMb/TCMz fields, strict validation, bounded memory history, UI source labels and null handling. No Sheet-column additions or credential changes. Dashboard version prepared as 1.63.0.
+
+## 2026-10-04 macOS daemon 原始碼收斂
+
+將本機監控部署工具整理為 `agent/macos_daemon/`，以範例／私有建置設定代替機器識別。保留 Swift sender 與安裝、續接、回滾、診斷；一次性 credential rewrite／partition repair 不變成正式自動修補功能。加入實際 item database 格式、錯誤 helper partition 與中斷重入回歸。整理版未部署，現役 daemon 不受影響；pre-login reboot 未實測。

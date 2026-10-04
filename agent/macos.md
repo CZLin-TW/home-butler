@@ -1,6 +1,6 @@
-# macOS 電腦指標 collector（未部署）
+# macOS 電腦指標 collector 與可選 daemon
 
-`macos_metrics.py` 是獨立的唯讀 collector，不載入 Windows `agent.py`、vision、theater、HA、Hue 或家電設定，沒有 WebSocket 控制、auto-update 或背景安裝功能。
+`macos_metrics.py` 是獨立的唯讀 collector，不載入 Windows `agent.py`、vision、theater、HA、Hue 或家電設定，沒有 WebSocket 控制或 auto-update。可選的原生 sender／LaunchDaemon 原始碼與安全操作見 [macOS daemon](macos_daemon/README.md)。
 
 ## 資料與限制
 
@@ -10,9 +10,10 @@
 | RAM 使用率 | psutil virtual_memory().percent | OS available-memory 語意，未必等同 Activity Monitor 的 Memory Used |
 | GPU 使用率 | AGXAccelerator / PerformanceStatistics / Device Utilization % | 可選；只接受有效 0–100 數值，未公開穩定契約、OS 更新可能失效；不以 renderer/tiler 數值代替 |
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
+| TCMb／TCMz | 唯讀 AppleSMC | 獨立感測器欄位；缺值為 null，M6 語義未官方確認 |
 | load average 1/5/15 分鐘、RAM 總量 | os.getloadavg / psutil | 只在預設本機 JSON 的 local_only；既有後端契約不接收／儲存，不顯示在卡片 |
 
-沒有執行 sudo、powermetrics、特權 SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
+collector 沒有執行 sudo、powermetrics、特權 SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
 
 ## 安全本機試跑
 
@@ -28,7 +29,7 @@ python3 -m venv .venv-macos
 
 ## 正式接入前需核對
 
-目前既有 `/api/computers/heartbeat` 使用家庭級 `HOME_BUTLER_API_KEY`，沒有僅能寫 telemetry 的獨立金鑰。**本次沒有讀取、建立、持久化或配置金鑰**。若選擇新建受限 telemetry key，須另外授權後端驗證與憑證部署，不能把 HA／語音 key 加進通用驗證。
+目前既有 `/api/computers/heartbeat` 使用家庭級 `HOME_BUTLER_API_KEY`，沒有僅能寫 telemetry 的獨立金鑰。collector 本身不持久化金鑰；可選 daemon 的 System Keychain 設定必須由使用者親自授權及輸入。若選擇新建受限 telemetry key，須另外授權後端驗證與憑證部署，不能把 HA／語音 key 加進通用驗證。
 
 先核對目標 home-butler HTTPS origin、Mac 的穩定 LAN IP（既有卡片主鍵）與金鑰供應方式，再由使用者授權送出。repo Windows 範例 origin 是 `https://home-butler.onrender.com`，不代表已核實目前正式目的地；collector 沒有預設外送網址。
 
@@ -38,18 +39,20 @@ python3 -m venv .venv-macos
 
 授權後可用 `--send --url <approved-origin>` 做一次送出，再以 `--watch --interval 60` 前景運行；key 僅由 `HOME_BUTLER_API_KEY` 環境取得，不放 CLI、URL 或 log。不在文件提供真 key。loopback 測試若環境含 key 會拒絕，避免秘密送到假收件器。逾時不重送同一筆，下個週期重新採樣；HTTP 回覆只認 `200 {"ok":true}`。前景模式 Ctrl-C 停止，勿同時啟動多個實例。
 
-常駐 launchd 安裝、開機啟動、金鑰持久化、正式 heartbeat、GitHub push／main 部署皆未執行。後续若要常駐，需另外決定專屬部署目錄、單实例與 log rotation、金鑰保管、失敗重啟、啟停與撤回方式；不放入相機服務 checkout。
+獨立 daemon 已有使用者授權的本機部署與自然回報驗證；重開機未登入仍未實測。repo 提供的是後續整理版原始碼，尚未替換現役 sender；重新建置會改變 cdhash，需獨立部署審查。見 [安裝、續接與回滾](macos_daemon/README.md)。不放入相機服務 checkout。
 
 ## 測試
 
 `tests/test_macos_metrics.py` 以 fake psutil、實際 heartbeat Pydantic schema 與 pc_state record/snapshot 驗證相容；Sheet writer 完全阻止。loopback HTTP 測試驗證 path、null、無 key 與禁止 redirect。後端 CI 不必安装 psutil；真實本機採樣才需要。
 
-## TCMb／TCMz 整合（本機準備，未發布）
+## TCMb／TCMz 整合
 
 `macos_temperature.py` 只讀 AppleSMC 的 TCMb／TCMz，無 sudo、憑證或網路。
 名稱依 OSHI 的 CPU die average / maximum 定義；M6 mapping 未經 Apple 官方確認。
-直接讀取 TCMb=46.05°C、TCMz=null。數值高低不作語義證據。
+缺失／無效值保留 null，不能把 TCMb 代替 TCMz，亦不能稱作已驗證的 CPU/GPU 攝氏溫度。
 
-
-
-Collector now emits optional smc_temperature={tcmb_c,tcmz_c}; CPU/GPU temperature fields stay null. Backend accepts only finite numeric values >0 and <=150 or null, rejecting booleans, strings and extra nested fields. Bounded memory history retains up to24h; new temperatures are NOT persisted in existing Sheets and are lost on backend restart. Dashboard renders each named sensor and its source/uncertainty independently. The installed trusted sender rejects this new schema, so do not replace only the collector: a reviewed new signed sender and explicit Keychain trust migration/re-entry are required. Existing installed files remain unchanged.
+Collector 外送獨立 `smc_temperature={tcmb_c,tcmz_c}`；CPU/GPU 溫度欄位維持 null。
+後端只接受有限、>0 且 <=150 的數值或 null，拒絕 bool/string/額外欄位。
+新溫度保留最多 24 小時記憶體歷史，不寫既有 Sheet 欄位，後端重啟即失去歷史。
+Dashboard 分別顯示來源、限制及 unavailable。舊 sender 不一定接受新 schema，
+不得只替換 collector；新的 binary 必須經明確的簽章／Keychain 信任審查。

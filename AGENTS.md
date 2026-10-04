@@ -445,7 +445,9 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 # PC monitoring agent 部署現況
 
-家裡兩台 Windows PC 跑 `agent/agent.py` 監控本機指標，每 60s push 到 home-butler `/api/computers/heartbeat`。macOS 另有 `agent/macos_metrics.py`，預設只本機採樣；使用既有 heartbeat 契約，無控制能力、可靠溫度來源或已安裝常駐。正式憑證與外送未配置，見 `agent/macos.md`。TCMb／TCMz 整合透過獨立 smc_temperature 欄位，來源標籤與 M6 未官方確認限制見 `agent/macos.md`。新溫度只留 bounded 24h 記憶體歷史，不新增 Sheet 欄位，尚未發布。詳細 setup 看 `agent/README.md`，這裡只記**本家**部署現況跟踩過的雷。
+Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；本次整理版 source 尚未替換現役 binary。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。新 binary 會改變 cdhash，不可直接覆蓋現役 sender 或自動改 ACL。TCMb／TCMz 使用獨立欄位，M6 映射未官方確認、缺值保留 null；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
+
+macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。只有使用者親自執行核准的操作入口才能安裝／切換，Git push 不代表 macOS 部署。
 
 **Hue 中繼已退居備援**：v1.51.0 家庭啟用 `HOME_ASSISTANT_HUE_ENABLED` 之後，照明走 HB → HA → Hue Bridge，
 `lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是
