@@ -953,6 +953,13 @@ class FAHStatus(BaseModel):
     progress_pct: Optional[float] = None
 
 
+class SMCTemperature(BaseModel):
+    # Fixed key semantics; no arbitrary sensor names or source labels.
+    model_config = {"extra": "forbid"}
+    tcmb_c: Optional[float] = Field(default=None, strict=True, gt=0, le=150, allow_inf_nan=False)
+    tcmz_c: Optional[float] = Field(default=None, strict=True, gt=0, le=150, allow_inf_nan=False)
+
+
 class PCHeartbeatRequest(BaseModel):
     ip: str
     hostname: Optional[str] = ""
@@ -964,6 +971,7 @@ class PCHeartbeatRequest(BaseModel):
     gpu_temp_c: Optional[float] = None
     cpu_temp_c: Optional[float] = None  # Windows 上要靠 LibreHardwareMonitor，沒裝就 None
     fah: Optional[FAHStatus] = None
+    smc_temperature: Optional[SMCTemperature] = None
 
 
 @router.post("/computers/heartbeat")

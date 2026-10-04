@@ -445,7 +445,7 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 # PC monitoring agent 部署現況
 
-家裡兩台 Windows PC 跑 `agent/agent.py` 監控本機指標，每 60s push 到 home-butler `/api/computers/heartbeat`。macOS 另有 `agent/macos_metrics.py`，預設只本機採樣；使用既有 heartbeat 契約，無控制能力、可靠溫度來源或已安裝常駐。正式憑證與外送未配置，見 `agent/macos.md`。詳細 setup 看 `agent/README.md`，這裡只記**本家**部署現況跟踩過的雷。
+家裡兩台 Windows PC 跑 `agent/agent.py` 監控本機指標，每 60s push 到 home-butler `/api/computers/heartbeat`。macOS 另有 `agent/macos_metrics.py`，預設只本機採樣；使用既有 heartbeat 契約，無控制能力、可靠溫度來源或已安裝常駐。正式憑證與外送未配置，見 `agent/macos.md`。TCMb／TCMz 整合透過獨立 smc_temperature 欄位，來源標籤與 M6 未官方確認限制見 `agent/macos.md`。新溫度只留 bounded 24h 記憶體歷史，不新增 Sheet 欄位，尚未發布。詳細 setup 看 `agent/README.md`，這裡只記**本家**部署現況跟踩過的雷。
 
 **Hue 中繼已退居備援**：v1.51.0 家庭啟用 `HOME_ASSISTANT_HUE_ENABLED` 之後，照明走 HB → HA → Hue Bridge，
 `lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是

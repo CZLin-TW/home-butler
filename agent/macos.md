@@ -12,7 +12,7 @@
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
 | load average 1/5/15 分鐘、RAM 總量 | os.getloadavg / psutil | 只在預設本機 JSON 的 local_only；既有後端契約不接收／儲存，不顯示在卡片 |
 
-沒有執行 sudo、powermetrics、SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
+沒有執行 sudo、powermetrics、特權 SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
 
 ## 安全本機試跑
 
@@ -43,3 +43,13 @@ python3 -m venv .venv-macos
 ## 測試
 
 `tests/test_macos_metrics.py` 以 fake psutil、實際 heartbeat Pydantic schema 與 pc_state record/snapshot 驗證相容；Sheet writer 完全阻止。loopback HTTP 測試驗證 path、null、無 key 與禁止 redirect。後端 CI 不必安装 psutil；真實本機採樣才需要。
+
+## TCMb／TCMz 整合（本機準備，未發布）
+
+`macos_temperature.py` 只讀 AppleSMC 的 TCMb／TCMz，無 sudo、憑證或網路。
+名稱依 OSHI 的 CPU die average / maximum 定義；M6 mapping 未經 Apple 官方確認。
+直接讀取 TCMb=46.05°C、TCMz=null。數值高低不作語義證據。
+
+
+
+Collector now emits optional smc_temperature={tcmb_c,tcmz_c}; CPU/GPU temperature fields stay null. Backend accepts only finite numeric values >0 and <=150 or null, rejecting booleans, strings and extra nested fields. Bounded memory history retains up to24h; new temperatures are NOT persisted in existing Sheets and are lost on backend restart. Dashboard renders each named sensor and its source/uncertainty independently. The installed trusted sender rejects this new schema, so do not replace only the collector: a reviewed new signed sender and explicit Keychain trust migration/re-entry are required. Existing installed files remain unchanged.

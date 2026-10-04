@@ -1,5 +1,10 @@
 # 驗證方式與範圍
 
+## 2026-10-04 TCMb／TCMz 本機讀取準備
+
+GitHub main 5d3b135 基準。新增獨立唯讀溫度工具，不改 heartbeat 或已安裝常駐。M6 真實無 sudo 讀取 TCMb=46.05°C，TCMz=null。4 項離線測試涵蓋 datatype／有限與範圍值、缺失 max 不替代、權限失敗、連線清理及禁止寫入指令。缺值保留 unavailable；OSHI die average/max 定義不代表 M6 官方確認。無 push、部署、Keychain 或服務修改。
+
+
 ## 2026-10-03 Mac mini 獨立 telemetry collector（未部署）
 
 基於 GitHub main `fe67e52` 獨立 checkout 新增 `agent/macos_metrics.py`，沿用既有 heartbeat/status schema，不修改後端 API、Sheet 欄位、Windows agent 或設備控制。預設只 stdout；外送須指定 --send/--url 和既有 key，禁止 redirect／環境 proxy，HTTP 僅 literal loopback。沒有常駐安裝、自我更新或秘密讀取。
@@ -429,3 +434,11 @@ python -m unittest discover -s tests -v
 - `agent/` 的系統排程、硬體指標、Hue 控制與更新應在各台 PC 分別核對；後端 CI 不代表 Windows agent 已部署。
 
 部署觀察請記下時間、目標程序、程式版本／SHA、最後成功時間與查到的結果。無法讀到程序版本時寫「未確認」，不能用 push 或 CI 代替。跨專案流程見 [系統導覽](system-overview.md)。
+
+## 2026-10-04 TCMb / TCMz integration (local only)
+
+Optional smc_temperature={tcmb_c,tcmz_c} travels collector -> strict backend schema -> bounded current/history -> Dashboard. No CPU/GPU field reuse. Null, unsupported and missing sensors remain unavailable; labels disclose AppleSMC, OSHI interpretation and unconfirmed M6 mapping. New temperatures have in-memory history only (maximum 24h); existing Sheet columns are unchanged and restart loses this history. Old agent payloads remain compatible.
+
+Backend: 253 offline tests passed; after adding the child-timeout/invalid-value case, all 7 targeted collector/schema tests passed. Dashboard: 39 tests, typecheck, lint and production build passed. Native staged sender fake-only tests passed for strict nested fields, ranges, booleans, nulls and unknown fields; no Keychain/network access. Actual localhost demo UI confirmed TCMb value/line, TCMz unavailable and source/retention labels. IAB screenshot tool failed, so no pixel screenshot verification claimed. No push, deployment, runtime/LaunchAgent/Keychain changes.
+
+Mobile DOM verification: 390px viewport, document scrollWidth390; TCMb label/value, TCMz unavailable and source text present. Real collector Python -I sample (stdout only, no send): TCMb46.3C, TCMznull.

@@ -10,6 +10,7 @@ import json
 import math
 import os
 import platform
+from pathlib import Path
 import plistlib
 import subprocess
 import sys
@@ -64,6 +65,23 @@ def cpu_model():
     return result.stdout.strip()
 
 
+def read_smc_temperature():
+    # Separate bounded child works under the installed sender's Python -I mode.
+    missing = {"tcmb_c": None, "tcmz_c": None}
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", str(Path(__file__).with_name("macos_temperature.py"))],
+            capture_output=True, check=True, timeout=5, text=True,
+        )
+        sensors = json.loads(result.stdout)["sensors"]
+        values = {name: sensors[key]["temperature_c"] for name, key in
+                  (("tcmb_c", "TCMb"), ("tcmz_c", "TCMz"))}
+        return {name: value if type(value) in (int, float) and math.isfinite(value)
+                and 0 < value <= 150 else None for name, value in values.items()}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return missing
+
+
 def collect(ip, hostname):
     if platform.system() != "Darwin":
         raise RuntimeError("macOS is required")
@@ -77,6 +95,7 @@ def collect(ip, hostname):
         "gpu_model": f"{model} integrated GPU" if model.startswith("Apple ") else "",
         "cpu_pct": cpu, "ram_pct": ram, "gpu_pct": read_gpu(),
         "cpu_temp_c": None, "gpu_temp_c": None, "fah": None,
+        "smc_temperature": read_smc_temperature(),
     }
 
 

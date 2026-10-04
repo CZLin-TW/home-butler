@@ -220,3 +220,11 @@ in-memory ownership 還會在 Render 重啟後歸零，同樣的洞再開一次�
 **取捨**：判斷的是「長相」不是「意圖」。把燈調成夜燈的樣子想讓它整天亮著 → 還是會被關；
 recall 別的場景 → auto 完全不碰。另外這個機制**救不到**「拿過時亮值誤動作」——過時的
 『已經變亮』讀值仍可能把還在暗處的夜燈關掉、下一輪又開，那是感應器讀值新鮮度的問題。
+
+## 2026-10-04 TCMb／TCMz 本機準備
+
+使用者選擇兩個獨立來源。新增 stdout-only AppleSMC reader，保留 M6 映射限制與 null，未整合 CPU/GPU heartbeat 或發布。
+
+## 2026-10-04 SMC temperature integration (unpublished)
+
+Added independent optional TCMb/TCMz fields, strict validation, bounded memory history, UI source labels and null handling. No Sheet-column additions or credential changes. Dashboard version prepared as 1.63.0.
