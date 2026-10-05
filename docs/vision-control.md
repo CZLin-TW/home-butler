@@ -1,7 +1,8 @@
 # Vision control phase 2：離線協定
 
-本階段只有可注入 transport 的離線控制模組與測試，不註冊到正式 app、不連線 mini，
-也不讀取部署設定或產生正式憑證。既有 HA／PC agent WebSocket 與家電路由不變。
+本階段已提供實際 loopback HTTP／WebSocket 控制鏈與 fixture 磁碟 writer。正式 app 僅有
+VISION_CONTROL_ENABLED=1 的註冊入口，預設停用；即使啟用也使用空 registry、拒絕全部憑證。
+沒有設定此開關、連線現役 mini 或產生正式憑證。既有 HA／PC agent 通道與家電路由不變。
 
 預定資料路徑：瀏覽器的 Dashboard session → Dashboard BFF 的 status/edit 授權 →
 獨立 HB vision service credential → 指定 mini 的 outbound vision session。
@@ -51,3 +52,22 @@ python3 scripts/test-vision-pair.py --floor-checkout /path/to/floor-presence
 第二條需要同階段 floor checkout；不會連線網路或 production app。五項跨 repo 測試包含
 shared schema 一致性、synthetic 狀態、修改去重／revision 衝突、幾何拒絕、撤銷與重連、
 斷線中斷回 unknown。兩 repo 的各自單元測試另覆蓋 payload／權限／容量／期限邊界。
+
+## Loopback milestone
+
+`vision_integration.install_vision_routes` 已接到 main，預設 disabled。
+`scripts/vision_loopback_fixture.py` 建立 ephemeral 127.0.0.1 listener，獨立假credential；
+floor `connect_fixture` 只允許固定 loopback device 路徑，拒proxy/redirect、不自動重連或重送。
+`FixtureFileAdapter` 只能使用新建的私有 temporary fixture 目錄，無 production path 參數；
+atomic JSON replace、每次reload、CAS、fixture-only rollback，不載入模型。
+
+完整三repo測試（需 uvicorn/websockets、Dashboard已安裝依賴）:
+
+```sh
+python3 scripts/test-vision-full-chain.py --floor-checkout /path/to/floor-presence \
+  --dashboard-checkout /path/to/Dashboard --node /path/to/node
+```
+
+此測試啟動真 HTTP BFF → HTTP HB → outbound WebSocket device，測試JWT拒絕、
+狀態讀取、兩client的revision競爭（200/409）、舊revision拒絕及adapter磁碟reload。
+不啟動Next dev；不包含productionmedia。正式啟用候選詳見 [批准提案](vision-activation-proposal.md)。

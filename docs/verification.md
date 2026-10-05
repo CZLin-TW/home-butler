@@ -483,3 +483,14 @@ shared protocol byte-identical；floor 完整142項亦通過。Python compile、
 
 registry／session／去重均非持久化，只支援單 process；未實作 production enrollment、
 connector、真實 config writer、模型載入、媒體串流或正式 HA publish。不宣稱真相機整合完成。
+
+
+## 2026-10-05 actual loopback control milestone
+
+正式 main 接入 opt-in integration，預設disabled；即使VISION_CONTROL_ENABLED=1也為空registry，
+本次沒有設定環境或注入正式credential。隔離fixture提供真正HTTP/WS127.0.0.1ephemerallistener。
+全套Python **310 passed**（4.291s），視覺focused29項中5項actualsocket。
+跨repo full-chain runner通過6項checks：真HTTP BFF→HTTP HB→outbound WS→temporary disk；
+兩client同revision得到200/409，第二adapter reload確認revision1。沒有mock fetch。
+floor全套154、Dashboard53、lint/typecheck/build、production-start browser9項通過。
+僅新增測試venv依赖，未改現役環境。批准候選在 vision-activation-proposal.md，尚未執行。

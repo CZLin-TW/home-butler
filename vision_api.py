@@ -1,8 +1,8 @@
-"""Unregistered router factory: dedicated credentials, JSON control only.
+"""Opt-in router factory: dedicated credentials, JSON control only.
 
-Calling create_vision_router() does not start a listener. Production main.py does not
-import/include this router. TLS, enrollment, credential storage and one-worker routing
-must be provided and reviewed separately before any deployment.
+Calling create_vision_router() does not start a listener. Production integration is
+disabled by default and uses an empty registry even when enabled. TLS, enrollment,
+credential storage and one-worker routing require separate deployment review.
 """
 import asyncio
 

@@ -201,4 +201,4 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 
 ## 離線 vision control 開發分支
 
-独立 vision.v1 hub／router factory 與 scoped auth 已供離線驗證；尚未註冊或啟用 production 路由。詳見 [協定與啟用邊界](docs/vision-control.md)。
+獨立 vision.v1 已有 loopback HTTP／WebSocket 與 fixture 保存驗證；正式入口預設 disabled，沒有 production credential。詳見 [協定與啟用邊界](docs/vision-control.md)。

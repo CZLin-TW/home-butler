@@ -240,3 +240,10 @@ Added independent optional TCMb/TCMz fields, strict validation, bounded memory h
 固定指令、CAS、期限、correlation 與有界去重；unknown 不重送。完整後端303、
 跨 repo5項通過。無 production route、credential、相機、HA、服務或部署變更。
 接手先讀 docs/vision-control.md 與 verification.md；不可直接加入 main.py。
+
+
+## 2026-10-05 loopback transport integration
+
+後續明確授權新增實際outbound fixture connector與HB main opt-in hook；正式預設停用，
+emptyregistry保持拒絕。新增loopbackfixture與三repo真HTTP/WS驗證，不importproductionmain啟動家用功能。
+310全套測試、三repo链及UI9項通過。未push/deploy；接手先讀activationproposal，不擴成正式授權。

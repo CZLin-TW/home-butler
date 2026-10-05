@@ -231,9 +231,13 @@ class RouterTests(unittest.TestCase):
         app=FastAPI();app.include_router(create_vision_router(self.hub))
         self.client=TestClient(app)
 
-    def test_no_application_registration_and_default_empty(self):
-        self.assertNotIn('vision_api',pathlib.Path('main.py').read_text())
-        self.assertNotIn('vision_hub',pathlib.Path('main.py').read_text())
+    def test_production_integration_is_explicit_and_default_empty(self):
+        import ast
+        tree=ast.parse(pathlib.Path('main.py').read_text())
+        calls=[n for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='install_vision_routes']
+        self.assertEqual(len(calls),1)
+        self.assertEqual([k.arg for k in calls[0].keywords],['enabled'])
+        self.assertEqual(ast.unparse(calls[0].keywords[0].value), "os.environ.get('VISION_CONTROL_ENABLED') == '1'")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from vision_api import create_vision_router

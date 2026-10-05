@@ -564,4 +564,4 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 
 ## Vision control phase 2 開發邊界
 
-vision_protocol／vision_hub／vision_api 為未註冊的離線模組。不得自行 include router、讀 production credential、連 mini 或傳影像。詳見 docs/vision-control.md；保持單 process、有界去重、unknown 不重送，shared protocol 需與 floor-presence byte-identical。
+vision_protocol／vision_hub／vision_api 已透過 vision_integration 接入 main，但預設 disabled，啟用仍為空 registry。不得自行設定開關或注入 production credential、連現役 mini 或傳影像。詳見 docs/vision-control.md；保持單 process、有界去重、unknown 不重送，shared protocol 需與 floor-presence byte-identical。
