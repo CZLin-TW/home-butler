@@ -465,3 +465,21 @@ Security SDK deprecated 警告保留。macOS CI 工作僅編譯／跑假測試�
 採 token/private-key/credential-assignment 特徵與本機識別規則、路徑／產物清單及人工 diff 審查。
 不讀真正 API key 進行比對，沒有宣稱完整上游歷史或所有高熵值皆無秘密。
 既有上游文件已有先前设备資訊；本次未擴散新的本機識別，也不改寫上游歷史。
+
+
+## 2026-10-05 vision control phase 2（離線、未註冊）
+
+從 remote main cd5da63 建立隔離 feature branch。新增 vision.v1 shared protocol、
+scoped hashed credential registry、async hub 與未註冊的 router factory；不改 main.py、
+HA 通道、Sheets、環境設定、正式憑證或現役服務。設計與啟用授權見 [vision control](vision-control.md)。
+
+驗證：新的隔離 Python 3.12 venv 依 requirements.lock 安裝 FastAPI/httpx；完整
+`python3 -m unittest discover -s tests -v` **303 項通過**（2.886 秒），其中新模組22項。
+初次 sandbox 執行只有既有 metrics loopback fixture bind 被拒絕；授權重跑完整套件通過。
+跨 repo `scripts/test-vision-pair.py --floor-checkout /path/to/floor-presence` **5 項通過**，
+shared protocol byte-identical；floor 完整142項亦通過。Python compile、git diff --check 通過。
+測試僅 fake credentials／synthetic data；HTTP/WebSocket 使用 TestClient，不建立外部連線。
+既有 TestClient/httpx 相容性 deprecation warning 保留，無測試失敗。
+
+registry／session／去重均非持久化，只支援單 process；未實作 production enrollment、
+connector、真實 config writer、模型載入、媒體串流或正式 HA publish。不宣稱真相機整合完成。

@@ -560,3 +560,8 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 - 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。
 - 執行 `python -m unittest discover -s tests -v` 與編譯檢查。測試使用假 Sheets／SDK，不向家電或 LINE 發送訊息。
 - 部署仍限定單一 Python process／worker。RLock、工作排程與記憶體快取不是跨主機鎖；Sheets 也沒有多步交易，手動直接改表不受鎖保護。需要多 worker 或多實例時，必須先抽出唯一 scheduler／writer 並導入可交易的資料庫或分散式協調，不能只增加 worker 數。
+
+
+## Vision control phase 2 開發邊界
+
+vision_protocol／vision_hub／vision_api 為未註冊的離線模組。不得自行 include router、讀 production credential、連 mini 或傳影像。詳見 docs/vision-control.md；保持單 process、有界去重、unknown 不重送，shared protocol 需與 floor-presence byte-identical。

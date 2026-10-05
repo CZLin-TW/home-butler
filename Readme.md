@@ -197,3 +197,8 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 | [AGENTS.md](AGENTS.md) | 新開發者與 AI Session 的維護規則 |
 
 文件與實作一起維護；純文件變更不調整系統顯示版本，也不代表設備或 HA 套件重新部署。
+
+
+## 離線 vision control 開發分支
+
+独立 vision.v1 hub／router factory 與 scoped auth 已供離線驗證；尚未註冊或啟用 production 路由。詳見 [協定與啟用邊界](docs/vision-control.md)。

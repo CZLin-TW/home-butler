@@ -232,3 +232,11 @@ Added independent optional TCMb/TCMz fields, strict validation, bounded memory h
 ## 2026-10-04 macOS daemon 原始碼收斂
 
 將本機監控部署工具整理為 `agent/macos_daemon/`，以範例／私有建置設定代替機器識別。保留 Swift sender 與安裝、續接、回滾、診斷；一次性 credential rewrite／partition repair 不變成正式自動修補功能。加入實際 item database 格式、錯誤 helper partition 與中斷重入回歸。整理版未部署，現役 daemon 不受影響；pre-login reboot 未實測。
+
+
+## 2026-10-05 vision phase 2 offline control
+
+獨立分支新增不註冊的 vision protocol/hub/API factory，device 與 service 授權分離，
+固定指令、CAS、期限、correlation 與有界去重；unknown 不重送。完整後端303、
+跨 repo5項通過。無 production route、credential、相機、HA、服務或部署變更。
+接手先讀 docs/vision-control.md 與 verification.md；不可直接加入 main.py。
