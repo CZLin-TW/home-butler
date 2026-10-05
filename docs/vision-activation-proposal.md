@@ -14,6 +14,9 @@
 - 裝置代號候選 `floor-mini-01`；只准此裝置的 status scope，驗收後才另外批准 edit。
   傳送健康狀態、模型選項、revision、normalized ROI 與區域名稱；不傳相機 URL、帳密、影像或人臉資料。
   區域名稱由使用者自行命名，不能保證自由文字不含私人資訊，批准時須納入資料範圍。
+- 建立與保存責任：使用者批准後，由部署操作者在 mini 本機以密碼學亂數建立 device token，
+  直接寫入專用 Keychain，不經聊天、repo、log或export。另建獨立 service token，直接交付 Dashboard
+  hosting secret；HB只接收其digest與授權metadata。這些步驟本輪均未執行。
 - Mini credential：新增獨立 macOS login Keychain item，service 候選
   `com.floorpresence.vision-control`、account `floor-mini-01`；只供簽章固定的 connector 讀取。
   不沿用相機 broker、家庭 API key 或其他 Keychain item。新增 item／ACL／簽章需另行批准；本輪未操作。
@@ -24,7 +27,10 @@
 - 不改防火牆、不開 mini inbound port、不建 tunnel。Mini 主動連 HB；目前斷線後由操作者明確重連，
   修改結果 unknown 時先讀 revision，不自動補送。HB 重啟不保證 exactly-once；不得增加 workers。
 - 回滾：關閉 `VISION_CONTROL_ENABLED`、撤銷兩種獨立 credential、停止新 connector；不動既有相機／HA服務。
-- 本提案尚未批准 push、部署或 service 安裝；正式 rollout 另列 SHA 與變更清單後批准。
+- 涉及三項 rollout：先 HB repo 部署正式 registry／TLS signaling與預設關閉的路由，再 Dashboard repo
+  部署 server transport／個人grant，最後 mini floor-presence connector安裝與手動啟動；
+  若需launchd另批。每步均需明列待部署SHA與回滾SHA，先status-only驗收再另批edit。
+  本提案尚未批准 push、部署或 service 安裝；正式 rollout 另列 SHA 與變更清單後批准。
 
 ## B. 媒體面：Cloudflare Realtime TURN 候選
 
