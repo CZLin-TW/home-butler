@@ -564,6 +564,6 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 
 ## Vision control phase 2 開發邊界
 
-vision_protocol／vision_hub／vision_api 的正式候選入口由 vision_sheets_api 管理，預設 disabled，只允許 status.get。Dashboard 沿用既有 LINE 配對／JWT 與 HOME_BUTLER_API_KEY；HB 接收可信 user／role／session-expiry headers，重新核對啟用家庭成員與明確 vision grant，kid/default deny。mini 仍只持獨立 Keychain device credential，不分享家庭 API key。舊 SQLite／service-token registry 保留離線歷史 fixture，不是本輪必要部署依賴。
+vision_protocol／vision_hub／vision_api 的正式候選入口由 vision_sheets_api 管理，預設 disabled，只允許 status.get。Dashboard 沿用既有 LINE 配對／JWT 與 HOME_BUTLER_API_KEY；HB 接收可信 user／role／session-expiry headers，以明確非秘密 VISION_STATUS_OWNER_USER_ID pin 限定 owner，再核對啟用家庭成員與明確 status grant；其他 member 即有 grant 也拒絕，kid/default deny。mini 仍只持獨立 Keychain device credential，不分享家庭 API key。舊 SQLite／service-token registry 保留離線歷史 fixture，不是本輪必要部署依賴。
 
 Sheets adapter 共用一次成員／grant／device digest 快照，30 秒刷新、monotonic 最長 60 秒；刷新失敗立即拒絕，啟動必須成功讀表。不得沿用家庭資料的 stale cache/retry 來延長授權；撤銷／變更裝置憑證須斷線，晚到回覆須重新驗權。單 filesystem 暫存鎖與 worker guard 不代表跨 replica 協調，仍須單 authority／單 worker。詳見 docs/vision-sheets-pilot.md。不得自行建表、擴大分享、設定正式開關、讀取秘密或連現役 mini；不需為此購買 persistent Disk。協定仍需與 floor-presence byte-identical，unknown 不重送。正式 preview/edit/media 未啟用。

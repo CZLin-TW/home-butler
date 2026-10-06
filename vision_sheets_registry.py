@@ -32,9 +32,10 @@ def validate_snapshot(value):
     return members,grants,CredentialRegistry(records)
 
 class SharedSnapshot:
-    def __init__(self,reader,*,clock=time.time,monotonic=time.monotonic,timeout=5):
+    def __init__(self,reader,*,clock=time.time,monotonic=time.monotonic,timeout=5,owner_user_id=None):
         self.reader,self.clock,self.monotonic=reader,clock,monotonic
         self.timeout=timeout
+        self.owner_user_id=owner_user_id if isinstance(owner_user_id,str) and IDENTIFIER.fullmatch(owner_user_id) else None
         self.closed=False
         self.authority_guard=lambda:None
         self.data=None
@@ -89,9 +90,9 @@ class SharedSnapshot:
         return await asyncio.shield(self._refresh)
     def capabilities(self,user,role='member'):
         members,grants,_=self.current()
-        if role != 'member' or not isinstance(user,str) or not members.get(user) or user not in grants or not any(grants[user].values()):
+        if self.owner_user_id is None or user != self.owner_user_id or role != 'member' or not isinstance(user,str) or not members.get(user) or user not in grants or not grants[user]['status']:
             raise ControlError('vision_forbidden',403)
-        return dict(grants[user])
+        return {'status':True,'preview':False,'edit':False}
 
 class SnapshotRegistry:
     """Service identity here is an internal verified user, never a Bearer credential."""

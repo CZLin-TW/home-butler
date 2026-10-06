@@ -213,7 +213,19 @@ def validate_result(raw, expected_action=None):
     action = expected_action
     if action is None and isinstance(payload, dict):
         action = 'status.get' if 'adapter' in payload else 'config.get' if 'config' in payload else 'detector.configure'
-    if action == 'status.get':
+    if action == 'status.get' and isinstance(payload,dict) and payload.get('adapter') == 'local-health':
+        _keys(payload, ('adapter','available','service','reason'))
+        service=payload['service']
+        _keys(service, ('reachable','app_version','mode','config_schema'))
+        if type(payload['available']) is not bool or type(service['reachable']) is not bool or payload['available'] != service['reachable']:
+            _fail()
+        if payload['available']:
+            version=service['app_version']
+            if payload['reason'] != 'http_service_responding' or not isinstance(version,str) or len(version)>32 or not re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:[-+][A-Za-z0-9.-]{1,16})?',version) or service['mode'] not in ('localhost-dev','production') or type(service['config_schema']) is not int or not 1 <= service['config_schema'] <= 100:
+                _fail()
+        elif payload['reason'] != 'local_health_unavailable' or any(service[key] is not None for key in ('app_version','mode','config_schema')):
+            _fail()
+    elif action == 'status.get':
         _keys(payload, ('adapter', 'available', 'config_revision', 'detector_revision', 'detector', 'zone_count'))
         if payload['adapter'] != 'synthetic' or type(payload['available']) is not bool or type(payload['zone_count']) is not int or not 0 <= payload['zone_count'] <= 32:
             _fail()

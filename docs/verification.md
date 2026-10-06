@@ -515,3 +515,15 @@ Full `python -m unittest discover -s tests -v`: **349/349 passed**, 3.268 second
 
 Independent read-only security review verified credential binding, shutdown publication guards and authority PID/inode checks; no remaining definite blocker was found. This validates code and offline fixtures, not actual Sheets/Render/Keychain/camera deployment. Global pairing/login code was unchanged. Dashboard records the corresponding cross-process TLS integration results.
 完整349項後補上 closed snapshot 禁止再次啟動 read 的小型 guard；相關15項重新通過（0.061秒）。
+
+## 2026-10-06 owner-only local health 候選（未啟用）
+
+明確 VISION_STATUS_OWNER_USER_ID pin 與啟用成員／status grant 缺一即拒絕，不查詢或推測 owner ID。
+其他 member 即使有 grants 仍拒絕；owner 回傳 preview/edit 固定 false，kid 與可信 expiry 規則維持。
+shared protocol 新增 strict local-health metadata variant；不接收圖片／ROI／URL／模型宣稱。
+測試未呼叫固定本機 health URL、真 Sheets 或 Keychain；未啟動正式服務。
+
+完整 HB **354 passed**（3.287秒），其中新增 owner／health 5 項與更新的 snapshot fixtures；
+涵蓋缺失／無效 owner pin、其他有 grant 的 member、owner 停用／缺 status、kid、健康／失聯格式、
+未知私密欄位拒絕與 synthetic discriminator 保留。`git diff --check` 通過。
+實際 native health reader 與 Dashboard SSR 隔離整合由各自模組測試，不以本 HB payload 單元測試取代。

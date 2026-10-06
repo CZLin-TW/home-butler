@@ -34,8 +34,8 @@ class SnapshotHub(StatusOnlyHub):
         self.bindings.pop(nonce,None)
         return super().disconnect(device_id,nonce)
 
-def create_components(reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic):
-    snapshot=SharedSnapshot(reader,clock=clock,monotonic=monotonic)
+def create_components(reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic,owner_user_id=None):
+    snapshot=SharedSnapshot(reader,clock=clock,monotonic=monotonic,owner_user_id=owner_user_id)
     hub=SnapshotHub(SnapshotRegistry(snapshot,api_key_verifier),clock=clock)
     def revalidate():
         for device,session in list(hub.sessions.items()):
@@ -106,8 +106,8 @@ def create_components(reader,api_key_verifier,*,clock=time.time,monotonic=time.m
     device_router.routes=[r for r in device_router.routes if r.path.endswith('/device')]
     return snapshot,hub,router,device_router
 
-def attach(app,reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic,close=lambda:None):
-    snapshot,hub,router,device_router=create_components(reader,api_key_verifier,clock=clock,monotonic=monotonic)
+def attach(app,reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic,close=lambda:None,owner_user_id=None):
+    snapshot,hub,router,device_router=create_components(reader,api_key_verifier,clock=clock,monotonic=monotonic,owner_user_id=owner_user_id)
     app.include_router(router)
     app.include_router(device_router)
     previous=app.router.lifespan_context
@@ -144,9 +144,9 @@ def attach(app,reader,api_key_verifier,*,clock=time.time,monotonic=time.monotoni
     app.state._vision_control_installed=True
     return snapshot
 
-def create_sheets_app(reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic):
+def create_sheets_app(reader,api_key_verifier,*,clock=time.time,monotonic=time.monotonic,owner_user_id=None):
     app=FastAPI()
-    attach(app,reader,api_key_verifier,clock=clock,monotonic=monotonic)
+    attach(app,reader,api_key_verifier,clock=clock,monotonic=monotonic,owner_user_id=owner_user_id)
     return app
 
 def install_sheets_status_pilot(app,*,environ=None,reader=None,api_key_verifier=None):
@@ -174,7 +174,7 @@ def install_sheets_status_pilot(app,*,environ=None,reader=None,api_key_verifier=
             current=private_path(path).stat()
             if os.getpid()!=owner_pid or (current.st_dev,current.st_ino)!=identity:
                 raise ValueError('authority_changed')
-        snapshot=attach(app,reader,api_key_verifier,close=lambda:os.close(fd))
+        snapshot=attach(app,reader,api_key_verifier,close=lambda:os.close(fd),owner_user_id=env.get('VISION_STATUS_OWNER_USER_ID'))
         snapshot.authority_guard=guard
         guard()
         return snapshot

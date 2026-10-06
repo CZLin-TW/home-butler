@@ -33,7 +33,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
             self.calls+=1
             if self.fail: raise OSError('private-text-not-returned')
             return copy.deepcopy(self.value)
-        self.snapshot=SharedSnapshot(reader,clock=lambda:self.now,monotonic=lambda:self.mono)
+        self.snapshot=SharedSnapshot(reader,owner_user_id='alice',clock=lambda:self.now,monotonic=lambda:self.mono)
         self.registry=SnapshotRegistry(self.snapshot,verify)
     async def test_startup_deny_no_per_heartbeat_reads_and_ttl(self):
         with self.assertRaises(ControlError):self.snapshot.current()
@@ -85,7 +85,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ControlError):self.snapshot.capabilities('bob')
         with self.assertRaises(ControlError):self.registry.identify(DEVICE,'device',1700)
     async def test_refresh_revoke_disconnects_and_late_result_denies(self):
-        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,clock=lambda:self.now,monotonic=lambda:self.mono)
+        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,owner_user_id='alice',clock=lambda:self.now,monotonic=lambda:self.mono)
         await snapshot.refresh()
         sent=[]
         async def send(value):sent.append(value)
@@ -98,7 +98,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await task)['status'],'unknown')
         with self.assertRaises(ControlError):hub.receive('mini',hello['session_nonce'],make_result(sent[0],'ok',status()))
     async def test_same_record_id_digest_rotation_disconnects_old_session(self):
-        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,clock=lambda:self.now,monotonic=lambda:self.mono)
+        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,owner_user_id='alice',clock=lambda:self.now,monotonic=lambda:self.mono)
         await snapshot.refresh()
         async def send(value):pass
         hub.connect(DEVICE,'mini',send)
@@ -119,7 +119,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(snapshot.data)
 
     async def test_grant_revoke_denies_pending_response(self):
-        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,clock=lambda:self.now,monotonic=lambda:self.mono)
+        snapshot,hub,_,_=create_components(self.snapshot.reader,verify,owner_user_id='alice',clock=lambda:self.now,monotonic=lambda:self.mono)
         await snapshot.refresh();sent=[]
         async def send(value):sent.append(value)
         hello=hub.connect(DEVICE,'mini',send)
@@ -132,7 +132,7 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
 class RouteTests(unittest.TestCase):
     def setUp(self):
         async def reader():return data()
-        self.app=create_sheets_app(reader,verify,clock=lambda:1000)
+        self.app=create_sheets_app(reader,verify,owner_user_id='alice',clock=lambda:1000)
     def test_existing_key_user_role_expiry_grant_and_defaultdeny(self):
         with TestClient(self.app) as client:
             access='/api/vision/v1/access'

@@ -258,3 +258,10 @@ filesystem authority lock。未設定正式開關或 credential；render persist
 ## 2026-10-06 沿用既有登入與 Sheets 的 vision pilot
 
 確認既有六位碼／LINE 核准、Dashboard JWT 及 server API key 流程後，移除 vision 第二套 service-token registry 的必要依賴。正式候選入口改用共享 Sheets 授權快照，30 秒刷新／monotonic 最長 60 秒，失敗立即拒絕；成員、grant、kid 角色與裝置撤銷均由伺服器查核。mini 保留獨立 device trust，沒有取得家庭通用 API key。舊 SQLite 保留歷史離線驗證，不再要求購買 Disk。未改全站配對／登入流程，未啟用真實服務。
+
+## 2026-10-06 owner-only local health
+
+status pilot 進一步限定明確 server owner pin，不使用 SIRI_USER_ID 或成員順序猜測；仍要求
+啟用家庭成員、status grant、member role 及有效 session expiry，preview/edit 固定停用。
+協定以 local-health discriminator 只承載本機 HTTP 服務 metadata，與舊 synthetic fixture 分離；
+不宣稱真相機、模型或 occupancy 正常。未設定實際 owner、未操作正式憑證或部署。

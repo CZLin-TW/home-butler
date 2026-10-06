@@ -1,4 +1,4 @@
-# Vision status pilot：既有 HB 驗證＋Sheets 授權快照
+# Owner-only health pilot：既有 HB 驗證＋Sheets 授權快照
 
 本輪只交付預設停用的程式碼及 fake-reader 測試，未建立或讀寫真 Sheet、未取得秘密、未部署。
 main 改用 `vision_sheets_api.install_sheets_status_pilot`；不再需要第二套 vision service-token
@@ -14,12 +14,16 @@ Dashboard server 使用既有 `auth.verify_api_key` 所驗證的 `X-API-Key`，�
 - `X-Dashboard-Session-Expires`：整數 Unix 秒，必須仍有效；命令 deadline 不得超過此值，回應前再驗證。
 
 BFF 不可複製瀏覽器提供的同名 header。HB 只信任通過既有 API key 的 server 轉送身分，
-並在自己的有效快照精確核對啟用家庭成員與明確 vision grant；不存在、重複、停用或無 grant 均拒絕。
-既有家庭 key 本身不代表此 actor 有 vision 權限。HB 不收 raw Dashboard JWT。
+並要求非秘密 server 設定 `VISION_STATUS_OWNER_USER_ID` 明確指定 owner，再在自己的有效快照
+精確核對該 owner 是啟用家庭成員且有明確 status grant；不存在、重複、停用或無 grant 均拒絕。
+其他 member 即使有 status／preview／edit grant 仍拒絕；owner pin 缺失或格式無效也拒絕，
+不從 `SIRI_USER_ID`、第一位成員、名稱或現有秘密猜測 owner。既有家庭 key 本身不代表此 actor 有權。
+本轮只新增設定入口，未填入、查詢或推測真實 owner ID。HB 不收 raw Dashboard JWT。
 
-`GET /api/vision/v1/access` 回 `{capabilities:{status,preview,edit}}`，三項明確布林值。
+`GET /api/vision/v1/access` 只對已授權 owner 回 `{capabilities:{status:true,preview:false,edit:false}}`。
+它可供 Dashboard SSR 做 server-side owner gate；前端隱藏連結不能取代此驗證。
 `POST /api/vision/v1/command` 仍使用 vision.v1 envelope，但只 dispatch `status.get`；
-`config.get` 即使屬通用 status scope 也拒絕。preview/edit grant metadata 不會新增相應路由或能力。
+`config.get` 即使屬通用 status scope 也拒絕。owner 即使擁有 preview/edit grant，回傳仍強制 false，不新增相應路由或能力。
 key 錯誤回 401；actor／grant／role／expiry 拒絕回 403；快照不可用回 503 registry_unavailable。
 所有路由錯誤與成功回應均 no-store。request 完成時重查 actor，撤權後晚到結果不可交付。
 
@@ -73,7 +77,7 @@ flock、PID／inode 檢查只防同 filesystem 的重複 authority 或鎖檔替�
 
 ## Fake-only 驗證入口
 
-`create_sheets_app(reader,api_key_verifier,clock=...,monotonic=...)` 建立隔離 app；reader 為 async，
+`create_sheets_app(reader,api_key_verifier,owner_user_id=FAKE_OWNER,clock=...,monotonic=...)` 建立隔離 app；reader 為 async，
 回 `{members:[...],grants:[...],devices:[...]}`，欄位如上但布林是 Python bool、scopes 是 `['status']`。
 Production verifier 預設既有 verify_api_key；fixture verifier 只能使用明顯假 key，錯誤拋 HTTPException。
 `app.state.vision_snapshot.refresh(force=True)` 僅供測試明確模擬新資料；HTTP 不提供 refresh／寫表入口。
@@ -81,3 +85,24 @@ Production verifier 預設既有 verify_api_key；fixture verifier 只能使用�
 `python -m unittest discover -s tests -p test_vision_sheets.py -v` 覆蓋錯 key／kid／expiry、無 grant、
 startup failure、30/60 秒邊界、refresh error、singleflight timeout、晚到與 shutdown、撤權、digest 輪替、
 錯 device key、無每 heartbeat IO、private ephemeral lock 與 source schema。所有 reader 都是假資料。
+
+## 嚴格 local-health 狀態契約
+
+`status.get` 新增有明確 discriminator 的 payload：
+
+```json
+{"adapter":"local-health","available":true,"service":{"reachable":true,"app_version":"1.2.3","mode":"localhost-dev","config_schema":2},"reason":"http_service_responding"}
+```
+
+資料由 mini native adapter 對固定 `http://127.0.0.1:8768/api/v1/health` 的有界唯讀結果產生；
+HB 不接收 URL 或代理 arbitrary HTTP，也不主動連 mini。此次 HB 單元測試只用假 payload，
+沒有呼叫此現役端點。`available`／`reachable` 只代表本機 HTTP health 回應通過格式驗證，
+不表示 camera、模型、偵測、occupancy 或 tracking 正常。
+
+無法讀取／驗證時為 `available:false`、`reachable:false`、reason `local_health_unavailable`，
+其他三項 service metadata 必須 null。成功時版本為最多32字元受限 semver，mode 只能
+localhost-dev／production，config_schema 為1..100整數。拒絕所有未知 key、圖片、ROI、區域名稱、
+相機 URL、憑證或模型宣稱。metadata 原樣 source 語意，不把 unknown 包裝成空間無人。
+
+舊 `adapter:synthetic` payload 僅保留既有 fixture 相容性，不能視為 real-health 驗收。
+shared `vision_protocol.py` 必須與 floor `vision/control_protocol.py` byte-identical。
