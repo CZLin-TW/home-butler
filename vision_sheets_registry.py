@@ -37,7 +37,6 @@ class SharedSnapshot:
         self.timeout=timeout
         self.owner_user_id=owner_user_id if isinstance(owner_user_id,str) and IDENTIFIER.fullmatch(owner_user_id) else None
         self.closed=False
-        self.authority_guard=lambda:None
         self.data=None
         self.started=None
         self.next_refresh=0
@@ -45,10 +44,6 @@ class SharedSnapshot:
         self._read=None
         self.on_change=lambda:None
     def current(self):
-        try:
-            self.authority_guard()
-        except Exception:
-            raise ControlError('registry_unavailable',503) from None
         if self.closed or self.data is None or self.started is None or not 0 <= self.monotonic()-self.started < 60:
             raise ControlError('registry_unavailable',503)
         return self.data

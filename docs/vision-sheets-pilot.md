@@ -35,7 +35,7 @@ actor 撤銷會終止其 pending result；unknown 不重送。
 
 ## Shared snapshot 與撤銷時效
 
-一個 authority 共用一份快照；啟動須成功讀取／驗證才能 ready。每 30 秒啟動一次 refresh，
+每個 status-only instance 各自共用一份快照；啟動須成功讀取／驗證才能 ready。每 30 秒啟動一次 refresh，
 以 monotonic 的**開始讀取時刻**計算 freshness，60 秒為硬上限；系統校時不延長期限。
 正常狀況仍存在 refresh 間隔造成的撤銷延遲，不宣稱即時撤銷。讀取錯誤、schema 錯誤或最多
 5 秒 refresh timeout 一經確認即清除 allow，不續用前一快照，也不延長原到期時間。
@@ -63,17 +63,29 @@ read-only scope；不呼叫 get_or_create、不新增表或欄位、不寫入。
 兩張 vision registry 表不得含 raw token；未知 header、重複 ID／digest、錯誤型別與超量（每類最多
 256 列）會令整份快照失效。family 身分資料與 grants／device rows 分開驗證，不把 grant 推導自姓名。
 
-## 單 authority 與啟用 gates
+## 部署重疊與啟用 gates
 
-仍預設關閉。候選 gates 為 `VISION_STATUS_PILOT_ENABLED=1`、
-`VISION_STATUS_SINGLE_AUTHORITY_ACK=1`、`VISION_STATUS_TLS_PROXY_ACK=1`、`WEB_CONCURRENCY=1`，
-若設定 `UVICORN_WORKERS` 也只能 1。`VISION_STATUS_AUTHORITY_LOCK` 指向既有 private ephemeral lock：
-canonical absolute path、owner 0700 父目錄、owner 0600 regular single-link 檔、無 symlink。
-installer 只開既有 lock，不建立檔案或修改權限；不再需要 DB path 或 paid disk。
+status.get-only 入口可容忍 Render rollout 期間多個 container 同時存在。每個 instance 只持有
+自己的 snapshot、device WebSocket、nonce、request/result cache；不共享連線、不轉送請求，
+也不需要 Redis、persistent disk、filesystem authority lock 或 SINGLE_AUTHORITY_ACK。
+`VISION_STATUS_AUTHORITY_LOCK`／`VISION_STATUS_SINGLE_AUTHORITY_ACK` 不再是此 installer 的條件。
 
-flock、PID／inode 檢查只防同 filesystem 的重複 authority 或鎖檔替換，不是跨 Render replica 的選主。
-平台仍須單 instance、單 worker、禁止重疊 rollout；ACK 不是實際部署驗證。TLS ACK 也不代替
-有效 HTTPS/WSS、受信任反向代理與 server-only key 配置。此次沒有改 Render 設定。
+HTTP request 若落在沒有本地 device session 的 instance，回 503 device_unavailable；
+不能借用其他 instance 的成功，也不能從本地舊 cache 假裝仍 online。重連換 nonce 後，
+舊 nonce 的同 request ID 不可取回舊成功。rollout 舊 instance shutdown／斷線令其 pending result
+回 unknown；不自動重派給新 instance。新 instance 需啟動成功讀表、device 新 hello 與新 nonce。
+舊回應不得完成新 instance 的請求，亦不得斷開其新 session。
+
+這是**安全容忍重疊，不是高可用路由**：LB 把 HTTP 分配到非 device 所在 instance 時仍會 unavailable。
+沒有 session affinity／跨 instance routing／全域 cache。每個 instance 按自身 30 秒 refresh／60 秒
+上限看見撤銷，不宣稱所有 instance 同時立即撤權；refresh error 仍立即 fail closed。
+讀取呼叫量會隨 instance 數增加。上述修正僅適用唯讀 status.get，不授權增加其他 HB 排程／寫入
+工作的 replicas，也不解除 media／edit 等未來 authority 的互斥需求；它們的程式碼未變動。
+
+仍預設關閉。候選 gates 為 `VISION_STATUS_PILOT_ENABLED=1`、`VISION_STATUS_TLS_PROXY_ACK=1`、
+`VISION_STATUS_OWNER_USER_ID` 與 `WEB_CONCURRENCY=1`；若設定 `UVICORN_WORKERS` 也只能 1。
+這裡保留每 container 單 worker，因既有 HB 家庭工作與程序內狀態不是本輪重構範圍。
+TLS ACK 不代替有效 HTTPS/WSS、受信任反向代理與 server-only key 配置。此次沒有改 Render 設定。
 
 ## Fake-only 驗證入口
 
@@ -84,7 +96,7 @@ Production verifier 預設既有 verify_api_key；fixture verifier 只能使用�
 
 `python -m unittest discover -s tests -p test_vision_sheets.py -v` 覆蓋錯 key／kid／expiry、無 grant、
 startup failure、30/60 秒邊界、refresh error、singleflight timeout、晚到與 shutdown、撤權、digest 輪替、
-錯 device key、無每 heartbeat IO、private ephemeral lock 與 source schema。所有 reader 都是假資料。
+錯 device key、無每 heartbeat IO、兩個無 lock 的 installer 與 source schema。所有 reader 都是假資料。
 
 ## 嚴格 local-health 狀態契約
 
@@ -106,3 +118,5 @@ localhost-dev／production，config_schema 為1..100整數。拒絕所有未知 
 
 舊 `adapter:synthetic` payload 僅保留既有 fixture 相容性，不能視為 real-health 驗收。
 shared `vision_protocol.py` 必須與 floor `vision/control_protocol.py` byte-identical。
+
+兩 instance／rollout 回歸見 `tests/test_vision_status_overlap.py`：routing miss、斷線後cache拒絕、舊nonce晚回覆、shutdown unknown、不重送、各自revoke與expiry、owner／status-only gate。

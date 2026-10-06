@@ -1,13 +1,12 @@
 """Status-only shared HB authentication, default-off; no new service token."""
 import asyncio
 from contextlib import asynccontextmanager
-import fcntl
 import os
 import time
 from fastapi import APIRouter,FastAPI,HTTPException,Request
 from fastapi.responses import JSONResponse
 from vision_hub import ControlError
-from vision_pilot import PilotConfigurationError,StatusOnlyHub,private_path
+from vision_pilot import PilotConfigurationError,StatusOnlyHub
 from vision_protocol import MAX_BYTES,ProtocolError,validate_command,make_result
 from vision_sheets_registry import SharedSnapshot,SnapshotRegistry
 
@@ -30,6 +29,17 @@ class SnapshotHub(StatusOnlyHub):
             self.disconnect(device_id,session.nonce)
             raise ControlError('credential_revoked',403)
         return session
+    async def request(self,token,raw):
+        command=validate_command(raw,self.clock(),allow_expired=True)
+        self.registry.identify(token,'service',self.clock())
+        if command['action']!='status.get':
+            raise ControlError('status_only_pilot',403)
+        # A status read must have this instance's live session, even for an old request ID.
+        session=self._session(command['device_id'],scope='status')
+        existing=self._entries.get((command['device_id'],command['request_id']))
+        if existing and existing.request['session_nonce']!=session.nonce:
+            raise ControlError('session_invalid',409)
+        return await super().request(token,command)
     def disconnect(self,device_id,nonce):
         self.bindings.pop(nonce,None)
         return super().disconnect(device_id,nonce)
@@ -153,32 +163,15 @@ def install_sheets_status_pilot(app,*,environ=None,reader=None,api_key_verifier=
     env=os.environ if environ is None else environ
     if env.get('VISION_STATUS_PILOT_ENABLED')!='1':
         return None
-    if env.get('VISION_STATUS_SINGLE_AUTHORITY_ACK')!='1' or env.get('VISION_STATUS_TLS_PROXY_ACK')!='1' or env.get('WEB_CONCURRENCY')!='1' or env.get('UVICORN_WORKERS','1')!='1' or getattr(app.state,'_vision_control_installed',False):
+    if env.get('VISION_STATUS_TLS_PROXY_ACK')!='1' or env.get('WEB_CONCURRENCY')!='1' or env.get('UVICORN_WORKERS','1')!='1' or getattr(app.state,'_vision_control_installed',False):
         raise PilotConfigurationError('pilot_deployment_guards_required')
-    fd=None
     try:
-        # Existing private ephemeral lock file: no persistent DB or paid volume dependency.
-        path=private_path(env.get('VISION_STATUS_AUTHORITY_LOCK',''))
-        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
-        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         if api_key_verifier is None:
             from auth import verify_api_key
             api_key_verifier=verify_api_key
         if reader is None:
             from vision_sheets_source import ProductionSheetsReader
             reader=ProductionSheetsReader()
-        info=os.fstat(fd)
-        identity=(info.st_dev,info.st_ino)
-        owner_pid=os.getpid()
-        def guard():
-            current=private_path(path).stat()
-            if os.getpid()!=owner_pid or (current.st_dev,current.st_ino)!=identity:
-                raise ValueError('authority_changed')
-        snapshot=attach(app,reader,api_key_verifier,close=lambda:os.close(fd),owner_user_id=env.get('VISION_STATUS_OWNER_USER_ID'))
-        snapshot.authority_guard=guard
-        guard()
-        return snapshot
+        return attach(app,reader,api_key_verifier,owner_user_id=env.get('VISION_STATUS_OWNER_USER_ID'))
     except Exception:
-        if fd is not None:
-            os.close(fd)
-        raise PilotConfigurationError('sheets_authority_unavailable') from None
+        raise PilotConfigurationError('sheets_status_unavailable') from None

@@ -527,3 +527,17 @@ shared protocol 新增 strict local-health metadata variant；不接收圖片／
 涵蓋缺失／無效 owner pin、其他有 grant 的 member、owner 停用／缺 status、kid、健康／失聯格式、
 未知私密欄位拒絕與 synthetic discriminator 保留。`git diff --check` 通過。
 實際 native health reader 與 Dashboard SSR 隔離整合由各自模組測試，不以本 HB payload 單元測試取代。
+
+## 2026-10-06 status-only 部署重疊修正（未部署）
+
+Sheets status-only installer 移除 single-authority ACK／filesystem lock 依賴；保留每 container
+worker=1、TLS gate、owner/member/grant/session-expiry/device digest／nonce 檢查。
+每個 instance 只使用自己的 device session，routing miss 回 503 device_unavailable，不做轉送或 fallback。
+status cache lookup 前先要求 live local session，且拒絕新 session 取回舊 nonce 的快取結果。
+media／SQLite authority 與家庭 scheduler/write 未修改；不宣稱整個 HB 已具備跨 replica 協調。
+
+完整 HB **359 passed**（3.364 秒），新增5項雙 hub rollout/routing/disconnect/revoke 回歸；
+既有 installer 測試改成兩個無 lock／無 ACK 的 app 可同时 startup。
+獨立唯讀 review 無 definite blocker；文件已明示 routing miss／各 snapshot 撤銷延遲與非高可用限制。
+只用假 reader、假 token、injected device send；完整套件既有 synthetic loopback fixture 維持。
+未連 Render、真 Sheets 或平台服務，沒有 Redis、disk、secret 或部署設定變更。diff check 通過。

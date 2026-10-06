@@ -265,3 +265,10 @@ status pilot 進一步限定明確 server owner pin，不使用 SIRI_USER_ID 或
 啟用家庭成員、status grant、member role 及有效 session expiry，preview/edit 固定停用。
 協定以 local-health discriminator 只承載本機 HTTP 服務 metadata，與舊 synthetic fixture 分離；
 不宣稱真相機、模型或 occupancy 正常。未設定實際 owner、未操作正式憑證或部署。
+
+## 2026-10-06 status.get-only 容忍 rollout 重疊
+
+修正 Sheets status-only pilot 的單 authority 假設：每 instance 的獨立只讀 device session 可以
+在 rollout 期間並存，因此不再要求 exclusive filesystem lock 或單 authority ACK。
+沒有本地 session 就 unavailable，shutdown pending unknown，舊 nonce／舊成功快取不得跨 session 復用。
+沒有新增跨 instance router／Redis，仍保留每 container 單 worker與所有授權；不擴大 media/edit 或家庭寫入範圍。

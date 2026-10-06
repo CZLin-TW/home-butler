@@ -209,3 +209,5 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 正式 Sheet grant、native Keychain 安裝／憑證與部署仍未啟用；見 [整合與驗證邊界](docs/vision-sheets-pilot.md)。
 
 Owner-only health 階段另需明確 VISION_STATUS_OWNER_USER_ID，不猜測真實 owner；只讀本機服務 health metadata，不代表相機或模型正常。preview/edit 維持關閉。
+
+唯讀 status.get 可容忍部署期間多個 HB container 重疊；沒有本地 device 連線的 instance 回 unavailable，不跨 instance 轉送或偽造成功。這不改變其他家庭工作或 media authority 的單一執行限制。

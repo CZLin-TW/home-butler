@@ -161,21 +161,18 @@ class RouteTests(unittest.TestCase):
         with self.assertRaises(ControlError):
             with TestClient(create_sheets_app(failed,verify)):pass
 class StorageBoundaryTests(unittest.TestCase):
-    def test_installer_singleauthority_and_replaced_ephemeral_lock(self):
-        import tempfile
-        from pathlib import Path
+    def test_installer_allows_two_status_instances_without_disk_or_authority_ack(self):
         from fastapi import FastAPI
         from vision_sheets_api import install_sheets_status_pilot
-        from vision_pilot import PilotConfigurationError
         async def reader():return data()
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory).resolve()/'authority.lock';path.touch(mode=0o600)
-            env={'VISION_STATUS_PILOT_ENABLED':'1','VISION_STATUS_AUTHORITY_LOCK':str(path),'VISION_STATUS_SINGLE_AUTHORITY_ACK':'1','VISION_STATUS_TLS_PROXY_ACK':'1','WEB_CONCURRENCY':'1'}
-            app=FastAPI();snapshot=install_sheets_status_pilot(app,environ=env,reader=reader,api_key_verifier=verify)
-            with TestClient(app):
-                with self.assertRaises(PilotConfigurationError):install_sheets_status_pilot(FastAPI(),environ=env,reader=reader,api_key_verifier=verify)
-                replacement=path.with_name('replacement');replacement.touch(mode=0o600);replacement.replace(path)
-                with self.assertRaises(ControlError):snapshot.current()
+        env={'VISION_STATUS_PILOT_ENABLED':'1','VISION_STATUS_TLS_PROXY_ACK':'1','WEB_CONCURRENCY':'1','VISION_STATUS_OWNER_USER_ID':'alice'}
+        first,second=FastAPI(),FastAPI()
+        one=install_sheets_status_pilot(first,environ=env,reader=reader,api_key_verifier=verify)
+        two=install_sheets_status_pilot(second,environ=env,reader=reader,api_key_verifier=verify)
+        with TestClient(first) as a,TestClient(second) as b:
+            self.assertIsNot(one,two)
+            self.assertEqual(a.get('/api/vision/v1/access',headers=headers(int(time.time()))).status_code,200)
+            self.assertEqual(b.get('/api/vision/v1/access',headers=headers(int(time.time()))).status_code,200)
     def test_production_reader_only_fixed_batch_no_secret_columns(self):
         from vision_sheets_source import ProductionSheetsReader
         source=ProductionSheetsReader.__new__(ProductionSheetsReader)
