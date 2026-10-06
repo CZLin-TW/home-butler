@@ -205,5 +205,5 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 
 ## Status-only pilot（預設停用）
 
-獨立視覺狀態 pilot 增加 SQLite digest registry、持久撤銷與單 authority guard，只允許 status.get。
-尚未配置正式持久磁碟、TLS 或憑證；[啟用前提與離線 CLI](docs/vision-status-pilot.md)。
+視覺狀態 pilot 沿用既有 Dashboard 登入及 server API key，HB 核對目前啟用成員與明確 vision grant；mini 使用獨立 Keychain device credential。專用 Sheets adapter 共享 30 秒刷新、最長 60 秒的授權快照，失敗拒絕，單 authority，只允許 status.get。不需第二套 Dashboard service token 或 SQLite／付費 Disk。
+正式 Sheet grant、native Keychain 安裝／憑證與部署仍未啟用；見 [整合與驗證邊界](docs/vision-sheets-pilot.md)。

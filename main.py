@@ -26,7 +26,7 @@ import lg_api
 
 app = FastAPI()
 # Status-only pilot stays disabled unless all explicit deployment guards are met.
-from vision_pilot import install_status_pilot
+from vision_sheets_api import install_sheets_status_pilot as install_status_pilot
 install_status_pilot(app)
 app.include_router(notify_router)
 

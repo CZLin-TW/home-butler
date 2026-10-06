@@ -508,3 +508,10 @@ expiry、status-only routes、default-off、CLI private secret-file 與成功 st
 首輪只有既有 main AST assertion 仍期待舊 installer；按新入口更新後全套通過。
 完整測試使用已授權 synthetic ephemeral loopback fixtures，未 import 家庭 main 做測試。
 `git diff --check` 通過；TLS local-CA 跨程序 runner 由另一驗證工作接續，這裡不宣稱已完成。
+
+## 2026-10-06 existing login and Sheets vision integration (not activated)
+
+Full `python -m unittest discover -s tests -v`: **349/349 passed**, 3.268 seconds; log `/tmp/hb-sheets-tests.log`. The 15 new Sheets authorization tests use fake readers and fake server keys, never real Sheets or household credentials. Coverage includes startup denial, shared reads, 30-second refresh/60-second monotonic TTL, immediate failure denial, singleflight timeout, read-start aging, shutdown late completion, enabled members/kid/grants/session expiry, rejection of household keys as device credentials, revocation and same-ID digest rotation, late-result denial, replaced authority lock and mocked read-only source transport.
+
+Independent read-only security review verified credential binding, shutdown publication guards and authority PID/inode checks; no remaining definite blocker was found. This validates code and offline fixtures, not actual Sheets/Render/Keychain/camera deployment. Global pairing/login code was unchanged. Dashboard records the corresponding cross-process TLS integration results.
+完整349項後補上 closed snapshot 禁止再次啟動 read 的小型 guard；相關15項重新通過（0.061秒）。

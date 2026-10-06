@@ -1,4 +1,7 @@
-# 預設停用的 status-only pilot
+# SQLite status-only pilot（保留替代實作）
+
+目前 main 已改用 [既有 HB 驗證＋Sheets 快照](vision-sheets-pilot.md)，不需要第二套 service token 或 SQLite volume。
+本頁描述保留的 SQLite 替代實作與測試，不是目前 main 的啟用步驟。
 
 這是可供後續審批的程式碼，不是已啟用的服務。未修改 render.yaml、部署設定、現役環境、
 正式憑證或相機。現有 render.yaml **沒有 persistent disk**；若沿用目前 SQLite provider，正式啟用前必須另行批准並配置
@@ -9,7 +12,7 @@
 
 ## 最小權限
 
-main 呼叫 `vision_pilot.install_status_pilot`；所有開關預設關閉。僅註冊既有
+保留的 `vision_pilot.install_status_pilot` 已不由 main 呼叫；所有開關預設關閉。僅註冊既有
 `/api/vision/v1/command` 與 outbound device WebSocket。`StatusOnlyHub` 在 dispatch 前
 只允許 `status.get`，即使 `config.get` 在通用協定也是 status scope，pilot 仍拒絕。
 沒有 config/edit/media 路由擴張，沒有 Dashboard → 相機直連或 HA 操作。

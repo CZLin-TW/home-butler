@@ -254,3 +254,7 @@ main 入口改由 vision_pilot 管理，所有 deployment gates 預設不成立�
 新增 existing-private SQLite digest registry、offline init/enroll/revoke CLI、持久撤銷及專用
 filesystem authority lock。未設定正式開關或 credential；render persistent disk、TLS reverse proxy、
 單 instance 與 enrollment 管理仍需後續批准。詳見 vision-status-pilot.md 與驗證紀錄。
+
+## 2026-10-06 沿用既有登入與 Sheets 的 vision pilot
+
+確認既有六位碼／LINE 核准、Dashboard JWT 及 server API key 流程後，移除 vision 第二套 service-token registry 的必要依賴。正式候選入口改用共享 Sheets 授權快照，30 秒刷新／monotonic 最長 60 秒，失敗立即拒絕；成員、grant、kid 角色與裝置撤銷均由伺服器查核。mini 保留獨立 device trust，沒有取得家庭通用 API key。舊 SQLite 保留歷史離線驗證，不再要求購買 Disk。未改全站配對／登入流程，未啟用真實服務。
