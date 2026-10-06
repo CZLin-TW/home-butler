@@ -1,9 +1,11 @@
 # 預設停用的 status-only pilot
 
 這是可供後續審批的程式碼，不是已啟用的服務。未修改 render.yaml、部署設定、現役環境、
-正式憑證或相機。現有 render.yaml **沒有 persistent disk**；正式啟用前必須另行批准並配置
+正式憑證或相機。現有 render.yaml **沒有 persistent disk**；若沿用目前 SQLite provider，正式啟用前必須另行批准並配置
 持久 volume、備份／復原流程、單 instance／worker，以及受信任 TLS reverse proxy。
 沒有 volume 就不能把此 SQLite 當成持久撤銷紀錄；不得用 ephemeral DB 自動初始化或 fallback。
+付費磁碟不是所有設計的唯一最低要求；既有 Sheets 能力與成本／一致性比較見
+[儲存選擇審查](vision-storage-review.md)，本輪沒有實作或選定替代 backend。
 
 ## 最小權限
 
@@ -59,6 +61,10 @@ python scripts/vision_status_registry.py enroll --db /approved/private/registry.
 python scripts/vision_status_registry.py revoke --db /approved/private/registry.sqlite \
   --record-id service-rotation-id
 ```
+
+這是離線 registry 工具介面，不是正式 mini device secret 的預設保存方式。正式預設為
+簽章固定的 Keychain broker 持有 token 並負責 WSS 認證，Python 不取得秘密；broker 尚待實作／批准。
+不得將檔案 provider 當成 Keychain 失敗時的 fallback。
 
 也可 `--stdin` 由 pipe／檔案重導輸入；拒絕互動 terminal，避免 echo。token 不接受 argv，
 不輸出、不存進 DB；secret-file 必須 private、同 owner、非 symlink、大小有界。CLI 不生成或尋找

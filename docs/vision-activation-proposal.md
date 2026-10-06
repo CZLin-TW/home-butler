@@ -18,15 +18,17 @@
   直接寫入專用 Keychain，不經聊天、repo、log或export。另建獨立 service token，直接交付 Dashboard
   hosting secret；HB只接收其digest與授權metadata。這些步驟本輪均未執行。
 - Mini credential：新增獨立 macOS login Keychain item，service 候選
-  `com.floorpresence.vision-control`、account `floor-mini-01`；只供簽章固定的 connector 讀取。
+  `com.floorpresence.vision-control`、account `floor-mini-01`；只供簽章固定的 native broker 讀取，由 broker 負責固定 HB host 的 WSS 認證，
+  status producer 只提交受限 metadata，不取得 token；明文 device token 檔不是預設或 fallback。
   不沿用相機 broker、家庭 API key 或其他 Keychain item。新增 item／ACL／簽章需另行批准；本輪未操作。
 - HB：只保存 token digest、device allowlist、scope、expiry/revoked metadata；單 worker registry。
-  第一輪設定 24 小時到期、可獨立撤銷的 device token。正式 enrollment／持久 revocation 尚未實作。
+  第一輪設定 24 小時到期、可獨立撤銷的 device token。SQLite enrollment／持久 revocation 已有隔離程式與測試，尚未部署；儲存選擇仍待核准，
+  不預設購買 Render disk。既有 Sheets 替代方案的限制見 [儲存審查](vision-storage-review.md)。
 - Dashboard：另發 service token，只准該 device 的 status，存在 hosting server secret；瀏覽器不取得。
   BFF 仍必須驗證 session 與個別使用者 vision grant。edit 開放時才增 grant／scope；不借用家庭 key。
 - 不改防火牆、不開 mini inbound port、不建 tunnel。Mini 主動連 HB；目前斷線後由操作者明確重連，
   修改結果 unknown 時先讀 revision，不自動補送。HB 重啟不保證 exactly-once；不得增加 workers。
-- 回滾：關閉 `VISION_CONTROL_ENABLED`、撤銷兩種獨立 credential、停止新 connector；不動既有相機／HA服務。
+- 回滾：關閉 `VISION_STATUS_PILOT_ENABLED`、撤銷兩種獨立 credential、停止新 connector；不動既有相機／HA服務。
 - 涉及三項 rollout：先 HB repo 部署正式 registry／TLS signaling與預設關閉的路由，再 Dashboard repo
   部署 server transport／個人grant，最後 mini floor-presence connector安裝與手動啟動；
   若需launchd另批。每步均需明列待部署SHA與回滾SHA，先status-only驗收再另批edit。
