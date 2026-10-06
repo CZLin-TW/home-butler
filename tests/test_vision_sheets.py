@@ -141,11 +141,18 @@ class RouteTests(unittest.TestCase):
                 response=client.get(access,headers=headers(**overrides));self.assertEqual(response.status_code,expected);self.assertEqual(response.headers['cache-control'],'no-store')
             self.assertEqual(client.post('/api/vision/v1/command',headers=headers(),json=command(action='config.get')).status_code,403)
             self.assertEqual(client.get(access+'?token=x',headers=headers()).status_code,400)
+            for key in headers():
+                duplicated=list(headers().items())+[(key,headers()[key])]
+                self.assertEqual(client.get(access,headers=duplicated).status_code,403)
     def test_device_ws_wrong_key_denied_and_wire_unchanged(self):
         from starlette.websockets import WebSocketDisconnect
         with TestClient(self.app) as client:
             with self.assertRaises(WebSocketDisconnect):
                 with client.websocket_connect('/api/vision/v1/device',headers={'Authorization':'Bearer '+FAMILY}):pass
+            from starlette.datastructures import Headers
+            from vision_api import _bearer
+            with self.assertRaises(ControlError):
+                _bearer(Headers(raw=[(b'authorization',('Bearer '+DEVICE).encode())]*2))
             with client.websocket_connect('/api/vision/v1/device',headers={'Authorization':'Bearer '+DEVICE}) as ws:
                 ws.send_json({'protocol':'vision.v1','type':'hello','device_id':'mini'})
                 self.assertEqual(ws.receive_json()['type'],'welcome')

@@ -54,6 +54,8 @@ def create_components(reader,api_key_verifier,*,clock=time.time,monotonic=time.m
     def actor(request):
         if request.query_params:
             raise ControlError('invalid_payload',400)
+        if any(len(request.headers.getlist(key))!=1 for key in ('x-api-key','x-dashboard-user','x-dashboard-role','x-dashboard-session-expires')):
+            raise ControlError('invalid_auth_headers',403)
         api_key_verifier(request.headers.get('x-api-key',''))
         expiry=request.headers.get('x-dashboard-session-expires','')
         if not expiry.isascii() or not expiry.isdecimal() or len(expiry)>12 or int(expiry)<=clock():

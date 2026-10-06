@@ -14,6 +14,8 @@ from vision_protocol import MAX_BYTES, ProtocolError, validate_hello, encode_mes
 
 
 def _bearer(headers):
+    if hasattr(headers,'getlist') and len(headers.getlist('authorization')) != 1:
+        raise ControlError('unauthorized',401)
     auth = headers.get('authorization', '')
     if not auth.startswith('Bearer ') or auth.count(' ') != 1:
         raise ControlError('unauthorized', 401)
