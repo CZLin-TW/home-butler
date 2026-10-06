@@ -69,14 +69,15 @@ class MockProvider:
             raise MediaError('preview_forbidden', 403)
 
 class MediaHub:
-    def __init__(self, provider=None, *, clock=time.time, timeout=4, startup_quarantine=QUARANTINE):
+    def __init__(self, provider=None, *, clock=time.time, monotonic=time.monotonic, timeout=4, startup_quarantine=QUARANTINE):
         self.clock = clock
+        self.monotonic = monotonic
         self.provider = provider or MockProvider(clock=clock)
         self.timeout = min(4, max(.01, timeout))
         self.device = None
         self.pending = {}
         self.lease = None
-        self.blocked_until = clock() + startup_quarantine
+        self.blocked_until = monotonic() + startup_quarantine
         self.terminal = {}
     def connect(self, token, hello, send):
         self.provider.credential(token, 'device')
@@ -93,7 +94,7 @@ class MediaHub:
             return
         self.device = None
         if self.lease or self.pending:
-            self.blocked_until = max(self.blocked_until, self.clock() + QUARANTINE)
+            self.blocked_until = max(self.blocked_until, self.monotonic() + QUARANTINE)
         self.lease = None
         for _, future in self.pending.values():
             if not future.done():
@@ -142,7 +143,7 @@ class MediaHub:
                 await device['send']({'protocol': PROTOCOL, 'type': 'request', 'id': request_id, 'epoch': device['epoch'], 'action': action, 'deadline': self.clock()+self.timeout, 'payload': payload})
                 return await future
         except (Exception, asyncio.CancelledError):
-            self.blocked_until = max(self.blocked_until, self.clock()+QUARANTINE)
+            self.blocked_until = max(self.blocked_until, self.monotonic()+QUARANTINE)
             raise MediaError('execution_unknown', 503) from None
         finally:
             self.pending.pop(request_id, None)
@@ -156,7 +157,7 @@ class MediaHub:
                 raise MediaError('execution_unknown', 503)
             self.terminal[lease['id']] = (lease['actor']['id'], self.clock()+67)
         except MediaError:
-            self.blocked_until = max(self.blocked_until, self.clock()+QUARANTINE)
+            self.blocked_until = max(self.blocked_until, self.monotonic()+QUARANTINE)
         finally:
             if self.lease is lease:
                 self.lease = None
@@ -190,9 +191,9 @@ class MediaHub:
         await self.sweep()
         if action == 'state':
             own = self.lease and self.lease['actor']['id'] == actor['id']
-            return {'active': bool(own and self.lease['phase'] == 'active'), 'reason': 'lease_active' if own and self.lease['phase'] == 'active' else 'unknown' if own else 'not_started', 'media': None}
+            return {'active': bool(own and self.lease['phase'] == 'active'), 'reason': 'lease_active' if own and self.lease['phase'] == 'active' else 'unknown' if own or self.monotonic() < self.blocked_until else 'not_started', 'media': None}
         if action == 'offer':
-            if self.clock() < self.blocked_until:
+            if self.monotonic() < self.blocked_until:
                 raise MediaError('media_result_unknown', 503)
             if self.lease:
                 raise MediaError('media_viewer_busy', 409)
@@ -204,7 +205,7 @@ class MediaHub:
                 status, answer = await self.dispatch('offer', {'device_id': DEVICE_ID, 'type':'offer', 'sdp':body['sdp']})
                 if status != 200:
                     if status >= 500:
-                        self.blocked_until = max(self.blocked_until, self.clock()+QUARANTINE)
+                        self.blocked_until = max(self.blocked_until, self.monotonic()+QUARANTINE)
                     self.lease = None
                     raise MediaError('media_offer_failed', status)
                 lease['native'] = answer['session_id']
@@ -225,7 +226,7 @@ class MediaHub:
             raise MediaError('lease_not_found', 404)
         if action == 'stop' or not body['visible']:
             await self.cleanup(lease)
-            if self.clock() < self.blocked_until:
+            if self.monotonic() < self.blocked_until:
                 raise MediaError('execution_unknown', 503)
             return {'active':False, 'reason':'user_stopped'}
         try:

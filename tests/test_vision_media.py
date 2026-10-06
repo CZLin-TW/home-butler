@@ -9,7 +9,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.now = 1000
         self.provider = MockProvider(enabled=True, clock=lambda:self.now)
-        self.hub = MediaHub(self.provider, clock=lambda:self.now, startup_quarantine=0, timeout=.05)
+        self.hub = MediaHub(self.provider, clock=lambda:self.now, monotonic=lambda:self.now, startup_quarantine=0, timeout=.05)
         self.sent = []
         self.block = None
         async def send(command):
@@ -84,12 +84,35 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(MediaError):
             await self.offer()
     async def test_restart_quarantine(self):
-        restarted=MediaHub(self.provider,clock=lambda:self.now)
+        restarted=MediaHub(self.provider,clock=lambda:self.now,monotonic=lambda:self.now)
         with self.assertRaises(MediaError) as failure:
             await restarted.operation(SERVICE_TOKEN,'offer',{'actor':self.actor(),'type':'offer','sdp':'v=0'})
         self.assertEqual(failure.exception.status,503)
         self.assertEqual(failure.exception.code,'media_result_unknown')
         self.assertEqual(restarted.blocked_until,self.now+67)
+    async def test_wall_clock_jump_does_not_end_quarantine_or_claim_clear(self):
+        monotonic_now = [10]
+        hub = MediaHub(self.provider, clock=lambda:self.now, monotonic=lambda:monotonic_now[0])
+        self.now += 100
+        for name in ('synthetic-alice', 'synthetic-bob'):
+            state = await hub.operation(SERVICE_TOKEN,'state',{'actor':self.actor(name)})
+            self.assertEqual(state,{'active':False,'reason':'unknown','media':None})
+        with self.assertRaises(MediaError) as failure:
+            await hub.operation(SERVICE_TOKEN,'offer',{'actor':self.actor(),'type':'offer','sdp':'v=0'})
+        self.assertEqual(failure.exception.code,'media_result_unknown')
+        self.now -= 200
+        monotonic_now[0] += 67
+        state = await hub.operation(SERVICE_TOKEN,'state',{'actor':self.actor()})
+        self.assertEqual(state['reason'],'not_started')
+
+    async def test_disconnected_quarantine_is_unknown_for_every_actor(self):
+        await self.offer()
+        self.hub.disconnect(self.welcome['epoch'])
+        self.assertIsNone(self.hub.lease)
+        for name in ('synthetic-alice', 'synthetic-bob'):
+            state = await self.hub.operation(SERVICE_TOKEN,'state',{'actor':self.actor(name)})
+            self.assertEqual(state,{'active':False,'reason':'unknown','media':None})
+
     async def test_ttl_actor_expiry_and_device_revoke(self):
         await self.offer()
         self.now+=31

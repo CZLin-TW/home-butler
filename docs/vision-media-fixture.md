@@ -21,10 +21,10 @@ HB 命令最多 4 秒；JSON 最多 40 KiB，SDP 最多 30 KiB。只由 mini ada
 HB 持有全裝置唯一 pending/active lease，瀏覽器取得不透明 actor-owned ID；
 native session ID 不直接暴露。state 只回自己狀態，不回別人的 SDP、影像或 lease。
 回應投影禁止未知欄位；不記錄 SDP、token 或網路地址。active/pending 競爭回
-409 media_viewer_busy；未知隔離回 503 media_result_unknown。已確認 stop 可本機重複成功，
+409 media_viewer_busy；未知隔離回 503 media_result_unknown。隔離期間即使記憶體租約已清除，state 對所有 actor 均回 active:false、reason:unknown，不宣稱 native 已停止。已確認 stop 可本機重複成功，
 未知結果不重送，heartbeat 不延長固定期限。撤銷、到期會嘗試有界 stop，失聯依 native TTL。
 
-重啟預設 67 秒隔離，避免遗忘的 native session 與新 viewer 重疊；斷線及未知也同樣隔離。
+重啟預設以單調時鐘計算 67 秒隔離（系統校時不會提前解除），避免遗忘的 native session 與新 viewer 重疊；斷線及未知也同樣隔離。
 CLI `scripts/vision_media_loopback_fixture.py --ready-file NEW --stop-file MARKER`
 只綁定 127.0.0.1 ephemeral port。`--fresh-native` 只用於首次啟動且 native 是全新程序，
 不可用來跳過重啟隔離。`--port` 支援重用測試自己先前的 port；`--revoke-file` 出現時撤銷
