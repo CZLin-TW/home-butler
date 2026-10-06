@@ -1,8 +1,8 @@
 """Opt-in router factory: dedicated credentials, JSON control only.
 
 Calling create_vision_router() does not start a listener. Production integration is
-disabled by default and uses an empty registry even when enabled. TLS, enrollment,
-credential storage and one-worker routing require separate deployment review.
+disabled by default; the separate status-only pilot requires its persistent registry
+and deployment guards. TLS and one-worker routing require separate deployment review.
 """
 import asyncio
 

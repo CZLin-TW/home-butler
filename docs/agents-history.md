@@ -247,3 +247,10 @@ Added independent optional TCMb/TCMz fields, strict validation, bounded memory h
 後續明確授權新增實際outbound fixture connector與HB main opt-in hook；正式預設停用，
 emptyregistry保持拒絕。新增loopbackfixture與三repo真HTTP/WS驗證，不importproductionmain啟動家用功能。
 310全套測試、三repo链及UI9項通過。未push/deploy；接手先讀activationproposal，不擴成正式授權。
+
+## 2026-10-06 status-only pilot 候選
+
+main 入口改由 vision_pilot 管理，所有 deployment gates 預設不成立；僅允許 status.get。
+新增 existing-private SQLite digest registry、offline init/enroll/revoke CLI、持久撤銷及專用
+filesystem authority lock。未設定正式開關或 credential；render persistent disk、TLS reverse proxy、
+單 instance 與 enrollment 管理仍需後續批准。詳見 vision-status-pilot.md 與驗證紀錄。

@@ -494,3 +494,17 @@ connector、真實 config writer、模型載入、媒體串流或正式 HA publi
 兩client同revision得到200/409，第二adapter reload確認revision1。沒有mock fetch。
 floor全套154、Dashboard53、lint/typecheck/build、production-start browser9項通過。
 僅新增測試venv依赖，未改現役環境。批准候選在 vision-activation-proposal.md，尚未執行。
+
+## 2026-10-06 status-only pilot 程式碼（未部署）
+
+main 改用預設停用的 status-only installer；SQLite 僅存憑證摘要與 scope／到期／撤銷 metadata，
+每次授權重新讀 DB。缺失／損毀／不安全權限／檔案替換拒絕；offline init 建立專用 authority lock。
+單 filesystem flock 與 worker 宣告 guard 不代表跨 replica 安全；render 尚未配置持久 disk。
+沒有真 token enrollment、正式 env、部署或真 mini 連線。
+
+完整 HB `python -m unittest discover -s tests -v` **334 passed**（3.166 秒）；
+其中新 pilot 9 項，覆蓋 digest-only、持久 revoke 與重啟、雙 authority、storage fail closed、
+expiry、status-only routes、default-off、CLI private secret-file 與成功 status 回覆。
+首輪只有既有 main AST assertion 仍期待舊 installer；按新入口更新後全套通過。
+完整測試使用已授權 synthetic ephemeral loopback fixtures，未 import 家庭 main 做測試。
+`git diff --check` 通過；TLS local-CA 跨程序 runner 由另一驗證工作接續，這裡不宣稱已完成。

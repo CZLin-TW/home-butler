@@ -1,8 +1,7 @@
 """Explicit, disabled-by-default installation of the independent vision control API.
 
-The production entry point passes only an enable flag: its registry remains empty.
-Registry injection is for isolated fixtures until enrollment/storage is separately
-implemented and authorized. Importing this module starts no tasks or connections.
+This generic factory is retained for isolated fixtures. The production entry point
+uses vision_pilot.install_status_pilot, with a narrower status.get-only action gate. Importing this module starts no tasks or connections.
 """
 
 

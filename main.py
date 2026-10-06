@@ -25,10 +25,9 @@ import lg_api
 
 
 app = FastAPI()
-# Independent vision control: disabled unless explicitly enabled. No token source is
-# wired here; even enabled, the empty registry denies every service/device request.
-from vision_integration import install_vision_routes
-install_vision_routes(app, enabled=os.environ.get("VISION_CONTROL_ENABLED") == "1")
+# Status-only pilot stays disabled unless all explicit deployment guards are met.
+from vision_pilot import install_status_pilot
+install_status_pilot(app)
 app.include_router(notify_router)
 
 # Web Dashboard REST API

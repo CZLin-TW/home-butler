@@ -564,4 +564,6 @@ Get-Content "$env:USERPROFILE\butler-agent.log" -Tail 10
 
 ## Vision control phase 2 開發邊界
 
-vision_protocol／vision_hub／vision_api 已透過 vision_integration 接入 main，但預設 disabled，啟用仍為空 registry。不得自行設定開關或注入 production credential、連現役 mini 或傳影像。詳見 docs/vision-control.md；保持單 process、有界去重、unknown 不重送，shared protocol 需與 floor-presence byte-identical。
+vision_protocol／vision_hub／vision_api 的 main 入口改由 vision_pilot 管理，預設 disabled；明確 gates 與既有私有 SQLite registry 完備後仍只允許 status.get。不得自行設定開關或注入 production credential、連現役 mini 或傳影像。詳見 docs/vision-control.md；保持單 process、有界去重、unknown 不重送，shared protocol 需與 floor-presence byte-identical。
+
+Status-only pilot 的持久磁碟／單 authority／TLS 部署邊界見 docs/vision-status-pilot.md。render.yaml 尚無 persistent disk；不得自行設定正式開關或 enrollment。

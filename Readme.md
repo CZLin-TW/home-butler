@@ -202,3 +202,8 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 ## 離線 vision control 開發分支
 
 獨立 vision.v1 已有 loopback HTTP／WebSocket 與 fixture 保存驗證；正式入口預設 disabled，沒有 production credential。詳見 [協定與啟用邊界](docs/vision-control.md)。
+
+## Status-only pilot（預設停用）
+
+獨立視覺狀態 pilot 增加 SQLite digest registry、持久撤銷與單 authority guard，只允許 status.get。
+尚未配置正式持久磁碟、TLS 或憑證；[啟用前提與離線 CLI](docs/vision-status-pilot.md)。

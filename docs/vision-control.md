@@ -1,7 +1,7 @@
 # Vision control phase 2：離線協定
 
-本階段已提供實際 loopback HTTP／WebSocket 控制鏈與 fixture 磁碟 writer。正式 app 僅有
-VISION_CONTROL_ENABLED=1 的註冊入口，預設停用；即使啟用也使用空 registry、拒絕全部憑證。
+本階段已提供實際 loopback HTTP／WebSocket 控制鏈與 fixture 磁碟 writer。正式 app 改由
+[status-only pilot](vision-status-pilot.md) 管理入口，預設停用，需持久私有 registry 與 deployment guards，且只允許 status.get。
 沒有設定此開關、連線現役 mini 或產生正式憑證。既有 HA／PC agent 通道與家電路由不變。
 
 預定資料路徑：瀏覽器的 Dashboard session → Dashboard BFF 的 status/edit 授權 →
@@ -55,7 +55,7 @@ shared schema 一致性、synthetic 狀態、修改去重／revision 衝突、�
 
 ## Loopback milestone
 
-`vision_integration.install_vision_routes` 已接到 main，預設 disabled。
+`vision_integration.install_vision_routes` 保留為 fixture factory；main 已改用 status-only pilot，預設 disabled。
 `scripts/vision_loopback_fixture.py` 建立 ephemeral 127.0.0.1 listener，獨立假credential；
 floor `connect_fixture` 只允許固定 loopback device 路徑，拒proxy/redirect、不自動重連或重送。
 `FixtureFileAdapter` 只能使用新建的私有 temporary fixture 目錄，無 production path 參數；
