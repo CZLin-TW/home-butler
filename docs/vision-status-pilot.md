@@ -63,7 +63,8 @@ python scripts/vision_status_registry.py revoke --db /approved/private/registry.
 ```
 
 這是離線 registry 工具介面，不是正式 mini device secret 的預設保存方式。正式預設為
-簽章固定的 Keychain broker 持有 token 並負責 WSS 認證，Python 不取得秘密；broker 尚待實作／批准。
+簽章固定的 Keychain broker 持有 token 並負責 WSS 認證，Python 不取得秘密；本輪已有 native 原始碼與 mock，由 native 自行產生受限 synthetic metadata，
+沒有 Python producer IPC；尚未簽章、安裝，activation 維持停用。
 不得將檔案 provider 當成 Keychain 失敗時的 fallback。
 
 也可 `--stdin` 由 pipe／檔案重導輸入；拒絕互動 terminal，避免 echo。token 不接受 argv，

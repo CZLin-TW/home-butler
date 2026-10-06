@@ -19,7 +19,8 @@
   hosting secret；HB只接收其digest與授權metadata。這些步驟本輪均未執行。
 - Mini credential：新增獨立 macOS login Keychain item，service 候選
   `com.floorpresence.vision-control`、account `floor-mini-01`；只供簽章固定的 native broker 讀取，由 broker 負責固定 HB host 的 WSS 認證，
-  status producer 只提交受限 metadata，不取得 token；明文 device token 檔不是預設或 fallback。
+  本輪 native 原始碼／mock 由 native 自行產生受限 synthetic metadata，未實作 Python producer IPC；
+  尚未簽章、安裝，activation 維持停用。明文 device token 檔不是預設或 fallback。
   不沿用相機 broker、家庭 API key 或其他 Keychain item。新增 item／ACL／簽章需另行批准；本輪未操作。
 - HB：只保存 token digest、device allowlist、scope、expiry/revoked metadata；單 worker registry。
   第一輪設定 24 小時到期、可獨立撤銷的 device token。SQLite enrollment／持久 revocation 已有隔離程式與測試，尚未部署；儲存選擇仍待核准，

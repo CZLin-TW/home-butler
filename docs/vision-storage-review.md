@@ -55,11 +55,12 @@ Render 文件說 persistent disk 只能附加到 paid service；預設 filesyste
 ## Mini 憑證預設：簽章固定的 Keychain broker
 
 正式 device credential 的預設設計是獨立 Keychain item＋簽章固定、最小權限的 native broker，
-由 broker 讀取秘密並負責固定 HB host 的 WSS 認證。Python/status producer 只透過受限 IPC 提交
-allowlisted status 資料，不取得 token。明文 device token 檔不是預設部署方法；目前檔案讀取介面
+由 broker 讀取秘密並負責固定 HB host 的 WSS 認證。本輪交付 native 原始碼與 mock，
+由 native 自身產生受限 synthetic metadata；未實作 Python producer IPC。明文 device token 檔不是預設部署方法；目前檔案讀取介面
 只是測試／離線 enrollment 工具能力，不代表已批准以檔案保存正式 device secret。
 
 repo 的 [macOS telemetry sender](../agent/macos_daemon/README.md) 提供固定簽章／精確 ACL 的既有
 設計證據，但它是另一個功能，不能沿用其 binary、Keychain item、ACL 或秘密。Vision broker
-尚未實作或驗收；新 item、簽章及 ACL 均需另批，不允許通用 Python/shell key reader、廣泛 ACL
+已有本輪原始碼與 mock，但尚未簽章、安裝或完成真實 Keychain 驗收，activation 維持停用；
+新 item、簽章及 ACL 均需另批，不允許通用 Python/shell key reader、廣泛 ACL
 或失敗時改讀明文檔。Keychain 解鎖／登入前可用性與版本升級信任也必須另外測試。
