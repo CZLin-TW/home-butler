@@ -27,7 +27,7 @@ class MetricsTests(unittest.TestCase):
 
     def test_payload_keeps_temperature_unknown_and_zero_gpu(self):
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal'}), patch.object(metrics, 'read_gpu', return_value=0):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=0):
             result = metrics.collect('192.0.2.20', 'Mac mini')
         self.assertEqual(result['gpu_pct'], 0)
         self.assertIsNone(result['cpu_temp_c'])
@@ -35,15 +35,32 @@ class MetricsTests(unittest.TestCase):
         self.assertNotIn('load_average_1_5_15', result)
         self.assertEqual(result['cpu_pct'], 12)
 
-    def test_memory_pressure_flags_and_unavailable(self):
+    @patch.object(metrics, "read_memory_pressure_pct", return_value=37)
+    def test_memory_pressure_flags_and_unavailable(self, _pct):
         for raw, expected in [('1\n', 'normal'), ('2', 'warning'), ('4', 'critical'),
                               ('0', None), ('3', None), ('8', None), ('50%', None), ('', None)]:
             with patch.object(metrics.subprocess, 'run', return_value=types.SimpleNamespace(stdout=raw)) as command:
-                self.assertEqual(metrics.read_memory_pressure(), {'level': expected})
+                self.assertEqual(metrics.read_memory_pressure(), {'level': expected, 'pct': 37})
                 self.assertEqual(command.call_args.args[0], ['/usr/sbin/sysctl', '-n', 'kern.memorystatus_vm_pressure_level'])
         for error in [OSError('denied'), metrics.subprocess.TimeoutExpired('sysctl', 5)]:
             with patch.object(metrics.subprocess, 'run', side_effect=error):
-                self.assertEqual(metrics.read_memory_pressure(), {'level': None})
+                self.assertEqual(metrics.read_memory_pressure(), {'level': None, 'pct': 37})
+
+    def test_continuous_pressure_uses_kernel_value_and_fails_unknown(self):
+        for free, code, expected in [(100, 0, 0), (63, 0, 37), (0, 0, 100),
+                                     (101, 0, None), (2**32-1, 0, None), (63, -1, None)]:
+            def query(pointer):
+                pointer._obj.value = free
+                return code
+            with patch.object(metrics.ctypes, 'CDLL', return_value=types.SimpleNamespace(memorystatus_get_level=query)):
+                self.assertEqual(metrics.read_memory_pressure_pct(), expected)
+        for error in [OSError('unavailable'), AttributeError('unsupported')]:
+            with patch.object(metrics.ctypes, 'CDLL', side_effect=error):
+                self.assertIsNone(metrics.read_memory_pressure_pct())
+        def unwritten(pointer):
+            return 0
+        with patch.object(metrics.ctypes, 'CDLL', return_value=types.SimpleNamespace(memorystatus_get_level=unwritten)):
+            self.assertIsNone(metrics.read_memory_pressure_pct())
 
     def test_smc_child_invalid_values_and_timeout_fail_closed(self):
         good = types.SimpleNamespace(stdout=json.dumps({'sensors': {'TCMb': {'temperature_c': 44.5}, 'TCMz': {'temperature_c': None}}}))
@@ -120,7 +137,7 @@ class ExistingContractTests(unittest.TestCase):
                                      'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None)}):
             state_spec.loader.exec_module(state)
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal'}), patch.object(metrics, 'read_gpu', return_value=None):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=None):
             payload = metrics.collect('192.0.2.20', 'Mac mini')
         request = namespace['PCHeartbeatRequest'](**payload)
         # Real record/snapshot; prevent spawning the Sheet writer entirely.
@@ -130,8 +147,8 @@ class ExistingContractTests(unittest.TestCase):
         pc = state.snapshot()['192.0.2.20']
         self.assertTrue(pc['online'])
         self.assertEqual(pc['hostname'], 'Mac mini')
-        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal', 'pct': None})
-        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal', 'pct': None})
+        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal', 'pct': 37})
+        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal', 'pct': 37})
         for pct in [0, 37, 100, None]:
             self.assertEqual(namespace['MemoryPressure'](level='normal', pct=pct).pct, pct)
         for pct in [True, -1, 101, 37.5, '37', float('nan'), float('inf')]:

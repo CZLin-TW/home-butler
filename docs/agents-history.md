@@ -1,5 +1,9 @@
 # home-butler 版本變更紀錄
 
+## 2026-10-09 連續記憶體壓力採樣
+
+collector 以 libSystem 唯讀取得連續 pct，與目前 macOS 活動監視器相同的來源及 100 減法；sysctl level 仍獨立。sender 嚴格驗證數值；來源不可用留 null。接收端先行部署，透過既有 GitHub 更新器發布。
+
 ## 2026-10-09 連續壓力接收契約
 
 先擴充可選 memory_pressure.pct（0–100 整數或 null），讓接收端先部署，再更新 agent 與圖表；舊 payload 相容，非法數值拒絕。

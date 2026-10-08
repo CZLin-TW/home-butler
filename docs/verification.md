@@ -1,14 +1,18 @@
 # 驗證方式與範圍
 
+## 2026-10-09 連續記憶體壓力採樣
+
+394 項後端離線測試及 AUTO_UPDATE native 假測試通過。涵蓋 100 減法、0/100、失敗與缺符號、越界與未寫回、level/pct 獨立缺值、嚴格 sender schema。Render 公開 OpenAPI 已確認接收端含可選 pct 後才發布 agent。macOS 27.0.1 靜態檢查確認 Activity Monitor 同一數值來源與計算，無壓力模擬；此版自然自動切換仍待 main CI 與背景驗收。
+
 ## 2026-10-09 連續壓力接收契約
 
 393 項後端離線測試通過；新增 pct 接受 0、37、100、null，拒絕布林、字串、小數、越界、NaN／Infinity；舊 level-only payload 保留且 pct 為 null。此階段不改已安裝 collector。
 
-## 2026-10-09 Mac 記憶體壓力（自動更新驗收候選）
+## 2026-10-09 Mac 記憶體壓力（首次真實自動切版通過）
 
 393 項完整後端離線測試通過；native AUTO_UPDATE 假測試通過。涵蓋 sysctl 1/2/4、未知值／逾時、舊 payload 相容、獨立狀態歷史與 sender 白名單。真實非 root 本機採樣為 normal，未送出測試 heartbeat，未製造記憶體壓力。
 
-開發副本修改 sender＋collector，已安裝目錄不手改；待 main 成功 CI 後，以自然排程的 update_confirmed、新 SHA 連續 acknowledged 及安裝版採樣驗證升級。未以程式編譯成功宣稱已自動部署。
+GitHub 0caaac624c86ea47baa099d311bdf2f622865b5f 的 push CI 成功後，UTC 17:54:45 與 17:55:47 自然新版 ACK，17:55:48 update_confirmed；已安裝版本與採樣 normal 核對成功。同一憑證 DR、不同 cdhash；未手改安裝目錄或手動重啟。
 
 ## 2026-10-09 macOS 完整自動更新（首次啟用通過）
 
@@ -46,7 +50,7 @@ signing-probe，回 `probe_validation_failed` 被誤報為 already exists。未�
 
 已安裝 runtime 可匿名讀取 GitHub main 和 CI。首次更新檢查得到 github_check_failed／HTTP 404：
 當時 main 仍為 188def0，尚不含 auto_update/trust.swift；此為合併前的缺檔，現役 telemetry 不受影響。
-main 合併與成功 push CI 後的更新檢查、首個真正不同版本的自動切換尚待確認。
+main 合併後先出現 agent_unchanged，其後 0caaac6 自動切版成功，見上方實測。
 
 ## 2026-10-04 TCMb／TCMz 本機讀取準備
 

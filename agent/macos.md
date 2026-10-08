@@ -7,7 +7,7 @@
 | 指標 | 來源 | 可用性 |
 | --- | --- | --- |
 | CPU 使用率 | psutil 1 秒取樣 | 0–100%，跨核心整體使用率 |
-| 記憶體壓力 | 唯讀 kern.memorystatus_vm_pressure_level | normal／warning／critical；不可當百分比，失敗／未知值為 null |
+| 記憶體壓力 | 唯讀 memorystatus_get_level + kern.memorystatus_vm_pressure_level | pct 為 100 減系統 free 值（0–100）；level 為正常／警告／嚴重；獨立缺值 null |
 | RAM 使用率（相容欄位） | psutil virtual_memory().percent | 保留原契約與既有歷史；新版 Mac 卡改顯示記憶體壓力 |
 | GPU 使用率 | AGXAccelerator / PerformanceStatistics / Device Utilization % | 可選；只接受有效 0–100 數值，未公開穩定契約、OS 更新可能失效；不以 renderer/tiler 數值代替 |
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
@@ -61,13 +61,24 @@ Dashboard 分別顯示來源、限制及 unavailable。舊 sender 不一定接�
 
 ## 記憶體壓力
 
-`memory_pressure={level, pct?}` 為可選獨立欄位；level 僅 normal／warning／critical／null。
-接收端先開放 pct：0–100 整數或 null；目前舊 collector 仍只送 level，待接收端部署後更新。
-collector 唯讀 sysctl 的 **dispatch flags 1／2／4**，不是 XNU 內部 enum 的 0／1／2／3。
-失敗／未知一律 null；不以 free RAM 百分比推估，不製造壓力測試、不執行 memory_pressure 工具。
-原生 sender 嚴格白名單，後端只保留 bounded 24h 記憶體歷史，不新增 Sheet 欄位。
-舊 Windows／Mac payload 缺欄位仍可接收；RAM 使用率欄位語義不變。
+`memory_pressure={level, pct}` 為可選獨立欄位。pct 是 0–100 整數或 null，來自
+libSystem 的唯讀 `memorystatus_get_level`，以 `100 - free_pct` 轉為圖形高度。
+這不是 psutil RAM 使用率，也不是把三級狀態換算成百分比。
+level 唯讀 sysctl 的 **dispatch flags 1／2／4**，對應 normal／warning／critical；
+不使用 pct 門檻推導顏色，兩個讀值各自失敗時為 null。
 
-來源：[Apple XNU sysctl 轉換](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_memorystatus_notify.c)、
+2026-10-09 在 macOS 27.0.1（26A434）唯讀檢查系統 Activity Monitor binary：
+`memorystatus_get_level` 回值經 100 減法送入 `setMemoryStatusLevel:`，
+繪圖時 `memoryStatusLevel.floatValue` 直接傳給 `memoryPressureGraph.addValue:withGradientIndex:`；
+gradient index 另由 sysctl 壓力旗標產生。這確認目前這台機器的數值來源與計算相同；
+不是 Apple 對未來版本的公開相容承諾。libSystem 符號缺失、呼叫失敗或回值超出 0–100
+一律 null，沒有其他 RAM 公式 fallback。每分鐘採樣一次，不聲稱與活動監視器的採樣時間／頻率相同。
+
+不製造壓力測試、不執行 memory_pressure 工具、不操作記憶體回收。
+原生 sender 嚴格驗證 level 與 pct，後端只保留 bounded 24h 記憶體歷史，不新增 Sheet 欄位。
+舊 Windows／Mac payload 缺欄位仍可接收；level-only 歷史不虛構數值；RAM 欄位語義不變。
+部署先發布接收端的可選 pct，確認公開 OpenAPI 後才發布 agent，避免舊後端拒絕新 payload。
+
+來源：[Apple system_cmds 的唯讀取值](https://github.com/apple-oss-distributions/system_cmds/blob/main/memory_pressure/memory_pressure.c)、
+[Apple XNU sysctl 轉換](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_memorystatus_notify.c)、
 [Activity Monitor 記憶體壓力](https://support.apple.com/guide/activity-monitor/actmntr34865/mac)。
-壓力狀態與 Activity Monitor 的壓力意義一致，但不聲稱重現其圖形高度／百分比。

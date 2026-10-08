@@ -5,6 +5,7 @@ Independent of agent.py, vision, theater, HA and auto-update. See macos.md.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import ipaddress
 import json
 import math
@@ -65,6 +66,25 @@ def cpu_model():
     return result.stdout.strip()
 
 
+def read_memory_pressure_pct():
+    """Activity Monitor's continuous value: 100 - memorystatus_get_level().
+
+    Read-only libSystem call, separate from severity and psutil RAM utilization.
+    This private macOS interface can disappear; missing/error/out-of-range is null.
+    Initialize outside the valid range to reject an unwritten success result.
+    """
+    try:
+        query = ctypes.CDLL('/usr/lib/libSystem.B.dylib').memorystatus_get_level
+        query.argtypes = [ctypes.POINTER(ctypes.c_uint)]
+        query.restype = ctypes.c_int
+        free_pct = ctypes.c_uint(101)
+        if query(ctypes.byref(free_pct)) == 0 and free_pct.value <= 100:
+            return 100 - free_pct.value
+    except (OSError, AttributeError):
+        pass
+    return None
+
+
 def read_memory_pressure():
     """Read the kernel's dispatch pressure level, not a RAM-use percentage.
 
@@ -79,7 +99,7 @@ def read_memory_pressure():
         level = {"1": "normal", "2": "warning", "4": "critical"}.get(result.stdout.strip())
     except (OSError, subprocess.SubprocessError):
         level = None
-    return {"level": level}
+    return {"level": level, "pct": read_memory_pressure_pct()}
 
 
 def read_smc_temperature():
