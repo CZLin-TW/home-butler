@@ -57,6 +57,7 @@ def record_heartbeat(payload: dict) -> None:
         "cpu_temp_c": payload.get("cpu_temp_c"),
         "gpu_temp_c": payload.get("gpu_temp_c"),
         "smc_temperature": payload.get("smc_temperature"),
+        "memory_pressure": payload.get("memory_pressure"),
     }
 
     with _lock:

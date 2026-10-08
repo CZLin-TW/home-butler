@@ -7,7 +7,8 @@
 | 指標 | 來源 | 可用性 |
 | --- | --- | --- |
 | CPU 使用率 | psutil 1 秒取樣 | 0–100%，跨核心整體使用率 |
-| RAM 使用率 | psutil virtual_memory().percent | OS available-memory 語意，未必等同 Activity Monitor 的 Memory Used |
+| 記憶體壓力 | 唯讀 kern.memorystatus_vm_pressure_level | normal／warning／critical；不可當百分比，失敗／未知值為 null |
+| RAM 使用率（相容欄位） | psutil virtual_memory().percent | 保留原契約與既有歷史；新版 Mac 卡改顯示記憶體壓力 |
 | GPU 使用率 | AGXAccelerator / PerformanceStatistics / Device Utilization % | 可選；只接受有效 0–100 數值，未公開穩定契約、OS 更新可能失效；不以 renderer/tiler 數值代替 |
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
 | TCMb／TCMz | 唯讀 AppleSMC | 獨立感測器欄位；缺值為 null，M6 語義未官方確認 |
@@ -56,3 +57,16 @@ Collector 外送獨立 `smc_temperature={tcmb_c,tcmz_c}`；CPU/GPU 溫度欄位�
 新溫度保留最多 24 小時記憶體歷史，不寫既有 Sheet 欄位，後端重啟即失去歷史。
 Dashboard 分別顯示來源、限制及 unavailable。舊 sender 不一定接受新 schema，
 不得只替換 collector；新的 binary 必須經明確的簽章／Keychain 信任審查。
+
+
+## 記憶體壓力
+
+`memory_pressure={level}` 為可選獨立欄位；level 僅 normal／warning／critical／null。
+collector 唯讀 sysctl 的 **dispatch flags 1／2／4**，不是 XNU 內部 enum 的 0／1／2／3。
+失敗／未知一律 null；不以 free RAM 百分比推估，不製造壓力測試、不執行 memory_pressure 工具。
+原生 sender 嚴格白名單，後端只保留 bounded 24h 記憶體歷史，不新增 Sheet 欄位。
+舊 Windows／Mac payload 缺欄位仍可接收；RAM 使用率欄位語義不變。
+
+來源：[Apple XNU sysctl 轉換](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_memorystatus_notify.c)、
+[Activity Monitor 記憶體壓力](https://support.apple.com/guide/activity-monitor/actmntr34865/mac)。
+壓力狀態與 Activity Monitor 的壓力意義一致，但不聲稱重現其圖形高度／百分比。

@@ -73,7 +73,7 @@ func payload(from data: Data) throws -> Data {
           let outer = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let raw = outer["heartbeat"] as? [String: Any],
           raw["ip"] as? String == account, raw["hostname"] as? String == Deployment.hostname else { throw Failure.invalidPayload }
-    let keys = Set(["ip", "hostname", "cpu_model", "gpu_model", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c", "fah", "smc_temperature"])
+    let keys = Set(["ip", "hostname", "cpu_model", "gpu_model", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c", "fah", "smc_temperature", "memory_pressure"])
     guard Set(raw.keys) == keys else { throw Failure.invalidPayload }
     for name in ["cpu_model", "gpu_model"] {
         guard let value = raw[name] as? String, value.count <= 128 else { throw Failure.invalidPayload }
@@ -92,6 +92,12 @@ func payload(from data: Data) throws -> Data {
         if smc[name] is NSNull { continue }
         guard let value = smc[name] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
               value.doubleValue.isFinite, value.doubleValue > 0, value.doubleValue <= 150 else { throw Failure.invalidPayload }
+    }
+    guard let pressure = raw["memory_pressure"] as? [String: Any],
+          Set(pressure.keys) == Set(["level"]) else { throw Failure.invalidPayload }
+    if !(pressure["level"] is NSNull) {
+        guard let level = pressure["level"] as? String,
+              ["normal", "warning", "critical"].contains(level) else { throw Failure.invalidPayload }
     }
     return try JSONSerialization.data(withJSONObject: raw)
 }
@@ -435,7 +441,7 @@ func selfTests() throws {
     }
     assert(!partitionValid(version:0x300,entries:[],expected:"cdhash:sender"))
     let good = Data("""
-    {"heartbeat":{"ip":"192.0.2.20","hostname":"Mac mini","cpu_model":"Example CPU","gpu_model":"Example GPU","cpu_pct":0,"ram_pct":50,"gpu_pct":null,"cpu_temp_c":null,"gpu_temp_c":null,"fah":null,"smc_temperature":{"tcmb_c":44.5,"tcmz_c":null}},"local_only":{"load_average_1_5_15":[1,2,3]}}
+    {"heartbeat":{"ip":"192.0.2.20","hostname":"Mac mini","cpu_model":"Example CPU","gpu_model":"Example GPU","cpu_pct":0,"ram_pct":50,"gpu_pct":null,"cpu_temp_c":null,"gpu_temp_c":null,"fah":null,"smc_temperature":{"tcmb_c":44.5,"tcmz_c":null},"memory_pressure":{"level":"normal"}},"local_only":{"load_average_1_5_15":[1,2,3]}}
     """.utf8)
     let parsed = try payload(from: good)
     assert(!String(data: parsed, encoding: .utf8)!.contains("local_only"))
@@ -478,6 +484,13 @@ func selfTests() throws {
         do { _ = try payload(from: Data(bad.utf8)); fatalError("expected payload rejection") } catch {}
     }
     let goodText = String(data: good, encoding: .utf8)!
+    for level in ["null", "\"warning\"", "\"critical\""] {
+        _ = try payload(from: Data(goodText.replacingOccurrences(of: "\"level\":\"normal\"", with: "\"level\":\(level)").utf8))
+    }
+    for level in ["true", "1", "50", "\"unknown\""] {
+        let bad = goodText.replacingOccurrences(of: "\"level\":\"normal\"", with: "\"level\":\(level)")
+        do { _ = try payload(from: Data(bad.utf8)); fatalError("invalid pressure accepted") } catch {}
+    }
     for invalid in ["true", "0", "-1", "151", "\"44\"", "1e999"] {
         let bad = goodText.replacingOccurrences(of: "\"tcmb_c\":44.5", with: "\"tcmb_c\":\(invalid)")
         do { _ = try payload(from: Data(bad.utf8)); fatalError("invalid SMC accepted") } catch {}

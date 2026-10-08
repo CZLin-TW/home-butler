@@ -10,7 +10,7 @@ import threading
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Body, Request
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import SIRI_USER_ID, TZ, now_taipei
 from assistant import process_message
@@ -960,6 +960,11 @@ class SMCTemperature(BaseModel):
     tcmz_c: Optional[float] = Field(default=None, strict=True, gt=0, le=150, allow_inf_nan=False)
 
 
+class MemoryPressure(BaseModel):
+    model_config = {"extra": "forbid"}
+    level: Optional[Literal["normal", "warning", "critical"]] = None
+
+
 class PCHeartbeatRequest(BaseModel):
     ip: str
     hostname: Optional[str] = ""
@@ -972,6 +977,7 @@ class PCHeartbeatRequest(BaseModel):
     cpu_temp_c: Optional[float] = None  # Windows 上要靠 LibreHardwareMonitor，沒裝就 None
     fah: Optional[FAHStatus] = None
     smc_temperature: Optional[SMCTemperature] = None
+    memory_pressure: Optional[MemoryPressure] = None
 
 
 @router.post("/computers/heartbeat")

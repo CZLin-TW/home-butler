@@ -27,13 +27,23 @@ class MetricsTests(unittest.TestCase):
 
     def test_payload_keeps_temperature_unknown_and_zero_gpu(self):
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_gpu', return_value=0):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal'}), patch.object(metrics, 'read_gpu', return_value=0):
             result = metrics.collect('192.0.2.20', 'Mac mini')
         self.assertEqual(result['gpu_pct'], 0)
         self.assertIsNone(result['cpu_temp_c'])
         self.assertIsNone(result['gpu_temp_c'])
         self.assertNotIn('load_average_1_5_15', result)
         self.assertEqual(result['cpu_pct'], 12)
+
+    def test_memory_pressure_flags_and_unavailable(self):
+        for raw, expected in [('1\n', 'normal'), ('2', 'warning'), ('4', 'critical'),
+                              ('0', None), ('3', None), ('8', None), ('50%', None), ('', None)]:
+            with patch.object(metrics.subprocess, 'run', return_value=types.SimpleNamespace(stdout=raw)) as command:
+                self.assertEqual(metrics.read_memory_pressure(), {'level': expected})
+                self.assertEqual(command.call_args.args[0], ['/usr/sbin/sysctl', '-n', 'kern.memorystatus_vm_pressure_level'])
+        for error in [OSError('denied'), metrics.subprocess.TimeoutExpired('sysctl', 5)]:
+            with patch.object(metrics.subprocess, 'run', side_effect=error):
+                self.assertEqual(metrics.read_memory_pressure(), {'level': None})
 
     def test_smc_child_invalid_values_and_timeout_fail_closed(self):
         good = types.SimpleNamespace(stdout=json.dumps({'sensors': {'TCMb': {'temperature_c': 44.5}, 'TCMz': {'temperature_c': None}}}))
@@ -96,13 +106,13 @@ class MetricsTests(unittest.TestCase):
 class ExistingContractTests(unittest.TestCase):
     def test_collector_fits_real_request_and_state_without_sheets(self):
         import ast
-        from typing import Optional
+        from typing import Optional, Literal
         from pydantic import BaseModel, Field
         root = Path(__file__).parents[1]
         tree = ast.parse((root / 'web_api.py').read_text())
         classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
-                   and node.name in ('FAHStatus', 'SMCTemperature', 'PCHeartbeatRequest')]
-        namespace = {'BaseModel': BaseModel, 'Optional': Optional, 'Field': Field}
+                   and node.name in ('FAHStatus', 'SMCTemperature', 'MemoryPressure', 'PCHeartbeatRequest')]
+        namespace = {'BaseModel': BaseModel, 'Optional': Optional, 'Literal': Literal, 'Field': Field}
         exec(compile(ast.Module(body=classes, type_ignores=[]), 'web_api.py', 'exec'), namespace)
         state_spec = importlib.util.spec_from_file_location('isolated_pc_state', root / 'pc_state.py')
         state = importlib.util.module_from_spec(state_spec)
@@ -110,7 +120,7 @@ class ExistingContractTests(unittest.TestCase):
                                      'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None)}):
             state_spec.loader.exec_module(state)
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_gpu', return_value=None):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal'}), patch.object(metrics, 'read_gpu', return_value=None):
             payload = metrics.collect('192.0.2.20', 'Mac mini')
         request = namespace['PCHeartbeatRequest'](**payload)
         # Real record/snapshot; prevent spawning the Sheet writer entirely.
@@ -120,6 +130,14 @@ class ExistingContractTests(unittest.TestCase):
         pc = state.snapshot()['192.0.2.20']
         self.assertTrue(pc['online'])
         self.assertEqual(pc['hostname'], 'Mac mini')
+        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal'})
+        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal'})
+        self.assertIsNone(namespace['PCHeartbeatRequest'](**{k: v for k, v in payload.items() if k != 'memory_pressure'}).memory_pressure)
+        for invalid in [True, 0, 1, 2, 4, 'green', '50', 'unknown']:
+            with self.assertRaises(ValueError):
+                namespace['MemoryPressure'](level=invalid)
+        with self.assertRaises(ValueError):
+            namespace['MemoryPressure'](level='normal', percent=50)
         self.assertEqual(pc['current']['cpu_pct'], 12)
         self.assertIsNone(pc['current']['gpu_pct'])
         self.assertIsNone(pc['history'][0]['cpu_temp_c'])

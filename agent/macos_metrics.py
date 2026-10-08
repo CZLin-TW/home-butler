@@ -65,6 +65,23 @@ def cpu_model():
     return result.stdout.strip()
 
 
+def read_memory_pressure():
+    """Read the kernel's dispatch pressure level, not a RAM-use percentage.
+
+    XNU's sysctl converts internal levels to NOTE_MEMORYSTATUS flags (1/2/4).
+    Missing/unsupported readings remain unknown; never manufacture 'normal'.
+    """
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            capture_output=True, check=True, timeout=5, text=True,
+        )
+        level = {"1": "normal", "2": "warning", "4": "critical"}.get(result.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        level = None
+    return {"level": level}
+
+
 def read_smc_temperature():
     # Separate bounded child works under the installed sender's Python -I mode.
     missing = {"tcmb_c": None, "tcmz_c": None}
@@ -96,6 +113,7 @@ def collect(ip, hostname):
         "cpu_pct": cpu, "ram_pct": ram, "gpu_pct": read_gpu(),
         "cpu_temp_c": None, "gpu_temp_c": None, "fah": None,
         "smc_temperature": read_smc_temperature(),
+        "memory_pressure": read_memory_pressure(),
     }
 
 

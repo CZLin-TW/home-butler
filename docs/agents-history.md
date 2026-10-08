@@ -1,5 +1,9 @@
 # home-butler 版本變更紀錄
 
+## 2026-10-09 Mac 記憶體壓力
+
+新增唯讀系統記憶體壓力，collector／native sender／後端共用嚴格 level 欄位；舊 ram_pct 與 Windows 契約保留。用這次實際功能變更驗證 GitHub main 到已安裝 updater 的自動切版。實際驗收結果另見驗證紀錄。
+
 ## 2026-10-09 macOS 完整 agent 自動更新
 
 新增獨立 updater：每五分鐘查 main＋同 SHA 的成功 push CI，僅 agent 檔案變更才建置。

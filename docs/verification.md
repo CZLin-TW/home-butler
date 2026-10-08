@@ -1,5 +1,11 @@
 # 驗證方式與範圍
 
+## 2026-10-09 Mac 記憶體壓力（自動更新驗收候選）
+
+393 項完整後端離線測試通過；native AUTO_UPDATE 假測試通過。涵蓋 sysctl 1/2/4、未知值／逾時、舊 payload 相容、獨立狀態歷史與 sender 白名單。真實非 root 本機採樣為 normal，未送出測試 heartbeat，未製造記憶體壓力。
+
+開發副本修改 sender＋collector，已安裝目錄不手改；待 main 成功 CI 後，以自然排程的 update_confirmed、新 SHA 連續 acknowledged 及安裝版採樣驗證升級。未以程式編譯成功宣稱已自動部署。
+
 ## 2026-10-09 macOS 完整自動更新（首次啟用通過）
 
 公開 sentinel、拋棄式憑證：獨立 0x100 與 System 0x100 Keychain／非 root system LaunchDaemon
