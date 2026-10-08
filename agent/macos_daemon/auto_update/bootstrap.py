@@ -129,6 +129,13 @@ def one_shot(root, c, args, label):
             u.call(["/bin/launchctl", "bootout", target])
 
 
+def fixture_source(service, test, package):
+    config = "enum ProbeConfig {\n" + "\n".join("static let " + name + " = " + json.dumps(value)
+        for name, value in {"fixture": str(test / "unused.keychain-db"), "service": service, "build": "original"}.items()) + "\n}\n"
+    fixture = (package / "probe.swift").read_text().replace('"public-fixture"', '"192.0.2.20"')
+    return config + fixture
+
+
 def public_migration_test(root, c, package, sha, sources):
     nonce = uuid.uuid4().hex
     test = Path("/Library/Application Support") / ("HomeButlerUpdateProbe-" + nonce)
@@ -139,12 +146,9 @@ def public_migration_test(root, c, package, sha, sources):
     (test / "state").mkdir(mode=0o700)
     os.chown(test / "state", c["deployment"]["uid"], c["deployment"]["gid"])
     service = "org.homebutler.telemetry.update-probe." + nonce
-    config = "enum ProbeConfig {\n" + "\n".join("static let " + name + " = " + json.dumps(value)
-        for name, value in {"fixture": str(test / "unused.keychain-db"), "service": service, "build": "original"}.items()) + "\n}\n"
     # This reviewed public-fixture source uses the same item account as the
     # isolated production-sender build. It never references the real item.
-    fixture = (package / "probe.swift").read_text().replace('"public-fixture"', '"192.0.2.20"')
-    (test / "main.swift").write_text(config + fixture)
+    (test / "main.swift").write_text(fixture_source(service, test, package))
     original = test / "original"
     u.call(["/usr/bin/swiftc", "-module-cache-path", test / "cache", test / "main.swift", "-o", original], timeout=180)
     u.call(["/usr/bin/codesign", "--force", "--sign", "-", original])
@@ -160,8 +164,7 @@ def public_migration_test(root, c, package, sha, sources):
     report = {"service": service, "passed": False, "public_test_only": True}
     try:
         absent = captured([original, "metadata", "system"], check=False)
-        if json.loads(absent.stdout).get("error_status") != -25300:
-            raise ValueError("Public test item already exists")
+        ensure_absent(absent)
         attempted = True
         initial = json.loads(captured([original, "create", "system"]).stdout)["metadata"]
         u.call([updated, "migrate-access"])
@@ -196,6 +199,86 @@ def put_plist(path, value):
     with path.open("xb") as out:
         out.write(plistlib.dumps(value))
     path.chmod(0o644)
+
+
+def ensure_absent(result):
+    value = json.loads(result.stdout)
+    if value.get("error_status") == -25300:
+        return
+    if result.returncode == 0 and "metadata" in value:
+        raise ValueError("Public test item already exists")
+    raise ValueError("Public test metadata query failed: " + json.dumps(value, sort_keys=True))
+
+
+def resume_preflight(root, template, package, sha, sources):
+    # Only the pre-production boundary is resumable. Never infer rollback or
+    # repeat an ACL transition after an uncertain production switch.
+    c = u.load_config(root)
+    if {k: v for k, v in c.items() if k not in ("certificate_sha1", "requirement")} != template:
+        raise ValueError("Prepared deployment differs from incomplete installation")
+    for name in ("installation.json", "current", "pending.json", "original.plist"):
+        if (root / name).exists() or (root / name).is_symlink():
+            raise ValueError("Production switch may have started; inspect before resuming")
+    report_path = root / "public-migration-test.json"
+    u.trusted(report_path)
+    report = json.loads(report_path.read_text())
+    if report.get("passed") is not False or report.get("public_test_only") is not True:
+        raise ValueError("Not a failed public preflight")
+    original = c["original"]
+    old_plist = Path("/Library/LaunchDaemons") / (original["label"] + ".plist")
+    if u.digest(old_plist.read_bytes()) != original["plist_sha256"] or u.digest(Path(original["sender"]).read_bytes()) != original["sha256"]:
+        raise ValueError("Original installation changed")
+    u.call(["/bin/launchctl", "print", "system/" + original["label"]])
+    for label in (c["deployment"]["label"], c["deployment"]["label"] + ".updater"):
+        if (old_plist.parent / (label + ".plist")).exists() or u.call(["/bin/launchctl", "print", "system/" + label], check=False) == 0:
+            raise ValueError("New job already exists")
+    # Keep the installed identity and runtime. Refuse to silently replace the
+    # trusted controller/helper as part of this narrowly scoped retry.
+    for name in ("update.py", "settings.py", "signer"):
+        u.trusted(root / "updater" / name)
+        if name != "signer" and (root / "updater" / name).read_bytes() != (package / name).read_bytes():
+            raise ValueError("Installed controller changed")
+    with (root / "update.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if any((root / name).exists() or (root / name).is_symlink()
+               for name in ("installation.json", "current", "pending.json", "original.plist")):
+            raise ValueError("Production switch may have started; inspect before resuming")
+        clear_failed_probe(root, report, package)
+        print("Resuming public preflight; original agent remains active...", flush=True)
+        public_migration_test(root, c, package, sha, sources)
+        print("PUBLIC_MIGRATION_PASSED. Building initial signed agent...", flush=True)
+        u.build(root, c, sha, sources)
+        u.select(root, sha)
+        switch(root, c, sha)
+    print("AUTO_UPDATE_ACTIVE: two natural heartbeats confirmed; checks every 5 minutes.", flush=True)
+
+
+def clear_failed_probe(root, report, package):
+    service = report.get("service", "")
+    match = re.fullmatch(r"org\.homebutler\.telemetry\.update-probe\.([a-f0-9]{32})", service)
+    if not match:
+        raise ValueError("Unexpected failed public probe scope")
+    test = Path("/Library/Application Support") / ("HomeButlerUpdateProbe-" + match[1])
+    if test.exists():
+        u.trusted(test, True)
+    check = root / "retry-probe"
+    if check.exists():
+        u.trusted(check, True)
+        shutil.rmtree(check)
+    check.mkdir(mode=0o700)
+    try:
+        (check / "main.swift").write_text(fixture_source(service, check, package))
+        u.call(["/usr/bin/swiftc", "-module-cache-path", check / "cache", check / "main.swift",
+                "-o", check / "probe"], timeout=180)
+        # Reference/ACL metadata only: no read or delete of a Keychain value.
+        ensure_absent(captured([check / "probe", "metadata", "system"], check=False))
+        for suffix in (".new", ".old"):
+            if u.call(["/bin/launchctl", "print", "system/" + service + suffix], check=False) == 0:
+                raise ValueError("Prior public probe job is still loaded")
+        if test.exists():
+            shutil.rmtree(test)
+    finally:
+        shutil.rmtree(check)
 
 
 def updater_job(root, c):
@@ -266,7 +349,7 @@ def run(package):
     root = Path(c["deployment"]["install"])
     u.validate(c["deployment"])
     if root.exists():
-        raise ValueError("Installation already exists; inspect before resuming")
+        return resume_preflight(root, c, package, sha, sources)
     user = pwd.getpwnam(c["deployment"]["user"])
     if user.pw_uid != c["deployment"]["uid"] or user.pw_uid == 0:
         raise ValueError("Configured non-root user changed")

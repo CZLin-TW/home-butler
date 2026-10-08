@@ -8,7 +8,7 @@
 updater、signer 與 runtime 不接受遠端自行改寫。文件更新不重啟 macOS sender；Windows 原機制不變。
 
 前置公開實驗已完成獨立與 System 0x100 Keychain 的 A/B/A、兩種錯誤身分拒絕及 ACL 不變；
-正式部署未切換。實作、啟用方式與限制見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
+首次啟用因 PUBLIC helper 前綴不一致停在正式切換前；已修正錯誤分類並加入受限接續，正式部署未切換。實作、啟用方式與限制見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
 
 ## 2026-10-03 Mac mini 指標 collector（未部署）
 

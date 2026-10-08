@@ -99,6 +99,61 @@ class ActivationTests(unittest.TestCase):
 
 
 class PackageTests(unittest.TestCase):
+    def test_retry_cleanup_refuses_unrelated_service(self):
+        with patch.object(b.u, "call") as command:
+            with self.assertRaisesRegex(ValueError, "Unexpected failed public probe scope"):
+                b.clear_failed_probe(Path("/unused"), {"service": "production"}, Path("/unused"))
+            command.assert_not_called()
+
+    def test_retry_cleanup_requires_confirmed_absence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "package"
+            package.mkdir()
+            (package / "probe.swift").write_text("// public-only fixture")
+            library = root / "library"
+            test = library / ("HomeButlerUpdateProbe-" + "a" * 32)
+            test.mkdir(parents=True)
+            marker = test / "keep-until-absence-confirmed"
+            marker.touch()
+            report = {"service": "org.homebutler.telemetry.update-probe." + "a" * 32}
+            with patch.object(b, "Path", side_effect=lambda x: library if x == "/Library/Application Support" else Path(x)), \
+                 patch.object(b.u, "trusted"), patch.object(b.u, "call", return_value=1), \
+                 patch.object(b, "captured", return_value=Mock(stdout='{"error_status":-25293}', returncode=1)) as query:
+                with self.assertRaisesRegex(ValueError, "metadata query failed"):
+                    b.clear_failed_probe(root, report, package)
+                self.assertTrue(marker.exists())
+                query.return_value = Mock(stdout='{"error_status":-25300}', returncode=1)
+                b.clear_failed_probe(root, report, package)
+                self.assertFalse(test.exists())
+                self.assertEqual(query.call_args.args[0][-2:], ["metadata", "system"])
+
+    def test_absence_is_distinct_from_probe_failure_or_existing_item(self):
+        b.ensure_absent(Mock(stdout='{"error_status":-25300}', returncode=1))
+        for value, code, message in (({"error": "probe_validation_failed"}, 1, "metadata query failed"),
+                                     ({"error_status": -25293}, 1, "metadata query failed"),
+                                     ({"metadata": {}}, 0, "already exists")):
+            with self.assertRaisesRegex(ValueError, message):
+                b.ensure_absent(Mock(stdout=json.dumps(value), returncode=code))
+
+    def test_resume_refuses_any_evidence_of_production_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            c = {"deployment": {}, "original": {}, "certificate_sha1": "fake", "requirement": "fake"}
+            template = {"deployment": {}, "original": {}}
+            for name in ("installation.json", "current", "pending.json", "original.plist"):
+                (root / name).touch()
+                with patch.object(b.u, "load_config", return_value=c), patch.object(b, "public_migration_test") as probe:
+                    with self.assertRaisesRegex(ValueError, "Production switch may have started"):
+                        b.resume_preflight(root, template, root, "a" * 40, {})
+                    probe.assert_not_called()
+                (root / name).unlink()
+
+    def test_resume_refuses_different_deployment(self):
+        with patch.object(b.u, "load_config", return_value={"deployment": {"service": "original"}}):
+            with self.assertRaisesRegex(ValueError, "differs"):
+                b.resume_preflight(Path("/unused"), {"deployment": {"service": "other"}}, Path("/unused"), "a" * 40, {})
+
     def test_missing_manifest_coverage_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)

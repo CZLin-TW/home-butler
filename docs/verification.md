@@ -18,6 +18,15 @@ System 實驗含單一惰性 creator-cdhash partition，未當成 0x200 的跨�
 正式 item 遷移、GitHub main 驅動的實際升級／回復、重開機未登入及 0x200 均尚未驗收；
 目前既有正式 sender／金鑰／排程未變。詳見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
 
+### 首次啟用前置失敗與修正
+
+首次執行停在 PUBLIC metadata 查詢：bootstrap 使用 update-probe 前綴，但原公開 helper 僅允許
+signing-probe，回 `probe_validation_failed` 被誤報為 already exists。未建立正式切換 journal／current，
+舊服務仍持續自然 acknowledged。修正版 helper 已用實際同 service 的唯讀 metadata 查詢取得
+-25300（不存在），未讀值、未改正式 item。補上錯誤分類與嚴格限定在正式切換前的接續流程；
+保留本機簽署身分，先確認舊 PUBLIC item 不存在才能清除該唯一暫存目錄。修正後完整離線測試
+392 項通過（macOS 71 項）；正式移交仍待重試驗收。
+
 ## 2026-10-04 TCMb／TCMz 本機讀取準備
 
 GitHub main 5d3b135 基準。新增獨立唯讀溫度工具，不改 heartbeat 或已安裝常駐。M6 真實無 sudo 讀取 TCMb=46.05°C，TCMz=null。4 項離線測試涵蓋 datatype／有限與範圍值、缺失 max 不替代、權限失敗、連線清理及禁止寫入指令。缺值保留 unavailable；OSHI die average/max 定義不代表 M6 官方確認。無 push、部署、Keychain 或服務修改。

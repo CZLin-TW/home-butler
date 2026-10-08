@@ -167,7 +167,8 @@ func main() throws {
     let command = CommandLine.arguments[1]
     let scope = CommandLine.arguments[2]
     guard ["fixture", "system"].contains(scope),
-          ProbeConfig.service.hasPrefix("org.homebutler.telemetry.signing-probe.") else { throw Failure.invalid }
+          (ProbeConfig.service.hasPrefix("org.homebutler.telemetry.signing-probe.") ||
+           ProbeConfig.service.hasPrefix("org.homebutler.telemetry.update-probe.")) else { throw Failure.invalid }
     if command == "create-fixture" {
         guard scope == "fixture" else { throw Failure.invalid }
         try createFixture()

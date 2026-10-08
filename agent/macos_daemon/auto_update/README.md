@@ -79,6 +79,10 @@ launcher 釘選 manifest 雜湊；root verifier 校驗每個檔案並複製到 r
 5. 捕捉到切換失敗會卸載新 job、恢復原授權／原 plist／原 job。SIGKILL／斷電無法執行首次
    installer 的 finally；此時看 `installation.json` 並人工核對，不重跑安裝器或猜測刪除資源。
 
+只有公開前置測試失敗、尚無正式切換 journal／current／新 jobs、原 binary／plist 完全一致時，
+修正版才允許接續。先以 metadata 查詢確認上一個唯一 PUBLIC item 不存在，清除其暫存目錄；
+沿用已建立的簽署身分與 runtime，再完整重做公開測試。任何正式切換跡象或查詢失敗皆拒絕。
+
 ## 自動切版、觀察與暫停
 
 `releases/<sha>` 保存編譯、簽署與雜湊驗證後的完整版本，`current` 是原子切換的相對 symlink。
