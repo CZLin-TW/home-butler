@@ -2,7 +2,12 @@
 
 獨立於 Windows agent、vision、theater 及家電控制。Swift sender 在採樣完成後才讀自己的
 System Keychain item，直接送既有 `/api/computers/heartbeat`；Python collector 不接觸 key。
-LaunchDaemon 使用明確指定的非 root 使用者，每 60 秒採樣一次，成功後退出；不做 auto-update。
+LaunchDaemon 使用明確指定的非 root 使用者，每 60 秒採樣一次，成功後退出。舊版安裝器維持手動更新；完整自動更新使用下述獨立入口。
+
+完整自動更新見 [auto_update/](auto_update/README.md)：main 通過 CI 後每五分鐘檢查，
+包含 sender 與 collectors、本機固定簽署、自然回報驗證及失敗回復。
+[signing_probe/](signing_probe/README.md) 已完成公開資料的 System-domain 跨版本實驗；
+正式啟用仍須一次性管理員安裝，未啟用的部署不會因 Git push 自動切換。
 
 這是從已驗證的本機部署整理出的**下一版原始碼**，不是現役 binary 的替換包。
 重新編譯會改變 ad-hoc cdhash，不能覆蓋現役 sender 或直接沿用其 Keychain 信任。
@@ -34,7 +39,7 @@ python3 agent/macos_daemon/build.py \
 
 輸出目錄必須不存在。Swift tests 使用文件 IP、`.invalid` 網域與 FAKE key；
 只驗證 payload、request、控制流程、partition policy，沒有 Keychain／網路存取。
-macOS CI 只跑上述假測試，不跑安裝器／採樣／setup。Linux CI 執行 Python 假 OS 回歸。
+macOS CI 另編譯 AUTO_UPDATE 假測試與本機 signer helper，不跑安裝器／採樣／setup。Linux CI 執行 Python 假 OS 回歸。
 
 ## 準備私人部署包（不會安裝）
 
@@ -59,7 +64,8 @@ python3 agent/macos_daemon/build.py \
 ```
 
 原始碼／依賴／設定及生成 manifest 要先 review。SHA256 可偵測變動，並不是第三方公證；
-此工具不下載 runtime、不使用開發者私鑰，也不提供自動更新或原地信任迁移。
+此處的舊版 `build.py` 不下載 runtime、不使用開發者私鑰，也不提供自動更新或原地信任遷移；
+已有 System daemon 的完整更新遷移請改用 [auto_update](auto_update/README.md)。
 
 ## 安裝、續接及回滾（需使用者另行授權）
 

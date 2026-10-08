@@ -10,7 +10,11 @@ let endpoint = URL(string: origin + "/api/computers/heartbeat")!
 let fm = FileManager.default
 let home = URL(fileURLWithPath: Deployment.home)
 let install = URL(fileURLWithPath: Deployment.install)
+#if AUTO_UPDATE
+let executable = install.appendingPathComponent("current/bin/mini-telemetry")
+#else
 let executable = install.appendingPathComponent("bin/mini-telemetry")
+#endif
 let plist = URL(fileURLWithPath: "/Library/LaunchDaemons/\(label).plist")
 let statusFile = install.appendingPathComponent("state/status.log")
 
@@ -93,8 +97,13 @@ func payload(from data: Data) throws -> Data {
 }
 
 func collect() throws -> Data {
+#if AUTO_UPDATE
+    let collector = install.appendingPathComponent("current/collector/macos_metrics.py").path
+#else
+    let collector = install.appendingPathComponent("collector/macos_metrics.py").path
+#endif
     let raw = try child(install.appendingPathComponent("runtime/" + Deployment.python).path,
-        ["-I", install.appendingPathComponent("collector/macos_metrics.py").path, "--ip", account, "--hostname", Deployment.hostname], capture: true)
+        ["-I", collector, "--ip", account, "--hostname", Deployment.hostname], capture: true)
     return try payload(from: raw)
 }
 
@@ -261,6 +270,9 @@ func verifyAccess(_ itemService: String) throws -> [String: Any] {
           let hash = (info as? [String:Any])?[kSecCodeInfoUnique as String] as? Data,
           SecCodeCopyDesignatedRequirement(code, [], &ownReq) == 0, let ownReq,
           SecRequirementCopyString(ownReq, [], &ownText) == 0, let ownText else { throw Failure.invalidPayload }
+#if AUTO_UPDATE
+    guard ownText as String == UpdateTrust.requirement else { throw Failure.invalidPayload }
+#endif
     let partition = "cdhash:" + hash.map { String(format:"%02x",$0) }.joined()
     var ownerUID: uid_t = 0; var ownerGID: gid_t = 0
     var ownerType: SecAccessOwnerType = 0; var ownerACL: CFArray?
@@ -292,8 +304,10 @@ func verifyAccess(_ itemService: String) throws -> [String: Any] {
             guard copyTrustedRequirement(trusted,&req)==0,let req,
                   SecRequirementCopyString(req,[],&text)==0,let text, text as String == ownText as String,
                   SecStaticCodeCheckValidity(code,[],req)==0,
-                  SecTrustedApplicationCopyData(trusted,&path)==0,let path,
-                  path as Data == Data((executable.path+"\0").utf8) else { throw Failure.invalidPayload }
+                  SecTrustedApplicationCopyData(trusted,&path)==0,let path else { throw Failure.invalidPayload }
+#if !AUTO_UPDATE
+            guard path as Data == Data((executable.path+"\0").utf8) else { throw Failure.invalidPayload }
+#endif
         }
         if auth.contains(kSecACLAuthorizationPartitionID as String) {
             guard auth.count==1,let hex=desc as String?,hex.count%2==0 else { throw Failure.invalidPayload }
@@ -308,7 +322,11 @@ func verifyAccess(_ itemService: String) throws -> [String: Any] {
             partitions.append(ids)
         }
     }
+#if AUTO_UPDATE
+    guard decrypts==1,stablePartitionValid(version:version,entries:partitions) else { throw Failure.invalidPayload }
+#else
     guard decrypts==1,partitionValid(version:version,entries:partitions,expected:partition) else { throw Failure.invalidPayload }
+#endif
     return ["count":1,"keychain_path":String(cString:path),"database_version":version,
             "sender_cdhash":String(partition.dropFirst(7)),"owner":[ownerUID,ownerGID,ownerType],
             "acl":metadata.sorted(),"partitions":partitions]
@@ -384,7 +402,11 @@ func run() throws {
     do {
         try verifyAccess(service)
         try heartbeat(sample: collect, credential: { try readKey() }, send: transmit)
+#if AUTO_UPDATE
+        note("heartbeat acknowledged version=\(UpdateTrust.version)")
+#else
         note("heartbeat acknowledged")
+#endif
     } catch Failure.keychain(let code) {
         note("keychain unavailable status=\(code); no heartbeat sent")
         throw Failure.keychain(code)
@@ -396,6 +418,14 @@ func run() throws {
 
 #if TESTING
 func selfTests() throws {
+#if AUTO_UPDATE
+    assert(stablePartitionValid(version:0x100,entries:[]))
+    assert(stablePartitionValid(version:0x100,entries:[["cdhash:"+String(repeating:"a",count:40)]]))
+    assert(!stablePartitionValid(version:0x100,entries:[["apple:"]]))
+    assert(!stablePartitionValid(version:0x100,entries:[["cdhash:invalid"]]))
+    assert(!stablePartitionValid(version:0x200,entries:[]))
+    assert(!stablePartitionValid(version:0x101,entries:[]))
+#endif
     assert(partitionValid(version:0x100,entries:[],expected:"cdhash:sender"))
     assert(partitionValid(version:0x101,entries:[],expected:"cdhash:sender"))
     assert(!partitionValid(version:0x100,entries:[["cdhash:sender"]],expected:"cdhash:sender"))
@@ -467,6 +497,12 @@ try selfTests()
 umask(0o077)
 do {
     switch CommandLine.arguments.dropFirst().first {
+#if AUTO_UPDATE
+    case "migrate-access": try migrateAccess(rollback:false)
+    case "restore-access": try migrateAccess(rollback:true)
+    case "version": print(UpdateTrust.version)
+    case "public-access-test": try publicAccessTest()
+#endif
     case "setup": try setup()
     case "sample": try sample()
     case "probe-create": try probeCreate()

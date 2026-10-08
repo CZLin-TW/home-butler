@@ -445,15 +445,17 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 # PC monitoring agent 部署現況
 
-Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；本次整理版 source 尚未替換現役 binary。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。新 binary 會改變 cdhash，不可直接覆蓋現役 sender 或自動改 ACL。TCMb／TCMz 使用獨立欄位，M6 映射未官方確認、缺值保留 null；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
+Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；本次整理版 source 尚未替換現役 binary。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。舊 ad-hoc binary 會改變 cdhash，不可直接覆蓋現役 sender；完整自動更新須先經下述一次性授權遷移。TCMb／TCMz 使用獨立欄位，M6 映射未官方確認、缺值保留 null；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
 
-macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。只有使用者親自執行核准的操作入口才能安裝／切換，Git push 不代表 macOS 部署。
+macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。首次安裝／遷移由使用者執行核准的管理員入口；啟用前 Git push 不代表 macOS 部署。
+
+完整自動更新原始碼見 `agent/macos_daemon/auto_update/`，目前待一次性正式啟用。獨立 updater 每 300 秒只讀 GitHub main，限定同一 SHA 的 push CI 成功；只在 sender／collector 來源變更時更新，以本機固定憑證簽署 sender，兩次帶新版 SHA 的自然回報才接受。失敗或中斷回復舊版，同一失敗 SHA 不循環重試。updater／signer／runtime 不從遠端自我替換，依賴改動需另行部署。首次入口先做公開 System item 的授權移交／復原實驗，再只移交原正式 item 的 decrypt app ACL，不讀出或重寫 API key。2026-10-09 公開測試已驗證 0x100 System Keychain＋非 root system launchd 的 A/B/A 與兩種錯誤身分拒絕，ACL 完全不變；僅接受 0x100 無 partition 或單一惰性 creator-cdhash 記錄，不延伸至 0x101／0x200。正式遷移、真實 GitHub 更新及重開機未登入仍待驗收。任何簽署私鑰／binary／私人設定不得提交。
 
 **Hue 中繼已退居備援**：v1.51.0 家庭啟用 `HOME_ASSISTANT_HUE_ENABLED` 之後，照明走 HB → HA → Hue Bridge，
 `lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是
 當時的診斷紀錄，現在照明異常**先查 HA**，別直接照那幾列去殺 agent。
 
-**任何推上 `main` 的 commit 都可能觸發 agent 自我更新**：`check_for_updates()` 比對的是 `HEAD` vs
+**任何推上 `main` 的 commit 都可能觸發 Windows agent 自我更新**：`check_for_updates()` 比對的是 `HEAD` vs
 `origin/main` 的整個 SHA，**沒有依修改路徑過濾**，所以只改文件也算。`[skip render]` 只擋 Render 部署，
 擋不住這個。實際會不會重啟還要看該台的 `AUTO_UPDATE` 是否開著、以及 `git pull` 與編譯檢查是否成功——
 所以是「可能各重啟一次」，不是保證。

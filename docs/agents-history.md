@@ -1,5 +1,15 @@
 # home-butler 版本變更紀錄
 
+## 2026-10-09 macOS 完整 agent 自動更新（待首次啟用）
+
+新增獨立 updater：每五分鐘查 main＋同 SHA 的成功 push CI，僅 agent 檔案變更才建置。
+完整 sender／collectors 使用本機固定憑證、原子版本切換、兩次自然回報確認與失敗／中斷回復。
+一次性入口先用公開 System item 驗證 ACL 移交與回復，再移交現有正式 item；不重新輸入 API key。
+updater、signer 與 runtime 不接受遠端自行改寫。文件更新不重啟 macOS sender；Windows 原機制不變。
+
+前置公開實驗已完成獨立與 System 0x100 Keychain 的 A/B/A、兩種錯誤身分拒絕及 ACL 不變；
+正式部署未切換。實作、啟用方式與限制見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
+
 ## 2026-10-03 Mac mini 指標 collector（未部署）
 
 新增独立 `agent/macos_metrics.py`：CPU/RAM、可選 AGX GPU 使用率，溫度 null；預設本機 JSON，明確開啟才外送。沿用 PC heartbeat 契約，與 vision／劇院／Windows agent 分離。正式 key、目的地與常駐尚未配置；見 [接入說明](../agent/macos.md)。

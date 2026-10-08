@@ -66,3 +66,7 @@ jobs:
           python agent/macos_daemon/build.py
           --config agent/macos_daemon/config.example.json
           --output "$RUNNER_TEMP/telemetry-fake-tests" --tests-only
+      - name: Test automatic-update sender policy and compile local signer (no Keychain or network)
+        run: >-
+          python agent/macos_daemon/auto_update/check_native.py
+          --output "$RUNNER_TEMP/telemetry-update-fake-tests"

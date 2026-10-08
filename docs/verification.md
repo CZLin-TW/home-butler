@@ -1,5 +1,23 @@
 # 驗證方式與範圍
 
+## 2026-10-09 macOS 完整自動更新（正式啟用待驗收）
+
+公開 sentinel、拋棄式憑證：獨立 0x100 與 System 0x100 Keychain／非 root system LaunchDaemon
+均完成 A → B → A；不同 cdhash 使用相同憑證限定 DR，錯誤 identifier／錯誤簽署者皆回 -25293。
+每次 UID 正確，前後 ACL 雜湊相同；公開 item、暫時 jobs／目錄與測試私鑰均已移除。
+System 實驗含單一惰性 creator-cdhash partition，未當成 0x200 的跨版本證據。
+
+完整更新器的離線測試涵蓋 exact SHA／CI、損壞 blob、重複與文件更新、相依套件變更拒絕、
+新版採樣失敗、自然回報缺失、程序中斷回復，以及首次啟用後半段失敗恢復舊 plist／ACL。
+真實本機 signer helper 已在拋棄式身分測試 create/import/lock/unlock/sign；兩個完整 sender＋collector
+版本均完成編譯、strict 簽章驗證與版本查詢：不同 cdhash、相同 DR。此建置實驗未使用正式 key 或 POST。
+完整 Python 離線測試 387 項通過（含 macOS 66 項）；AUTO_UPDATE 原生假測試與正式 root guard
+的 signer helper 編譯通過；Security deprecation 警告保留。
+
+首次安裝會先執行獨立公開 System item 的實際移交／回復，成功才接觸正式 ACL。
+正式 item 遷移、GitHub main 驅動的實際升級／回復、重開機未登入及 0x200 均尚未驗收；
+目前既有正式 sender／金鑰／排程未變。詳見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
+
 ## 2026-10-04 TCMb／TCMz 本機讀取準備
 
 GitHub main 5d3b135 基準。新增獨立唯讀溫度工具，不改 heartbeat 或已安裝常駐。M6 真實無 sudo 讀取 TCMb=46.05°C，TCMz=null。4 項離線測試涵蓋 datatype／有限與範圍值、缺失 max 不替代、權限失敗、連線清理及禁止寫入指令。缺值保留 unavailable；OSHI die average/max 定義不代表 M6 官方確認。無 push、部署、Keychain 或服務修改。
