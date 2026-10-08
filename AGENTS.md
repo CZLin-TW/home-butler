@@ -445,7 +445,7 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 # PC monitoring agent 部署現況
 
-Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；已啟用完整簽署 sender 的 GitHub 更新，驗收見下段。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。舊 ad-hoc binary 會改變 cdhash，不可直接覆蓋現役 sender；完整自動更新須先經下述一次性授權遷移。TCMb／TCMz 使用獨立欄位，M6 映射未官方確認、缺值保留 null；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。Mac 新增 memory_pressure.level（normal/warning/critical/null），採 sysctl dispatch flags 1/2/4，未知不當正常；保留 ram_pct 原義，Windows 不變。壓力歷史只留 bounded 記憶體，不加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
+Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；已啟用完整簽署 sender 的 GitHub 更新，驗收見下段。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。舊 ad-hoc binary 會改變 cdhash，不可直接覆蓋現役 sender；完整自動更新須先經下述一次性授權遷移。TCMb／TCMz 使用獨立欄位，M6 映射未官方確認、缺值保留 null；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。Mac 支援 memory_pressure.pct（可選 0–100 整數；先部署接收端，舊 agent 可省略）及 memory_pressure.level（normal/warning/critical/null），採 sysctl dispatch flags 1/2/4，未知不當正常；保留 ram_pct 原義，Windows 不變。壓力歷史只留 bounded 記憶體，不加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
 
 macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。首次安裝／遷移由使用者執行核准的管理員入口；啟用前 Git push 不代表 macOS 部署。
 

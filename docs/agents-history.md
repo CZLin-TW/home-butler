@@ -1,5 +1,9 @@
 # home-butler 版本變更紀錄
 
+## 2026-10-09 連續壓力接收契約
+
+先擴充可選 memory_pressure.pct（0–100 整數或 null），讓接收端先部署，再更新 agent 與圖表；舊 payload 相容，非法數值拒絕。
+
 ## 2026-10-09 Mac 記憶體壓力
 
 新增唯讀系統記憶體壓力，collector／native sender／後端共用嚴格 level 欄位；舊 ram_pct 與 Windows 契約保留。用這次實際功能變更驗證 GitHub main 到已安裝 updater 的自動切版。實際驗收結果另見驗證紀錄。

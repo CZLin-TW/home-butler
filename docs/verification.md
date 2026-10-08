@@ -1,5 +1,9 @@
 # 驗證方式與範圍
 
+## 2026-10-09 連續壓力接收契約
+
+393 項後端離線測試通過；新增 pct 接受 0、37、100、null，拒絕布林、字串、小數、越界、NaN／Infinity；舊 level-only payload 保留且 pct 為 null。此階段不改已安裝 collector。
+
 ## 2026-10-09 Mac 記憶體壓力（自動更新驗收候選）
 
 393 項完整後端離線測試通過；native AUTO_UPDATE 假測試通過。涵蓋 sysctl 1/2/4、未知值／逾時、舊 payload 相容、獨立狀態歷史與 sender 白名單。真實非 root 本機採樣為 normal，未送出測試 heartbeat，未製造記憶體壓力。

@@ -130,8 +130,13 @@ class ExistingContractTests(unittest.TestCase):
         pc = state.snapshot()['192.0.2.20']
         self.assertTrue(pc['online'])
         self.assertEqual(pc['hostname'], 'Mac mini')
-        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal'})
-        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal'})
+        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal', 'pct': None})
+        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal', 'pct': None})
+        for pct in [0, 37, 100, None]:
+            self.assertEqual(namespace['MemoryPressure'](level='normal', pct=pct).pct, pct)
+        for pct in [True, -1, 101, 37.5, '37', float('nan'), float('inf')]:
+            with self.assertRaises(ValueError):
+                namespace['MemoryPressure'](pct=pct)
         self.assertIsNone(namespace['PCHeartbeatRequest'](**{k: v for k, v in payload.items() if k != 'memory_pressure'}).memory_pressure)
         for invalid in [True, 0, 1, 2, 4, 'green', '50', 'unknown']:
             with self.assertRaises(ValueError):

@@ -61,7 +61,8 @@ Dashboard 分別顯示來源、限制及 unavailable。舊 sender 不一定接�
 
 ## 記憶體壓力
 
-`memory_pressure={level}` 為可選獨立欄位；level 僅 normal／warning／critical／null。
+`memory_pressure={level, pct?}` 為可選獨立欄位；level 僅 normal／warning／critical／null。
+接收端先開放 pct：0–100 整數或 null；目前舊 collector 仍只送 level，待接收端部署後更新。
 collector 唯讀 sysctl 的 **dispatch flags 1／2／4**，不是 XNU 內部 enum 的 0／1／2／3。
 失敗／未知一律 null；不以 free RAM 百分比推估，不製造壓力測試、不執行 memory_pressure 工具。
 原生 sender 嚴格白名單，後端只保留 bounded 24h 記憶體歷史，不新增 Sheet 欄位。

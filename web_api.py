@@ -963,6 +963,8 @@ class SMCTemperature(BaseModel):
 class MemoryPressure(BaseModel):
     model_config = {"extra": "forbid"}
     level: Optional[Literal["normal", "warning", "critical"]] = None
+    # 100 - memorystatus_get_level(), independent of the dispatch severity flags.
+    pct: Optional[int] = Field(default=None, strict=True, ge=0, le=100)
 
 
 class PCHeartbeatRequest(BaseModel):
