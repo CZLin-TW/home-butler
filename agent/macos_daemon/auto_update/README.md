@@ -6,7 +6,8 @@
 PR 或 CI 尚未完成／失敗不部署；下載逾時、rate limit、簽署／編譯失敗保留現役版本。
 已知 main 僅一個 REST request；agent 檔案沒變則不編譯、不重啟。
 
-目前原始碼與安裝包已準備，**正式一次性啟用仍待完成**；驗證證據見
+2026-10-09 已完成一次性啟用、公開 ACL 移交／復原與新版連續自然回報；
+GitHub main 合併／成功 CI 後的輪詢與後續實際新版切換仍須分別確認。驗證證據見
 [verification](../../../docs/verification.md)。舊 `build.py` 安裝的 ad-hoc sender 不會自行採用此機制。
 
 ## 更新範圍與身分

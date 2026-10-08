@@ -1,6 +1,6 @@
 # 驗證方式與範圍
 
-## 2026-10-09 macOS 完整自動更新（正式啟用待驗收）
+## 2026-10-09 macOS 完整自動更新（首次啟用通過）
 
 公開 sentinel、拋棄式憑證：獨立 0x100 與 System 0x100 Keychain／非 root system LaunchDaemon
 均完成 A → B → A；不同 cdhash 使用相同憑證限定 DR，錯誤 identifier／錯誤簽署者皆回 -25293。
@@ -15,8 +15,8 @@ System 實驗含單一惰性 creator-cdhash partition，未當成 0x200 的跨�
 的 signer helper 編譯通過；Security deprecation 警告保留。
 
 首次安裝會先執行獨立公開 System item 的實際移交／回復，成功才接觸正式 ACL。
-正式 item 遷移、GitHub main 驅動的實際升級／回復、重開機未登入及 0x200 均尚未驗收；
-目前既有正式 sender／金鑰／排程未變。詳見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
+正式 item 遷移已完成，見下方首次啟用結果；GitHub main 驅動的實際升級／回復、重開機未登入
+及 0x200 尚未驗收。詳見 [自動更新](../agent/macos_daemon/auto_update/README.md)。
 
 ### 首次啟用前置失敗與修正
 
@@ -25,7 +25,18 @@ signing-probe，回 `probe_validation_failed` 被誤報為 already exists。未�
 舊服務仍持續自然 acknowledged。修正版 helper 已用實際同 service 的唯讀 metadata 查詢取得
 -25300（不存在），未讀值、未改正式 item。補上錯誤分類與嚴格限定在正式切換前的接續流程；
 保留本機簽署身分，先確認舊 PUBLIC item 不存在才能清除該唯一暫存目錄。修正後完整離線測試
-392 項通過（macOS 71 項）；正式移交仍待重試驗收。
+392 項通過（macOS 71 項）；其後重試結果如下。
+
+### 首次正式啟用結果
+
+2026-10-09 01:22–01:24（Asia/Taipei）：公開 System item 的新 reader／原 reader 與 ACL metadata
+完全復原通過；安裝 phase=active，來源 1a61d30。非 root system job 已連續三次自然 acknowledged，
+均帶該版本完整 SHA，last exit 0。舊 startup plist 已移除，新 telemetry 每 60 秒及 root updater
+每 300 秒的 LaunchDaemon 均已載入；保留原 binary／plist 備份，未重輸或匯出 API key。
+
+已安裝 runtime 可匿名讀取 GitHub main 和 CI。首次更新檢查得到 github_check_failed／HTTP 404：
+當時 main 仍為 188def0，尚不含 auto_update/trust.swift；此為合併前的缺檔，現役 telemetry 不受影響。
+main 合併與成功 push CI 後的更新檢查、首個真正不同版本的自動切換尚待確認。
 
 ## 2026-10-04 TCMb／TCMz 本機讀取準備
 

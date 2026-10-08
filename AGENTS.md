@@ -449,7 +449,7 @@ Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_
 
 macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。首次安裝／遷移由使用者執行核准的管理員入口；啟用前 Git push 不代表 macOS 部署。
 
-完整自動更新原始碼見 `agent/macos_daemon/auto_update/`，目前待一次性正式啟用。獨立 updater 每 300 秒只讀 GitHub main，限定同一 SHA 的 push CI 成功；只在 sender／collector 來源變更時更新，以本機固定憑證簽署 sender，兩次帶新版 SHA 的自然回報才接受。失敗或中斷回復舊版，同一失敗 SHA 不循環重試。updater／signer／runtime 不從遠端自我替換，依賴改動需另行部署。首次入口先做公開 System item 的授權移交／復原實驗，再只移交原正式 item 的 decrypt app ACL，不讀出或重寫 API key。2026-10-09 公開測試已驗證 0x100 System Keychain＋非 root system launchd 的 A/B/A 與兩種錯誤身分拒絕，ACL 完全不變；僅接受 0x100 無 partition 或單一惰性 creator-cdhash 記錄，不延伸至 0x101／0x200。正式遷移、真實 GitHub 更新及重開機未登入仍待驗收。任何簽署私鑰／binary／私人設定不得提交。
+完整自動更新原始碼見 `agent/macos_daemon/auto_update/`；2026-10-09 已完成一次性正式啟用及連續自然回報，GitHub main 合併／成功 CI 後的輪詢待確認。獨立 updater 每 300 秒只讀 GitHub main，限定同一 SHA 的 push CI 成功；只在 sender／collector 來源變更時更新，以本機固定憑證簽署 sender，兩次帶新版 SHA 的自然回報才接受。失敗或中斷回復舊版，同一失敗 SHA 不循環重試。updater／signer／runtime 不從遠端自我替換，依賴改動需另行部署。首次入口先做公開 System item 的授權移交／復原實驗，再只移交原正式 item 的 decrypt app ACL，不讀出或重寫 API key。2026-10-09 公開測試已驗證 0x100 System Keychain＋非 root system launchd 的 A/B/A 與兩種錯誤身分拒絕，ACL 完全不變；僅接受 0x100 無 partition 或單一惰性 creator-cdhash 記錄，不延伸至 0x101／0x200。正式 ACL 遷移與公開測試復原已通過；真實 GitHub 新版切換及重開機未登入仍待驗收。任何簽署私鑰／binary／私人設定不得提交。
 
 **Hue 中繼已退居備援**：v1.51.0 家庭啟用 `HOME_ASSISTANT_HUE_ENABLED` 之後，照明走 HB → HA → Hue Bridge，
 `lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是
