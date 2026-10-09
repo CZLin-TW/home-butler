@@ -1,3 +1,7 @@
+## 2026-10-10 移除 vision 控制試作
+
+移除後全部離線測試與編譯檢查通過（測試由 395 項減為 316 項，少掉的 79 項都是 vision 試作的測試）。確認根目錄與 `handlers/` 的程式不再 import 任何 `vision_*` 模組。此日期之前各筆提到 vision pilot、status pilot、media hub 的紀錄是歷史，對應的程式已不存在；Dashboard 端的呼叫者已先在其 repo 移除。
+
 # 驗證方式與範圍
 
 ## 2026-10-09 Render Build Filters 與 CI 把關（已以實際推送確認）

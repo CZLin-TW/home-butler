@@ -99,8 +99,3 @@ HA 空調的到期關機由 `ac_auto_off` 以「自動（HA）」排程負責，
 ## macOS 指標常駐
 
 `agent/macos_daemon/` 是獨立 telemetry sender 的 source 與部署工具，沿用 heartbeat 契約；不連相機／theater／家電。System LaunchDaemon 使用非 root UID、60 秒新採樣，System Keychain 限定 sender。repo 更新不自動部署；實際二進位／設定／憑證留部署端。操作與中斷恢復見 [macOS daemon](../agent/macos_daemon/README.md)。
-
-
-## 尚未啟用的 vision 控制面
-
-[vision.v1 離線模組](vision-control.md) 獨立於 HA／PC agent 通道，已驗證 loopback outbound connector；正式入口預設 disabled。媒體 relay、正式憑證與 production connector 均未啟用；不改既有設備控制路徑。

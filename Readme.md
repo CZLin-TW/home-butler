@@ -197,17 +197,3 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 | [AGENTS.md](AGENTS.md) | 新開發者與 AI Session 的維護規則 |
 
 文件與實作一起維護；純文件變更不調整系統顯示版本，也不代表設備或 HA 套件重新部署。
-
-
-## 離線 vision control 開發分支
-
-獨立 vision.v1 已有 loopback HTTP／WebSocket 與 fixture 保存驗證；正式入口預設 disabled，沒有 production credential。詳見 [協定與啟用邊界](docs/vision-control.md)。
-
-## Status-only pilot（預設停用）
-
-視覺狀態 pilot 沿用既有 Dashboard 登入及 server API key，HB 核對目前啟用成員與明確 vision grant；mini 使用獨立 Keychain device credential。專用 Sheets adapter 共享 30 秒刷新、最長 60 秒的授權快照，失敗拒絕，單 authority，只允許 status.get。不需第二套 Dashboard service token 或 SQLite／付費 Disk。
-正式 Sheet grant、native Keychain 安裝／憑證與部署仍未啟用；見 [整合與驗證邊界](docs/vision-sheets-pilot.md)。
-
-Owner-only health 階段另需明確 VISION_STATUS_OWNER_USER_ID，不猜測真實 owner；只讀本機服務 health metadata，不代表相機或模型正常。preview/edit 維持關閉。
-
-唯讀 status.get 可容忍部署期間多個 HB container 重疊；沒有本地 device 連線的 instance 回 unavailable，不跨 instance 轉送或偽造成功。這不改變其他家庭工作或 media authority 的單一執行限制。

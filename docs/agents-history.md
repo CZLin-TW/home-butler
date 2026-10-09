@@ -1,3 +1,7 @@
+## 2026-10-10 移除 vision 控制試作
+
+刪除經雲端轉送的 vision.v1 試作：`vision_*.py` 十個模組、`main.py` 的載入點、對應測試、fixture 腳本與六份文件。它預設停用、從未正式啟用；Floor Presence 的外網編輯已改為 Dashboard 簽票＋家中閘道，不經過後端。後端因此不再註冊 `/api/vision/v1/*`。
+
 # home-butler 版本變更紀錄
 
 ## 2026-10-09 連續記憶體壓力採樣
