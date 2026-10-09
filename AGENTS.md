@@ -459,7 +459,7 @@ macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 �
 
 | 對象 | 什麼變動會觸發 | 把關 |
 | --- | --- | --- |
-| Render 後端 | 後端程式與相依檔。Render 後台的 Build Filters（Ignored Paths）排除了 `**/*.md`、`docs/**`、`agent/**`、`homeassistant/**`、`homebridge/**`、`tests/**`、`evals/**`、`scripts/**`、`.github/**`（2026-10-09 由使用者設定） | 無；重啟會清掉只存記憶體的歷史 |
+| Render 後端 | 後端程式與相依檔。Render 後台的 Build Filters（Ignored Paths）排除了 `**/*.md`、`docs/**`、`agent/**`、`homeassistant/**`、`homebridge/**`、`tests/**`、`evals/**`、`scripts/**`、`.github/**`（2026-10-09 由使用者設定） | Render 後台 Auto-Deploy 設為「After CI Checks Pass」（2026-10-09 由使用者設定），CI 沒過不部署；重啟會清掉只存記憶體的歷史 |
 | Mac mini 監控程式 | 只看 `agent/macos_daemon/auto_update/update.py` 的 `FILES` 清單 | 同一 SHA 的 CI 成功、兩次自然回報、失敗退回 |
 | Windows agent | 任何變動（見下） | 無 |
 | HA 自訂整合 | 不會自動安裝 | 手動依 SHA 安裝並重啟 HA |

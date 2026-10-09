@@ -1,8 +1,8 @@
 # 驗證方式與範圍
 
-## 2026-10-09 Render Build Filters（待以實際推送確認）
+## 2026-10-09 Render Build Filters 與 CI 把關（已以實際推送確認）
 
-使用者在 Render 後台設定 Ignored Paths（清單見 AGENTS「推上 main 會觸發哪些事」）。離線確認後端根目錄與 `handlers/` 的程式沒有 import 或讀取被排除的資料夾與任何 `.md`。Glob 規則依 Render 文件。本提交只改文件，預期不觸發後端部署；實際結果需由使用者在 Render 的 Events 確認，repo 內無法驗證。
+使用者在 Render 後台設定 Ignored Paths（清單見 AGENTS「推上 main 會觸發哪些事」）。離線確認後端根目錄與 `handlers/` 的程式沒有 import 或讀取被排除的資料夾與任何 `.md`。Glob 規則依 Render 文件。提交 `95d9931` 只改文件，推送後使用者在 Render 的 Events 確認沒有觸發部署；同一提交 CI 四項通過，Mac mini 更新程式判定 `agent_unchanged`。同日使用者另把 Auto-Deploy 設為「After CI Checks Pass」，這項尚未以一次 CI 失敗的提交實際驗證。兩項設定都只存在 Render 後台。
 
 ## 2026-10-09 TCMb 在 M6 的意義（唯讀實測，僅文件）
 
