@@ -1,5 +1,9 @@
 # 驗證方式與範圍
 
+## 2026-10-09 TCMb 在 M6 的意義（唯讀實測，僅文件）
+
+M6 Mac mini（macOS 27.0.1）以一次性唯讀 SMC 負載測試確認 TCMb 是整顆 SoC 的最高點：閒置約 53°C、CPU 滿載 102.0°C、GPU 滿載 84.9°C，全程約等於 TVDC 與 TVDG 的較大值。數據與限制見 `agent/macos.md`。沒有修改 collector、sender 或後端；測試期間 CPU 滿載 45 秒，未製造其他負載，未寫入 SMC。
+
 ## 2026-10-09 連續記憶體壓力採樣
 
 394 項後端離線測試及 AUTO_UPDATE native 假測試通過。涵蓋 100 減法、0/100、失敗與缺符號、越界與未寫回、level/pct 獨立缺值、嚴格 sender schema。Render 公開 OpenAPI 已確認接收端含可選 pct 後才發布 agent。macOS 27.0.1 靜態檢查確認 Activity Monitor 同一數值來源與計算，無壓力模擬；此版自然自動切換仍待 main CI 與背景驗收。

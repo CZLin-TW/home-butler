@@ -11,7 +11,7 @@
 | RAM 使用率（相容欄位） | psutil virtual_memory().percent | 保留原契約與既有歷史；新版 Mac 卡改顯示記憶體壓力 |
 | GPU 使用率 | AGXAccelerator / PerformanceStatistics / Device Utilization % | 可選；只接受有效 0–100 數值，未公開穩定契約、OS 更新可能失效；不以 renderer/tiler 數值代替 |
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
-| TCMb／TCMz | 唯讀 AppleSMC | 獨立感測器欄位；缺值為 null，M6 語義未官方確認 |
+| SoC 熱點溫度（TCMb） | 唯讀 AppleSMC | 獨立感測器欄位 `smc_temperature.tcmb_c`；實測為整顆晶片的最高點（見下），Apple 未公開；缺值為 null。TCMz 在 M6 讀不到，固定 null |
 | load average 1/5/15 分鐘、RAM 總量 | os.getloadavg / psutil | 只在預設本機 JSON 的 local_only；既有後端契約不接收／儲存，不顯示在卡片 |
 
 collector 沒有執行 sudo、powermetrics、特權 SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
@@ -49,13 +49,31 @@ python3 -m venv .venv-macos
 ## TCMb／TCMz 整合
 
 `macos_temperature.py` 只讀 AppleSMC 的 TCMb／TCMz，無 sudo、憑證或網路。
-名稱依 OSHI 的 CPU die average / maximum 定義；M6 mapping 未經 Apple 官方確認。
-缺失／無效值保留 null，不能把 TCMb 代替 TCMz，亦不能稱作已驗證的 CPU/GPU 攝氏溫度。
+程式輸出的標籤沿用 OSHI 的 CPU die average / maximum，但那不符合 M6 的實測（見下），不要照字面解讀。
+缺失／無效值保留 null，不能把 TCMb 代替 TCMz，亦不能稱作 CPU 或 GPU 各自的溫度。
+
+### TCMb 在 M6 上是什麼（2026-10-09 實測）
+
+M6 Mac mini（macOS 27.0.1）唯讀負載測試：閒置 30 秒 → CPU 12 核滿載 45 秒 → 冷卻 → Metal 運算滿載 45 秒，
+每秒讀全部 126 個可讀的溫度 key。
+
+| key | 閒置 | CPU 滿載最高 | GPU 滿載最高 |
+| --- | --- | --- | --- |
+| `TCMb` | 約 53°C | 102.0°C | 84.9°C |
+| `TVDC` | 約 53°C | 102.0°C | 80.2°C |
+| `TVDG` | 約 50°C | 74.4°C | 85.2°C |
+| `Tp*`（21 個）最大值 | 約 44°C | 93.9°C | 72.1°C |
+| `Tg*`（18 個）最大值 | 約 43°C | 68.1°C | 77.8°C |
+
+`TCMb` 全程約等於 `TVDC`（跟 CPU 負載）與 `TVDG`（跟 GPU 負載）兩者的較大值，CPU 或 GPU 任一邊滿載都會升，
+所以它是**整顆 SoC 的最高點，不是 CPU 平均**。它比 `Tp*`／`Tg*` 個別感測器的最大值穩定高出約 8–9°C（閒置時也是），
+推測是晶片內部估算的熱點，無法證實。CPU 與 GPU 在同一顆晶片上、熱會互傳，因此只用這一個值代表 SoC 溫度，
+不另外拆成 CPU／GPU 溫度。`TCMz` 在這台讀不到。換機型或 OS 更新後需重新實測。
 
 Collector 外送獨立 `smc_temperature={tcmb_c,tcmz_c}`；CPU/GPU 溫度欄位維持 null。
 後端只接受有限、>0 且 <=150 的數值或 null，拒絕 bool/string/額外欄位。
 新溫度保留最多 24 小時記憶體歷史，不寫既有 Sheet 欄位，後端重啟即失去歷史。
-Dashboard 分別顯示來源、限制及 unavailable。舊 sender 不一定接受新 schema，
+Dashboard 自 v1.73.0 起把 tcmb_c 顯示為單一「SoC 溫度」，缺值顯示 unavailable。舊 sender 不一定接受新 schema，
 不得只替換 collector；新的 binary 必須經明確的簽章／Keychain 信任審查。
 
 
