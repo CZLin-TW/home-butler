@@ -455,7 +455,20 @@ macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 �
 `lighting_transport` 不再打 PC agent；agent 的 Hue 能力留給沒切換的部署。下面表格裡 Hue 502／504 那幾行是
 當時的診斷紀錄，現在照明異常**先查 HA**，別直接照那幾列去殺 agent。
 
-**任何推上 `main` 的 commit 都可能觸發 Windows agent 自我更新**：`check_for_updates()` 比對的是 `HEAD` vs
+**推上 `main` 會觸發哪些事**（同一個分支、四個各自獨立的機制，不要混為一談）：
+
+| 對象 | 什麼變動會觸發 | 把關 |
+| --- | --- | --- |
+| Render 後端 | 後端程式與相依檔。Render 後台的 Build Filters（Ignored Paths）排除了 `**/*.md`、`docs/**`、`agent/**`、`homeassistant/**`、`homebridge/**`、`tests/**`、`evals/**`、`scripts/**`、`.github/**`（2026-10-09 由使用者設定） | 無；重啟會清掉只存記憶體的歷史 |
+| Mac mini 監控程式 | 只看 `agent/macos_daemon/auto_update/update.py` 的 `FILES` 清單 | 同一 SHA 的 CI 成功、兩次自然回報、失敗退回 |
+| Windows agent | 任何變動（見下） | 無 |
+| HA 自訂整合 | 不會自動安裝 | 手動依 SHA 安裝並重啟 HA |
+
+Build Filters **只存在 Render 後台**，`render.yaml` 沒有對應設定（無法從 repo 確認該服務是否由 Blueprint 管理，寫進去可能無效而誤導）。
+用排除清單而不是包含清單，所以後端新增的檔案預設會觸發部署；新增「後端執行時不會讀」的頂層資料夾時，記得請使用者到後台補上。
+後端執行時不得讀取上述被排除的路徑，否則改了不會部署。只改文件的提交因此不再重啟後端。
+
+**任何推上 `main` 的 commit 都可能觸發 Windows agent 自我更新**（該 PC 預定淘汰，不為它調整）：`check_for_updates()` 比對的是 `HEAD` vs
 `origin/main` 的整個 SHA，**沒有依修改路徑過濾**，所以只改文件也算。`[skip render]` 只擋 Render 部署，
 擋不住這個。實際會不會重啟還要看該台的 `AUTO_UPDATE` 是否開著、以及 `git pull` 與編譯檢查是否成功——
 所以是「可能各重啟一次」，不是保證。
@@ -472,7 +485,7 @@ macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 �
 | Hostname | IP | Python | Windows user | 額外 capability |
 |---|---|---|---|---|
 | `A7600X_N4070Ti` | 192.168.68.53 | `C:\Python313\python.exe` | `chuan` | — |
-| `XEON-1230V2` | 192.168.68.55 | `C:\Program Files\Python314\python.exe` | `User1` | `theater`（agent_config.py 設 `THEATER_AGENT_URL="http://127.0.0.1:8080"` + `THEATER_AGENT_KEY`，轉送到同機 `C:\theater-agent` 的 theater_agent.py；那個 repo 是 github.com/CZLin-TW/theater-agent，有自己的 auto-update） |
+| `XEON-1230V2` | 192.168.68.55 | `C:\Program Files\Python314\python.exe` | `User1` | —（`theater` 已於 2026-10-02 移到 Mac mini，這台只剩 PC 指標） |
 
 bat 範本（python 路徑要對應該台，不要兩台共用同一個 bat）：
 ```bat

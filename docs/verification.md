@@ -1,5 +1,9 @@
 # 驗證方式與範圍
 
+## 2026-10-09 Render Build Filters（待以實際推送確認）
+
+使用者在 Render 後台設定 Ignored Paths（清單見 AGENTS「推上 main 會觸發哪些事」）。離線確認後端根目錄與 `handlers/` 的程式沒有 import 或讀取被排除的資料夾與任何 `.md`。Glob 規則依 Render 文件。本提交只改文件，預期不觸發後端部署；實際結果需由使用者在 Render 的 Events 確認，repo 內無法驗證。
+
 ## 2026-10-09 TCMb 在 M6 的意義（唯讀實測，僅文件）
 
 M6 Mac mini（macOS 27.0.1）以一次性唯讀 SMC 負載測試確認 TCMb 是整顆 SoC 的最高點：閒置約 53°C、CPU 滿載 102.0°C、GPU 滿載 84.9°C，全程約等於 TVDC 與 TVDG 的較大值。數據與限制見 `agent/macos.md`。沒有修改 collector、sender 或後端；測試期間 CPU 滿載 45 秒，未製造其他負載，未寫入 SMC。
