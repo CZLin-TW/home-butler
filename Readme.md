@@ -131,7 +131,7 @@ HB 保留除濕機規則與待辦提醒。v1.53.0 起移除 HB 自動夜燈引�
    [IR 電扇](homeassistant/ir-buttons.md)、[感測器／Hue](homeassistant/sensors-and-hue.md) 文件設定兩端清單。
    先確認資料與控制，再將需要的配件經 HA HomeKit Bridge 加入 Apple Home。
 
-HA 自訂整合以 HA OS／Core 2026.9.2 為目前測試基準；各整合有獨立版本，
+HA 自訂整合以 HA OS／Core 2026.10.0 為目前測試基準；各整合有獨立版本，
 不等於 Dashboard 顯示版本。安裝使用通過 CI 的完整 commit，保留安裝器備份。
 一般本地自動化不需把 HA 直接暴露到網際網路；遠端手機存取另用自己的 VPN 等安排。
 

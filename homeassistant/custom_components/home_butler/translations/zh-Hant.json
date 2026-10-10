@@ -32,7 +32,7 @@
     "step": {
       "init": {
         "title": "同步感測器與空調",
-        "description": "保留既有選項。感測器配對範例：{\"SwitchBot Hub 2 客廳\": {\"temperature\": \"sensor.hub_2_ke_ting_temperature\", \"humidity\": \"sensor.hub_2_ke_ting_humidity\", \"light_level\": \"sensor.guang_zhao_deng_ji\"}}。co2 使用 ppm；light_level 為 1–20 級，不是 lux。HB 的溫濕度補償只在 HB 套用，請勿另選已重複補償的模板。Hue 只允許勾選的區域、所屬場景及特效。",
+        "description": "保留既有選項。感測器配對以 HB 的感測器名稱為鍵，值再以 temperature、humidity、co2、light_level 對應到 HA 的實體 ID；完整範例見 homeassistant/sensors-and-hue.md。co2 使用 ppm；light_level 為 1–20 級，不是 lux。HB 的溫濕度補償只在 HB 套用，請勿另選已重複補償的模板。Hue 只允許勾選的區域、所屬場景及特效。",
         "data": {
           "export_entities": "要同步的感測器",
           "climate_entities": "交由 HA 管理、允許管家操作的空調",

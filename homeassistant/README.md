@@ -75,7 +75,7 @@ Snapshot 含遞增 sequence；重連重設，由 server 隔離舊連線。每 fr
 單一 HA 對單一 HB process／worker；多副本部署前需要另設共享狀態協調。
 
 離線 backend tests 在 repo 根目錄執行 unittest；真實 HA 框架 tests 在 Linux：
-`pip install homeassistant==2026.9.2 pytest-homeassistant-custom-component` 後於本目錄 `pytest -q`。
+`pip install homeassistant==2026.10.0 pytest-homeassistant-custom-component` 後於本目錄 `pytest -q`。
 測試不連家庭 HA，也不代替上述實機驗收。
 
 ## 劇院功能開關（Home Butler 1.7.0，選配）
