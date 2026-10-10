@@ -26,14 +26,23 @@ def cycle_locked(fn):
     return wrapped
 
 
-def hours_for(row):
+def _blank(value):
+    return value is None or isinstance(value, str) and not value.strip()
+
+
+def _hours(row):
+    """Whole hours 0-168, or None when the cell holds something else."""
     try:
         if type(row.get(HOURS_COLUMN)) is bool:
-            return 0
+            return None
         value = float(row.get(HOURS_COLUMN) or 0)
-        return int(value) if value.is_integer() and 0 <= value <= 168 else 0
+        return int(value) if value.is_integer() and 0 <= value <= 168 else None
     except (TypeError, ValueError, OverflowError):
-        return 0
+        return None
+
+
+def hours_for(row):
+    return _hours(row) or 0
 
 
 def window_for(row):
@@ -192,7 +201,7 @@ def dispatch_allowed(row, ctx, schedules=None):
             and (detached or state.get("lastPower") == "on"))
 
 
-def describe(device, schedules):
+def describe(device, schedules, now=None):
     import ha_climate
     name = device["名稱"]
     hours = hours_for(device)
@@ -207,4 +216,28 @@ def describe(device, schedules):
             "待執行": "counting", "待確認": "needs_review", "執行失敗": "needs_review",
             "已執行": "completed", "已過期": "expired", "已取消": "cancelled"}.get(active.get("狀態"), status)
     return {"hours": hours, "status": status,
-            "scheduled_at": active.get("觸發時間") if active and status == "counting" else None}
+            "scheduled_at": active.get("觸發時間") if active and status == "counting" else None,
+            **(settings(device, now) if managed else {})}
+
+
+def settings(device, now=None):
+    """What the Sheet cells are understood as, so a typo shows before the AC runs.
+
+    preview_off_at uses the same arithmetic as reconcile for a cycle starting now.
+    """
+    hours, window = hours_for(device), window_for(device)
+    problems = []
+    if _hours(device) is None:
+        problems.append("hours_unreadable")
+    if not _blank(device.get(WINDOW_COLUMN)) and not window:
+        problems.append("window_unreadable")
+    elif window and not hours and not problems:
+        problems.append("window_without_hours")
+    return {
+        "hours_text": str(device.get(HOURS_COLUMN, "") or "")[:40],
+        "window_text": str(device.get(WINDOW_COLUMN, "") or "")[:40],
+        "window": "%02d:%02d-%02d:%02d" % (*divmod(window[0], 60), *divmod(window[1], 60)) if window else None,
+        "problems": problems,
+        "preview_off_at": deferred(now + timedelta(hours=hours), window).strftime("%Y-%m-%d %H:%M")
+                          if hours and now else None,
+    }

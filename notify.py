@@ -352,6 +352,30 @@ def run_schedule_tick(ctx, now=None):
         _archive_processed_schedules(processed, ctx)
 
 
+def reconcile_ac_auto_off_now():
+    """Create or cancel the auto-off row right after an interactive AC command.
+
+    Without this the row only changes on the next 60 s tick, so the schedule list
+    a client reloads after its own command is stale. Best effort: a tick that is
+    busy dispatching, or any failure here, leaves the work to that tick. Pending
+    schedules are not dispatched and nothing is archived from this path.
+    """
+    import ac_auto_off
+    if not _schedule_cycle_lock.acquire(timeout=2):
+        return False
+    try:
+        with ac_auto_off.LOCK:
+            ctx = RequestContext()
+            ctx.load(["智能居家", "排程指令"])
+            ac_auto_off.reconcile(ctx, now_taipei())
+        return True
+    except Exception as e:
+        print(f"[AUTO-OFF] immediate reconcile failed: {type(e).__name__}")
+        return False
+    finally:
+        _schedule_cycle_lock.release()
+
+
 def run_todo_tick(ctx):
     now = now_taipei()
     materialize_recurring_todos(now, ctx)

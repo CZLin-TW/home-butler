@@ -1,3 +1,8 @@
+## 2026-10-11 自動關機：指令後立即建立排程、回報設定解讀
+
+使用者反映 Dashboard 操作空調後排程區要等很久才變。原因是自動關機列只在 60 秒巡檢時建立／取消，Dashboard 指令完成後的立即重讀讀不到。現在 Dashboard 的空調控制端點在 HA 指令確認後立刻跑一次 `ac_auto_off.reconcile`（`notify.reconcile_ac_auto_off_now`）；盡力而為，不派送、不封存、失敗不影響指令。排程執行器與其他入口不走這條，避免在派送途中改動 cycle。
+另外 `GET /api/ac/auto-off` 多回設定的解讀與「現在開機會排幾點」的預覽，給 Dashboard 顯示，避免 Sheet 填錯要等真的開機才發現。
+
 ## 2026-10-11 Mac 的 SoC 溫度與記憶體壓力寫進 PC 監控歷史
 
 使用者要求重新部署後這兩條線不要歸零。「PC 監控歷史」分頁多三欄 `soc_temp_c`（TCMb）、`mem_pressure_pct`、`mem_pressure_level`，由 `pc_state` 自己補在既有分頁表尾；Windows 與舊資料列留空。

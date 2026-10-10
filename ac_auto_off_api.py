@@ -18,8 +18,10 @@ def get_auto_off():
     from sheets import RequestContext
     ctx = RequestContext()
     ctx.load(["智能居家", "排程指令"])
+    from config import now_taipei
     devices = ctx.get("智能居家")
-    return {"devices": {d["名稱"]: ac_auto_off.describe(d, ctx.get("排程指令")) for d in devices
+    now = now_taipei()
+    return {"devices": {d["名稱"]: ac_auto_off.describe(d, ctx.get("排程指令"), now) for d in devices
                         if d.get("類型") == "空調" and d.get("狀態") == "啟用"
                         and sum(r.get("名稱") == d.get("名稱") for r in devices) == 1}}
 

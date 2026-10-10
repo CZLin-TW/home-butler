@@ -130,6 +130,76 @@ class AutoOffTests(unittest.TestCase):
         self.sync(60)
         self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 13:00")
 
+    def test_settings_report_what_the_cells_mean_and_preview_matches_the_real_deadline(self):
+        now = datetime(2026, 9, 14, 20, 0, 30)
+        def read(hours, window):
+            return auto.settings({auto.HOURS_COLUMN: hours, auto.WINDOW_COLUMN: window}, now)
+        good = read(1, " 7：00 ～ 07:00 ")
+        self.assertEqual((good["window"], good["problems"], good["preview_off_at"]),
+                         ("07:00-07:00", [], "2026-09-15 07:00"))
+        self.assertEqual(read(3, "")["preview_off_at"], "2026-09-14 23:00")
+        self.assertEqual(read(3, None)["problems"], [])
+        self.assertEqual(read("", "")["problems"], [])
+        self.assertIsNone(read(0, "")["preview_off_at"])
+        typo = read(1, "7點-7點")
+        self.assertEqual((typo["window"], typo["window_text"], typo["problems"], typo["preview_off_at"]),
+                         (None, "7點-7點", ["window_unreadable"], "2026-09-14 21:00"))
+        self.assertEqual(read("一", "22:00-07:00")["problems"], ["hours_unreadable"])
+        self.assertEqual(read(1.5, "x")["problems"], ["hours_unreadable", "window_unreadable"])
+        self.assertEqual(read(0, "22:00-07:00")["problems"], ["window_without_hours"])
+        self.assertEqual(read("", 2200)["problems"], ["window_unreadable"])
+        # The preview is the deadline reconcile would write for a cycle starting now.
+        self.device[auto.WINDOW_COLUMN] = "10:00-18:00"
+        preview = auto.describe(self.device, [], self.now)["preview_off_at"]
+        self.sync()
+        self.assertEqual(self.active()[0]["觸發時間"], preview)
+        self.assertEqual(auto.describe(self.device, self.sheet.rows, self.now)["scheduled_at"], preview)
+
+    def test_command_reconciles_at_once_but_never_fails_or_waits_on_a_busy_tick(self):
+        calls = []
+        class Lock:
+            def __init__(self, free): self.free, self.released = free, 0
+            def acquire(self, timeout): return self.free
+            def release(self): self.released += 1
+        def build(lock):
+            return endpoint("notify.py", "reconcile_ac_auto_off_now", {
+                "_schedule_cycle_lock": lock, "now_taipei": lambda: self.now,
+                "RequestContext": lambda: SimpleNamespace(load=lambda names: calls.append(names))})
+        free = Lock(True)
+        with patch.object(auto, "reconcile", side_effect=lambda ctx, now: calls.append(now)):
+            self.assertTrue(build(free)())
+        self.assertEqual(calls, [["智能居家", "排程指令"], self.now])
+        with patch.object(auto, "reconcile", side_effect=RuntimeError("sheets down")):
+            self.assertFalse(build(free)())
+        self.assertEqual(free.released, 2)
+        busy = Lock(False)
+        with patch.object(auto, "reconcile") as reconcile:
+            self.assertFalse(build(busy)())
+        reconcile.assert_not_called()
+        self.assertEqual(busy.released, 0)
+
+    def test_dashboard_command_triggers_it_only_after_a_confirmed_ha_command(self):
+        class HttpError(Exception):
+            def __init__(self, status_code, detail): self.status_code = status_code
+        now = Mock()
+        def call(result, managed=True, saved=True):
+            ctx = SimpleNamespace(load=Mock(), _ac_saved_state={})
+            def control(data, c):
+                c._ac_state_saved = saved
+                return result
+            fn = endpoint("web_api.py", "api_control_ac", {
+                "RequestContext": lambda: ctx, "control_ac_result": control, "HTTPException": HttpError})
+            with patch.dict("sys.modules", {"ha_climate": SimpleNamespace(managed=lambda _: managed),
+                                           "notify": SimpleNamespace(reconcile_ac_auto_off_now=now)}):
+                return fn(SimpleNamespace(device_name="測試冷氣", power="on", temperature=None, mode=None, fan_speed=None))
+        call(CommandResult.success("ok"))
+        now.assert_called_once_with()
+        for args in ((CommandResult.failed("no"),), (CommandResult.unknown("?"),), (CommandResult.success("ok"), True, False)):
+            with self.assertRaises(HttpError):
+                call(*args)
+        call(CommandResult.success("ok"), managed=False)
+        now.assert_called_once_with()
+
     def handlers(self):
         from schedule_execution import ATTENTION_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
         archive = Sheet([])

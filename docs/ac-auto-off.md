@@ -22,6 +22,7 @@ Dashboard 移除時數設定，改在既有排程區編輯、刪除本輪產生�
 ## 計時與編輯
 
 - HB 每 60 秒觀察 HA 快照；首次確認 on 時依 Sheet 建立一次性 off，來源「自動（HA）」。
+- Dashboard 的空調控制端點（`POST /api/devices/control/ac`）在 HA 指令確認成功後立刻做同一次觀察，讓客戶端緊接著的排程讀取就看得到新建或取消的列。這一步只建立／取消自動關機列，不派送、不封存；巡檢正忙（等不到鎖 2 秒）或失敗時略過，由下一次巡檢補上，不影響指令結果。LINE、Siri、Apple Home、HA 自動化與遙控器的開關仍等巡檢。
 - 初次接手已開機空調從觀察時計時，不使用遷移前的最後開機紀錄；Dashboard／HA／Apple Home 開機同樣適用。
 - 調溫、風速、模式切換不重新計時。Sheet 正值時數的修改適用下一輪，避免覆寫已編輯的本輪排程。
 - Dashboard 可修改本次時間、同一台空調的控制參數或刪除；Sheet 的預設時數不變。
@@ -53,7 +54,11 @@ Sheets 不提供跨程序或手動外部編輯的交易保證，不能直接增�
 v1.56 已存在的計時列保留期限；舊 `_auto_paused` 暫停列恢復為一般可編輯排程，不覆寫日期時間。
 使用者刪除必須經排程功能；直接從 Sheet 刪除 cycle 紀錄會失去本輪去重狀態。
 
-`GET /api/ac/auto-off` 保留完整 key 的診斷讀取；舊 `POST` 回 410，不再保存時數。Dashboard BFF 與設定面板已移除。
+`GET /api/ac/auto-off` 是完整 key 的唯讀讀取；舊 `POST` 回 410，不再保存時數。Dashboard 的設定面板已移除，設定仍只在 Sheet 改。
+HA 管理的空調另外回報後端對兩個儲存格的解讀，供 Dashboard 在排程區顯示，讓填錯在開機前就看得到：
+`hours_text`／`window_text`（原文，最多 40 字）、`window`（正規化的 `HH:MM-HH:MM` 或 null）、
+`preview_off_at`（若此刻開機會排的關機時間，與建立排程用同一段計算；時數為 0 時 null）、
+`problems`（`hours_unreadable`：時數有填但不是 0–168 的整數，視為停用；`window_unreadable`：時段有填但認不得，視為不暫緩；`window_without_hours`：有時段但時數為 0，自動關機停用）。
 非 HA 空調保留既有 handler 機制；半度、回饋補償與防黴已於 v1.58.0 移除。
 
 ## 限制與部署

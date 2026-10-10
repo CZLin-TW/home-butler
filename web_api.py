@@ -329,6 +329,10 @@ def api_control_ac(req: AcControlRequest):
     if result.status != "success": raise HTTPException(status_code=400, detail=result.message)
     if not ctx._ac_state_saved:
         raise HTTPException(status_code=503, detail="空調指令已送出但保存未確認，請重新讀取；不要自動重送")
+    if ha_climate.managed(req.device_name):
+        # 客戶端收到回應後會立刻重讀排程；先把自動關機排程建好／取消，不等 60 秒巡檢。
+        from notify import reconcile_ac_auto_off_now
+        reconcile_ac_auto_off_now()
     # Return the accepted comfort target, which may be rounded by the backend.
     return {"message": result.message, "state": ctx._ac_saved_state}
 
