@@ -5,13 +5,16 @@ This prevents an on snapshot or a Render restart from rearming the same run.
 No HA automation or device command is created while reconciling settings.
 """
 import json
+import re
 from datetime import timedelta
 from threading import RLock
 from functools import wraps
 
 LOCK = RLock()
 HOURS_COLUMN = "自動關機小時數"
+WINDOW_COLUMN = "自動關機暫緩時段"
 SOURCE = "自動（HA）"
+_WINDOW = re.compile(r"\s*(\d{1,2})[:：](\d{2})\s*[-–~～]\s*(\d{1,2})[:：](\d{2})\s*")
 
 
 def cycle_locked(fn):
@@ -33,6 +36,34 @@ def hours_for(row):
         return 0
 
 
+def window_for(row):
+    """(start, end) minutes of day from "22:00-07:00"; equal ends mean all day.
+
+    Blank or malformed means no deferral, like malformed hours mean disabled.
+    """
+    value = row.get(WINDOW_COLUMN)
+    match = _WINDOW.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return None
+    start_hour, start_minute, end_hour, end_minute = map(int, match.groups())
+    if max(start_hour, end_hour) > 23 or max(start_minute, end_minute) > 59:
+        return None
+    return start_hour * 60 + start_minute, end_hour * 60 + end_minute
+
+
+def deferred(due, window):
+    """Move a shutdown that lands inside the window to the window's end."""
+    due = due.replace(second=0, microsecond=0)
+    if not window:
+        return due
+    start, end = window
+    minute = due.hour * 60 + due.minute
+    if start < end and not start <= minute < end or start > end and end <= minute < start:
+        return due
+    target = due.replace(hour=end // 60, minute=end % 60)
+    return target if target >= due else target + timedelta(days=1)
+
+
 def metadata(row):
     try:
         value = json.loads(row.get("參數") or "{}")
@@ -50,6 +81,7 @@ def reconcile(ctx, now):
 
 First observation of an already running AC starts at now. Temperature/mode
 changes don't reset it. Positive Sheet hours changes apply to the next cycle.
+The deferral window only shapes the deadline when the cycle is created.
 """
     import ha_climate
     from sheets import append_record, update_row_fields, ensure_columns
@@ -117,7 +149,8 @@ changes don't reset it. Positive Sheet hours changes apply to the next cycle.
             ensure_columns(sheet, [RESULT_COLUMN])
             started = now.strftime("%Y-%m-%d %H:%M")
             row = {"設備名稱": name, "動作": "control_ac", "建立者": "系統", "建立時間": started,
-                   "來源": SOURCE, "觸發時間": (now + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M"),
+                   "來源": SOURCE,
+                   "觸發時間": deferred(now + timedelta(hours=hours), window_for(device)).strftime("%Y-%m-%d %H:%M"),
                    "狀態": "待執行",
                    "參數": json.dumps({"power": "off", "_auto_hours": hours}),
                    RESULT_COLUMN: ""}

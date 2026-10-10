@@ -20,7 +20,7 @@
 | 範圍 | 目前由誰控制 | 決定權的旗標／來源 |
 | --- | --- | --- |
 | 三台空調 | HA（原生 SwitchBot Cloud climate） | `HOME_ASSISTANT_AC_NAMES`；整數溫度、無回饋補償、無防黴 |
-| 空調排程 | HB 保管，經 HA 下達 | 手動「使用者（HA）」、自動關機「自動（HA）」＋Sheet「自動關機小時數」 |
+| 空調排程 | HB 保管，經 HA 下達 | 手動「使用者（HA）」、自動關機「自動（HA）」＋Sheet「自動關機小時數」「自動關機暫緩時段」 |
 | 三台 IR 電扇 | HA 本機 button | `HOME_ASSISTANT_IR_NAMES`；只有電源／風速±，無實體回讀 |
 | 溫濕度／CO₂／Hub 光照 | HA 為即時來源，HB 每 300 秒採樣留歷史 | `HOME_ASSISTANT_SENSOR_NAMES`；Hub 光照是 1–20 級，不是 lux |
 | Hue 照明（含色溫／HSV） | HA（需 home_butler 1.5.0 宣告 `color_control`） | `HOME_ASSISTANT_HUE_ENABLED`；PC agent Hue 僅備援 |
@@ -55,7 +55,7 @@ Apple Home 的室溫配對 climate 是原生空調的呈現層。`ac_room_temper
 | --- | --- | --- | --- |
 | 使用者 | Dashboard／LINE／完整 Siri | 一般設備與未遷移空調 | 可 |
 | 使用者（HA） | 同上，對 HA 空調（v1.55.0 起） | HA 管理的空調 | 可 |
-| 自動（HA） | `ac_auto_off.reconcile`，依 Sheet 時數 | HA 管理的空調 | 可改時間／參數或刪除，刪除後本輪不補回 |
+| 自動（HA） | `ac_auto_off.reconcile`，依 Sheet 時數與暫緩時段 | HA 管理的空調 | 可改時間／參數或刪除，刪除後本輪不補回 |
 
 舊的「自動」（`maintain_ac_auto_schedule`，只服務未遷移空調）與「防黴」來源已移除；
 Sheet 上若還有這兩種舊列，到期會照一般規則標成已過期，不會被執行。
@@ -134,6 +134,7 @@ v1.53.0 移除夜燈引擎後**已無每 300 秒的照明工作**。細節與歷
 - **不 fallback 到另一條路徑。** HA 失聯、設定錯誤、provider 不一致時一律拒絕或取消，
   不可改走直接 IR 或雲端。感測器同理：HA 失聯就是未知，不回頭讀雲端。
 - **不新增 Sheet 欄位或 HA 自動化**去實作 HB 的功能；HA 組件版本是明確相依，不默默忽略請求。
+  新增欄位只在使用者明確要求時做（例：2026-10-11 的「自動關機暫緩時段」），而且欄位不存在時行為必須與原本相同。
 - **1–20 光照等級不是 lux**，不可標成 lux 或匯入既有 illuminance 通道。
 - **無簽章 payload 不能寫進 HA 狀態**；值只能來自原生 authenticated refresh。
 - **不可把 Homebridge 匯入的實體再導回 HB** 控制，那會繞成迴圈。

@@ -94,6 +94,42 @@ class AutoOffTests(unittest.TestCase):
         self.sync(80)
         self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 12:20")
 
+    def test_deferral_window_moves_only_new_deadlines_inside_it(self):
+        def due(hour, minute, text):
+            start = datetime(2026, 9, 14, hour, minute, 40)
+            return auto.deferred(start + timedelta(hours=3), auto.window_for({auto.WINDOW_COLUMN: text}))
+        night = "22:00-07:00"
+        self.assertEqual(due(14, 0, night), datetime(2026, 9, 14, 17, 0))
+        self.assertEqual(due(18, 59, night), datetime(2026, 9, 14, 21, 59))
+        self.assertEqual(due(19, 0, night), datetime(2026, 9, 15, 7, 0))
+        self.assertEqual(due(23, 30, night), datetime(2026, 9, 15, 7, 0))
+        self.assertEqual(due(3, 0, night), datetime(2026, 9, 14, 7, 0))
+        self.assertEqual(due(4, 0, night), datetime(2026, 9, 14, 7, 0))
+        self.assertEqual(due(5, 0, night), datetime(2026, 9, 14, 8, 0))
+        # Same-day window, and equal ends as "always wait for that time".
+        self.assertEqual(due(10, 30, "13:00-15:00"), datetime(2026, 9, 14, 15, 0))
+        self.assertEqual(due(12, 0, "13:00-15:00"), datetime(2026, 9, 14, 15, 0))
+        self.assertEqual(due(20, 0, "07:00-07:00"), datetime(2026, 9, 15, 7, 0))
+        self.assertEqual(due(4, 0, " 7：00 ～ 07:00 "), datetime(2026, 9, 14, 7, 0))
+        self.assertEqual(due(4, 1, "07:00-07:00"), datetime(2026, 9, 15, 7, 0))
+        for text in ("", None, "22:00", "22-07", "24:00-07:00", "22:60-07:00", "22:00-07:00x", 2200, True):
+            self.assertIsNone(auto.window_for({auto.WINDOW_COLUMN: text}))
+            self.assertEqual(due(20, 0, text), datetime(2026, 9, 14, 23, 0))
+
+    def test_window_applies_at_creation_and_later_sheet_edits_wait_for_next_cycle(self):
+        self.device[auto.WINDOW_COLUMN] = "10:00-18:00"
+        self.sync()
+        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 18:00")
+        self.device[auto.WINDOW_COLUMN] = ""
+        self.sync(30)
+        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 18:00")
+        self.update.assert_not_called()
+        self.state["lastPower"] = "off"
+        self.sync(40)
+        self.state["lastPower"] = "on"
+        self.sync(60)
+        self.assertEqual(self.active()[0]["觸發時間"], "2026-09-14 13:00")
+
     def handlers(self):
         from schedule_execution import ATTENTION_STATES, ATTEMPT_COLUMN, RESULT_COLUMN
         archive = Sheet([])
