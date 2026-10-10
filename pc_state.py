@@ -19,13 +19,16 @@ from threading import Lock
 
 import gspread
 
-from sheets import _get_spreadsheet
+from sheets import _get_spreadsheet, ensure_columns
 import ring_buffer
 
 MAX_HISTORY_POINTS = 1440          # 24h × 60s 上限
 OFFLINE_THRESHOLD_S = 300          # 5 分鐘沒 heartbeat 視為離線（agent watchdog 也是 5 分鐘）
 PC_HISTORY_SHEET = "PC 監控歷史"
-HISTORY_HEADERS = ["timestamp", "ip", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c"]
+# 後三欄是 Mac 的 SoC 溫度（TCMb）與記憶體壓力；Windows／舊資料列留空。
+HISTORY_HEADERS = ["timestamp", "ip", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c",
+                   "soc_temp_c", "mem_pressure_pct", "mem_pressure_level"]
+PRESSURE_LEVELS = ("normal", "warning", "critical")
 TRIM_EVERY_N_APPENDS = 100         # ~50 分鐘一次（兩台 PC × 60s）
 SHEET_HARD_LIMIT_ROWS = 10000      # 防呆：trim fail 時的最後一道牆
 
@@ -103,7 +106,10 @@ def snapshot() -> dict:
 # ── Sheet I/O ──────────────────────────────────────────
 
 def _ensure_history_sheet():
-    """確保「PC 監控歷史」分頁存在，沒就建（含 header row）。Cache ws 物件避免重複查找。"""
+    """確保「PC 監控歷史」分頁存在，沒就建（含 header row）。Cache ws 物件避免重複查找。
+
+    既有分頁缺的欄位補在表尾。補不成就拋出、不 cache：資料列比標題列寬的話
+    get_all_records 會因空白標題失敗，backfill 與 trim 都跟著壞。"""
     global _cached_ws
     if _cached_ws is not None:
         return _cached_ws
@@ -114,6 +120,8 @@ def _ensure_history_sheet():
         ws = ss.add_worksheet(title=PC_HISTORY_SHEET, rows=2000, cols=len(HISTORY_HEADERS))
         ws.append_row(HISTORY_HEADERS, value_input_option="USER_ENTERED")
         print(f"[pc_state] created sheet '{PC_HISTORY_SHEET}'")
+    else:
+        ensure_columns(ws, HISTORY_HEADERS)
     _cached_ws = ws
     return ws
 
@@ -128,6 +136,9 @@ def _sheet_append_async(point: dict, ip: str) -> None:
                 point["t"], ip,
                 point.get("cpu_pct"), point.get("ram_pct"), point.get("gpu_pct"),
                 point.get("cpu_temp_c"), point.get("gpu_temp_c"),
+                (point.get("smc_temperature") or {}).get("tcmb_c"),
+                (point.get("memory_pressure") or {}).get("pct"),
+                (point.get("memory_pressure") or {}).get("level"),
             ],
             value_input_option="USER_ENTERED",
         )
@@ -148,6 +159,21 @@ def _sheet_append_async(point: dict, ip: str) -> None:
 
 # trim 與 to_float_or_none 是與資料形狀無關的純機制，抽到 ring_buffer 共用。
 _to_float_or_none = ring_buffer.to_float_or_none
+
+
+def _mac_fields(r: dict) -> dict:
+    """Sheet 列 → heartbeat 同形狀的 Mac 欄位；空白或超出接收端範圍的值當缺值。"""
+    soc = _to_float_or_none(r.get("soc_temp_c"))
+    pct = _to_float_or_none(r.get("mem_pressure_pct"))
+    level = r.get("mem_pressure_level")
+    soc = soc if soc is not None and 0 < soc <= 150 else None
+    pct = int(pct) if pct is not None and pct.is_integer() and 0 <= pct <= 100 else None
+    level = level if level in PRESSURE_LEVELS else None
+    return {
+        # TCMz 讀不到也沒人用，不存；形狀仍與 live heartbeat 一致。
+        "smc_temperature": None if soc is None else {"tcmb_c": soc, "tcmz_c": None},
+        "memory_pressure": None if pct is None and level is None else {"level": level, "pct": pct},
+    }
 
 
 def backfill_from_sheet() -> None:
@@ -186,6 +212,7 @@ def backfill_from_sheet() -> None:
                     "gpu_pct": _to_float_or_none(r.get("gpu_pct")),
                     "cpu_temp_c": _to_float_or_none(r.get("cpu_temp_c")),
                     "gpu_temp_c": _to_float_or_none(r.get("gpu_temp_c")),
+                    **_mac_fields(r),
                 }
                 pc["history_dict"][int(t)] = point
                 # 追蹤每台 PC 最新一筆 timestamp，補進 last_heartbeat_at + current

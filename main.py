@@ -136,6 +136,10 @@ def _on_startup():
             # 缺就補在表尾，不動既有欄位；失敗不擋。
             ("ensure 濕度規則欄位", lambda: ensure_columns(
                 get_sheet("智能居家"), ["濕度控制規則"])),
+            # HA 空調自動關機的暫緩時段（ac_auto_off.WINDOW_COLUMN）。空白＝不暫緩，
+            # 所以補上空欄不改變任何一台的行為；值由使用者自己填。
+            ("ensure 自動關機暫緩時段欄位", lambda: ensure_columns(
+                get_sheet("智能居家"), ["自動關機暫緩時段"])),
             # 失聯告警的收件人開關欄（health_alert.ALERT_COLUMN）。補不出來不會讓告警
             # 靜音，只是無法縮小收件範圍（沒人勾 → 發給全部啟用成員）。
             ("ensure 系統告警欄位", lambda: ensure_columns(

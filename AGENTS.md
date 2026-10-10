@@ -134,7 +134,7 @@ v1.53.0 移除夜燈引擎後**已無每 300 秒的照明工作**。細節與歷
 - **不 fallback 到另一條路徑。** HA 失聯、設定錯誤、provider 不一致時一律拒絕或取消，
   不可改走直接 IR 或雲端。感測器同理：HA 失聯就是未知，不回頭讀雲端。
 - **不新增 Sheet 欄位或 HA 自動化**去實作 HB 的功能；HA 組件版本是明確相依，不默默忽略請求。
-  新增欄位只在使用者明確要求時做（例：2026-10-11 的「自動關機暫緩時段」），而且欄位不存在時行為必須與原本相同。
+  新增欄位只在使用者明確要求時做（例：2026-10-11 的「自動關機暫緩時段」與「PC 監控歷史」的三個 Mac 欄位），而且欄位不存在或空白時行為必須與原本相同。
 - **1–20 光照等級不是 lux**，不可標成 lux 或匯入既有 illuminance 通道。
 - **無簽章 payload 不能寫進 HA 狀態**；值只能來自原生 authenticated refresh。
 - **不可把 Homebridge 匯入的實體再導回 HB** 控制，那會繞成迴圈。
@@ -446,7 +446,7 @@ fallback 與「全部讀不到就拋錯」的語意不變，只是範圍從固�
 
 # PC monitoring agent 部署現況
 
-Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；已啟用完整簽署 sender 的 GitHub 更新，驗收見下段。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。舊 ad-hoc binary 會改變 cdhash，不可直接覆蓋現役 sender；完整自動更新須先經下述一次性授權遷移。TCMb／TCMz 使用獨立欄位，缺值保留 null；TCMb 在 M6 實測為整顆 SoC 的最高點（非 CPU 平均，Apple 未公開，依據見 `agent/macos.md`），Dashboard 當作單一 SoC 溫度顯示，TCMz 讀不到；僅 bounded 24h 記憶體歷史，不增加 Sheet 欄位。Mac 支援 memory_pressure.pct（0–100 整數，100 減 memorystatus_get_level 回值；私有介面不可用則 null，非 RAM 用量）及 memory_pressure.level（normal/warning/critical/null），採 sysctl dispatch flags 1/2/4，未知不當正常；保留 ram_pct 原義，Windows 不變。壓力歷史只留 bounded 記憶體，不加 Sheet 欄位。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
+Windows PC 跑 `agent/agent.py` 每 60 秒 push 指標。macOS 的 `agent/macos_metrics.py` 預設只本機採樣；可選 `agent/macos_daemon/` 提供獨立原生 sender、System LaunchDaemon 安裝／續接／回滾及唯讀診斷，與 vision、theater、家電控制分離。已有使用者授權的本機 system-domain 自然回報驗證，pre-login reboot 未實測；已啟用完整簽署 sender 的 GitHub 更新，驗收見下段。私人設定、runtime、產物、log、Keychain 與簽章身分不得提交。舊 ad-hoc binary 會改變 cdhash，不可直接覆蓋現役 sender；完整自動更新須先經下述一次性授權遷移。TCMb／TCMz 使用獨立欄位，缺值保留 null；TCMb 在 M6 實測為整顆 SoC 的最高點（非 CPU 平均，Apple 未公開，依據見 `agent/macos.md`），Dashboard 當作單一 SoC 溫度顯示，TCMz 讀不到；TCMb 與其他指標一樣寫進「PC 監控歷史」分頁（`soc_temp_c` 欄），重啟後讀回 24 小時。Mac 支援 memory_pressure.pct（0–100 整數，100 減 memorystatus_get_level 回值；私有介面不可用則 null，非 RAM 用量）及 memory_pressure.level（normal/warning/critical/null），採 sysctl dispatch flags 1/2/4，未知不當正常；保留 ram_pct 原義，Windows 不變。壓力歷史同樣寫進「PC 監控歷史」（`mem_pressure_pct`、`mem_pressure_level`），重啟後讀回（2026-10-11 起；之前只留記憶體）。完整操作與限制見 `agent/macos.md`、`agent/macos_daemon/README.md`。
 
 macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 無 partition，0x200 限定原 sender 的單一 cdhash；未知格式、helper value rewrite 導致的 partition 變更不可自動修補。續接不重輸 key、不重複 CREATE；中斷結果不明不盲目重送。首次安裝／遷移由使用者執行核准的管理員入口；啟用前 Git push 不代表 macOS 部署。
 
@@ -460,7 +460,7 @@ macOS Keychain 驗證須讀取 item 真正所屬 database 版本：0x100/0x101 �
 
 | 對象 | 什麼變動會觸發 | 把關 |
 | --- | --- | --- |
-| Render 後端 | 後端程式與相依檔。Render 後台的 Build Filters（Ignored Paths）排除了 `**/*.md`、`docs/**`、`agent/**`、`homeassistant/**`、`homebridge/**`、`tests/**`、`evals/**`、`scripts/**`、`.github/**`（2026-10-09 由使用者設定） | Render 後台 Auto-Deploy 設為「After CI Checks Pass」（2026-10-09 由使用者設定），CI 沒過不部署；重啟會清掉只存記憶體的歷史 |
+| Render 後端 | 後端程式與相依檔。Render 後台的 Build Filters（Ignored Paths）排除了 `**/*.md`、`docs/**`、`agent/**`、`homeassistant/**`、`homebridge/**`、`tests/**`、`evals/**`、`scripts/**`、`.github/**`（2026-10-09 由使用者設定） | Render 後台 Auto-Deploy 設為「After CI Checks Pass」（2026-10-09 由使用者設定），CI 沒過不部署；重啟後四張歷史表各自從 Sheet 讀回 24 小時，前幾秒圖是空的 |
 | Mac mini 監控程式 | 只看 `agent/macos_daemon/auto_update/update.py` 的 `FILES` 清單 | 同一 SHA 的 CI 成功、兩次自然回報、失敗退回 |
 | Windows agent | 任何變動（見下） | 無 |
 | HA 自訂整合 | 不會自動安裝 | 手動依 SHA 安裝並重啟 HA |

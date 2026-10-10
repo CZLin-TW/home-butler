@@ -134,7 +134,7 @@ class ExistingContractTests(unittest.TestCase):
         state_spec = importlib.util.spec_from_file_location('isolated_pc_state', root / 'pc_state.py')
         state = importlib.util.module_from_spec(state_spec)
         with patch.dict(sys.modules, {'gspread': types.SimpleNamespace(),
-                                     'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None)}):
+                                     'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None, ensure_columns=None)}):
             state_spec.loader.exec_module(state)
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
         with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=None):

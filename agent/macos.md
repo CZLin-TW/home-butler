@@ -72,7 +72,7 @@ M6 Mac mini（macOS 27.0.1）唯讀負載測試：閒置 30 秒 → CPU 12 核�
 
 Collector 外送獨立 `smc_temperature={tcmb_c,tcmz_c}`；CPU/GPU 溫度欄位維持 null。
 後端只接受有限、>0 且 <=150 的數值或 null，拒絕 bool/string/額外欄位。
-新溫度保留最多 24 小時記憶體歷史，不寫既有 Sheet 欄位，後端重啟即失去歷史。
+新溫度保留最多 24 小時歷史；2026-10-11 起 TCMb 寫進「PC 監控歷史」分頁的 `soc_temp_c` 欄，後端重啟後讀回（TCMz 不存）。
 Dashboard 自 v1.73.0 起把 tcmb_c 顯示為單一「SoC 溫度」，缺值顯示 unavailable。舊 sender 不一定接受新 schema，
 不得只替換 collector；新的 binary 必須經明確的簽章／Keychain 信任審查。
 
@@ -93,7 +93,7 @@ gradient index 另由 sysctl 壓力旗標產生。這確認目前這台機器的
 一律 null，沒有其他 RAM 公式 fallback。每分鐘採樣一次，不聲稱與活動監視器的採樣時間／頻率相同。
 
 不製造壓力測試、不執行 memory_pressure 工具、不操作記憶體回收。
-原生 sender 嚴格驗證 level 與 pct，後端只保留 bounded 24h 記憶體歷史，不新增 Sheet 欄位。
+原生 sender 嚴格驗證 level 與 pct，後端保留 bounded 24h 歷史；2026-10-11 起寫進「PC 監控歷史」分頁的 `mem_pressure_pct`、`mem_pressure_level` 欄，重啟後讀回。
 舊 Windows／Mac payload 缺欄位仍可接收；level-only 歷史不虛構數值；RAM 欄位語義不變。
 部署先發布接收端的可選 pct，確認公開 OpenAPI 後才發布 agent，避免舊後端拒絕新 payload。
 
