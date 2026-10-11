@@ -13,6 +13,7 @@ from .ir_buttons import IRCommands, snapshot as ir_snapshot
 from . import hub_updates, environment
 from .hue import HueCommands
 from .theater import LocalTheaterRelay, TheaterRelay
+from .automations import AutomationLog
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
@@ -38,6 +39,7 @@ async def async_setup_entry(hass, entry):
         theater = LocalTheaterRelay(hass, theater_entry)
     else:
         theater = TheaterRelay(session, theater_url, theater_key) if theater_url and theater_key else None
+    automation_log = AutomationLog(hass) if entry.options.get("automation_log") else None
     link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
                         commands=ClimateCommands(hass, climates) if climates or buttons else None,
@@ -47,7 +49,8 @@ async def async_setup_entry(hass, entry):
                         hue_commands=HueCommands(hass, groups) if groups else None,
                         theater_commands=theater,
                         hub_devices=lambda: hub_updates.devices(hass),
-                        hub_updates=lambda frame: hub_updates.receive(hass, frame))
+                        hub_updates=lambda frame: hub_updates.receive(hass, frame),
+                        automations=automation_log.snapshot if automation_log else None)
 
     @callback
     def changed(event):
@@ -57,8 +60,20 @@ async def async_setup_entry(hass, entry):
             link.notify()
             return
         from .observations import current_entity_ids
-        if event.data.get("entity_id") in current_entity_ids(hass, sources + climates + buttons + sensors):
+        entity_id = event.data.get("entity_id")
+        # An automation switched on or off should show up without waiting for the heartbeat.
+        if automation_log and isinstance(entity_id, str) and entity_id.startswith("automation."):
             link.notify()
+        elif entity_id in current_entity_ids(hass, sources + climates + buttons + sensors):
+            link.notify()
+
+    @callback
+    def automation_ran(event):
+        if automation_log.record(event):
+            link.notify()
+
+    if automation_log:
+        entry.async_on_unload(hass.bus.async_listen("automation_triggered", automation_ran))
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):
         entry.async_on_unload(hass.bus.async_listen(event_type, changed))

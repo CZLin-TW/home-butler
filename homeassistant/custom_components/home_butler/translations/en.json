@@ -41,7 +41,8 @@
           "hue_groups": "Hue areas controlled by Home Butler",
           "theater_url": "Legacy theater address (cleared when selecting the local integration)",
           "theater_key": "Legacy theater API key",
-          "theater_entry": "Local Theater Agent integration (recommended)"
+          "theater_entry": "Local Theater Agent integration (recommended)",
+          "automation_log": "Share the automation list and recent runs (read-only)"
         }
       }
     },

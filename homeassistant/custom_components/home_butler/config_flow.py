@@ -105,6 +105,7 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                         raise ValueError("Theater key required")
                 return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups,
                                                                CONF_THEATER_ENTRY: theater_entry,
+                                                               "automation_log": bool(user_input.get("automation_log", entry.options.get("automation_log", False))),
                                                                CONF_THEATER_URL: theater_url, CONF_THEATER_KEY: theater_key if theater_url else ""})
             except ValueError:
                 errors["base"] = "invalid_input"
@@ -131,4 +132,5 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_THEATER_KEY, default=entry.options.get(CONF_THEATER_KEY, "")): password(),
             vol.Optional(CONF_THEATER_ENTRY, default=selected_theater):
                 selector.SelectSelector(selector.SelectSelectorConfig(options=theater_options)),
+            vol.Optional("automation_log", default=bool(entry.options.get("automation_log", False))): bool,
         }), errors=errors)

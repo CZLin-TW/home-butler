@@ -41,7 +41,8 @@
           "hue_groups": "交給 Home Butler 控制的 Hue 區域",
           "theater_url": "舊版劇院直連位址（選本地整合後會清除）",
           "theater_key": "舊版劇院直連金鑰",
-          "theater_entry": "本地 Theater Agent 整合（建議）"
+          "theater_entry": "本地 Theater Agent 整合（建議）",
+          "automation_log": "分享自動化清單與最近的執行記錄（唯讀）"
         }
       }
     },

@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from uuid import uuid4
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -22,6 +22,9 @@ from ha_hub_events import HubRelay
 from auth import verify_api_key
 
 PROTOCOL = 1
+# "automation_log": the snapshot may carry HA's automation list and recent runs (read-only).
+CAPABILITIES = ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control",
+                "theater_relay", "automation_log"]
 MAX_BYTES = 131072
 STALE_SECONDS = 90
 
@@ -47,7 +50,7 @@ owner_router = APIRouter(prefix="/api/home-assistant", dependencies=[Depends(ver
 
 @router.get("/health", dependencies=[Depends(verify_ha_key)])
 def health():
-    return {"protocol": PROTOCOL, "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control", "theater_relay"]}
+    return {"protocol": PROTOCOL, "capabilities": CAPABILITIES}
 
 
 class Observation(BaseModel):
@@ -165,6 +168,30 @@ class HueResult(BaseModel):
     result: dict = Field(default_factory=dict)
 
 
+class AutomationRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entity_id: str = Field(pattern=r"^automation\.[a-z0-9_]+$", max_length=255)
+    name: str = Field(min_length=1, max_length=160)
+    enabled: bool = Field(strict=True)
+    last_triggered: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class AutomationRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entity_id: str = Field(pattern=r"^automation\.[a-z0-9_]+$", max_length=255)
+    name: str = Field(min_length=1, max_length=160)
+    at: float = Field(ge=0, allow_inf_nan=False)
+    source: str = Field(default="", max_length=200)
+
+
+class AutomationReport(BaseModel):
+    """What HA's automations are and when they last acted. Display only: nothing here
+    can enable, disable, edit or trigger an automation."""
+    model_config = ConfigDict(extra="forbid")
+    rules: list[AutomationRule] = Field(max_length=200)
+    runs: list[AutomationRun] = Field(max_length=50)
+
+
 class Snapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["snapshot"]
@@ -175,6 +202,8 @@ class Snapshot(BaseModel):
     environment: list[EnvironmentReading] = Field(default_factory=list, max_length=80)
 
     hub_devices: list[str] = Field(default_factory=list, max_length=20)
+    # Absent unless the household opted in on the HA side.
+    automations: Optional[AutomationReport] = None
 
     @model_validator(mode="after")
     def unique_entities(self):
@@ -220,6 +249,7 @@ class LinkState:
         self.ir_capable = False
         self.ir_buttons = []
         self.environment = []
+        self.automations = None
         self.hue_capable = False
         # The theater relay keeps its own in-flight slot: a Dashboard page load
         # must never make an AC command report 'busy'.
@@ -288,6 +318,8 @@ class LinkState:
             self.climates = fresh
             self.ir_buttons = [s.model_dump() for s in snapshot.ir_buttons]
             self.environment = [s.model_dump() for s in snapshot.environment]
+            # Every snapshot carries the whole report, so one that omits it means sharing was switched off.
+            self.automations = snapshot.automations.model_dump() if snapshot.automations else None
             return True
 
     def climate_state(self, name):
@@ -484,6 +516,19 @@ class LinkState:
                                     for item in self.environment]}
 
 
+    def automation_log(self):
+        """Rules and recent runs for display. Past runs stay true while HA is away, so they are
+        kept and marked by `online`; whether a rule is enabled is only known while connected."""
+        with self.lock:
+            status = self.snapshot()
+            report = self.automations
+            return {"configured": status["configured"], "online": status["online"], "shared": report is not None,
+                    "received_at": self.received_at,
+                    "rules": [{**rule, "enabled": rule["enabled"] if status["online"] else None}
+                              for rule in (report or {}).get("rules", [])],
+                    "runs": list((report or {}).get("runs", []))}
+
+
 link = LinkState()
 
 
@@ -517,7 +562,7 @@ async def ha_websocket(websocket: WebSocket):
             except (RuntimeError, WebSocketDisconnect):
                 pass  # The previous connection may already have closed.
         await websocket.send_json({"type": "hello_ack", "protocol": PROTOCOL,
-                                   "capabilities": ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control", "theater_relay"]})
+                                   "capabilities": CAPABILITIES})
         while True:
             frame = await receive_frame(websocket, STALE_SECONDS)
             # Recheck revoked keys on every application frame.
@@ -556,3 +601,8 @@ async def ha_websocket(websocket: WebSocket):
 @owner_router.get("/observations")
 def read_observations():
     return link.snapshot()
+
+
+@owner_router.get("/automations")
+def read_automations():
+    return link.automation_log()

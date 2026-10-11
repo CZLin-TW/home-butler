@@ -44,7 +44,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None, automations=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
         self.key, self.snapshot = key, snapshot
@@ -60,6 +60,10 @@ class OutboundLink:
         # block an AC command, and a concurrent relay call must never tear down the
         # link the way the shared command guard below does.
         self.theater_commands = theater_commands
+        # Optional display-only report; sent only to a backend that says it accepts it,
+        # because an older one rejects unknown snapshot fields and would drop the link.
+        self.automations = automations
+        self._automations_enabled = False
 
     async def _serve_climates(self, ws):
         """Receive commands while waiting for the next sensor heartbeat."""
@@ -124,6 +128,8 @@ class OutboundLink:
                     frame["ir_buttons"] = self.ir_buttons()
                 if self._hub_enabled:
                     frame["hub_devices"] = self.hub_devices()
+                if self._automations_enabled:
+                    frame["automations"] = self.automations()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
                     raise LinkError("Snapshot too large")
                 await ws.send_json(frame)
@@ -160,6 +166,7 @@ class OutboundLink:
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
                         raise LinkError("Invalid handshake")
                     self._hub_enabled = self.hub_updates is not None and "hub_updates" in hello.get("capabilities", [])
+                    self._automations_enabled = self.automations is not None and "automation_log" in hello.get("capabilities", [])
                     self.connected = True
                     if failed:
                         _LOGGER.info("HomeButler local link recovered")
@@ -191,6 +198,8 @@ class OutboundLink:
                         await asyncio.sleep(0.2)  # coalesce zone transitions
                         sequence += 1
                         frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot()}
+                        if self._automations_enabled:
+                            frame["automations"] = self.automations()
                         if len(json.dumps(frame).encode("utf-8")) > 131072:
                             raise LinkError("Snapshot too large")
                         await ws.send_json(frame)

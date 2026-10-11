@@ -102,7 +102,7 @@ HA 端的 `theater.py` 是**白名單不是 proxy**：action 對應寫死的 met
 | `HOME_BUTLER_API_KEY` | 完整 `/api/assistant`、Dashboard BFF | 家庭全功能，含建立／修改排程。`user_id` 只決定對話身分，不是降權機制 |
 | `DEVICE_VOICE_API_KEY` | 家電專用 `/api/assistant/devices` | 只有 `device_voice.ALLOWED_ARGS` 的控制與查詢。**沒有任何 schedule 動作，這是刻意的限制** |
 | `HOMEBRIDGE_API_KEY` | `homebridge_api.py` | 只有 `HOMEBRIDGE_DEVICE_NAMES` 內的空調 |
-| `HOME_ASSISTANT_API_KEY` | HA 主動連回的 WSS | 只有選定觀測、明確允許的設備動作，以及固定兩個劇院中繼呼叫 |
+| `HOME_ASSISTANT_API_KEY` | HA 主動連回的 WSS | 只有選定觀測、明確允許的設備動作、固定兩個劇院中繼呼叫，以及（HA 端勾選後）唯讀的自動化清單與執行記錄 |
 
 **絕不可把後三把加進 `verify_api_key`，或讓它們進入完整 assistant pipeline。**
 家電專用入口不讀家庭／待辦／食品／對話，不接受 `user_id` 覆寫；新增能力要同步
