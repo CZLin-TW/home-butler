@@ -448,6 +448,7 @@ Webhook 簽章驗證 LINE 來源，不代表發話者已獲家庭授權。
 | /api/recurring-todos | DELETE | 停整個週期（模板狀態 → 停用，不刪除；可帶 rule_id 或 item + recur_type） |
 | /api/auth/device/create | POST | Dashboard 裝置配對登入：發一組 6 位 user_code + device_token（device_token 由 PWA 保管）給前端顯示與輪詢用 |
 | /api/auth/device/status | GET | Dashboard 裝置配對登入：PWA 帶自己保管的 `token`（device_token）輪詢配對狀態（pending/approved/expired/consumed/not_found）；approved 時回核准者身分 `{lineUserId, name, picture}` 並把狀態標成 consumed（單次使用） |
+| /api/auth/member | GET | Dashboard 延長 session 前確認成員資格：帶 `X-Dashboard-User`（LINE user id），回 `{active, name?}`。只有明確讀到名單且對不上啟用成員時回 `active:false`；讀表失敗回 5xx，Dashboard 視為無法確認 |
 | /api/computers/heartbeat | POST | PC agent 每 60 秒 push 指標（cpu_pct, ram_pct, gpu_pct, gpu_temp_c, cpu_temp_c, fah, ip, hostname, cpu_model, gpu_model）|
 | /api/computers/status | GET | 列出所有 PC 的 current snapshot + 24h raw history（每 60s 一點），供 Dashboard 折線圖渲染 |
 | /api/agent/ws | WebSocket | PC Agent 主動連回 Render，提供 hello／heartbeat／在線狀態、劇院中繼，以及未切換 HA Hue 時的照明通道 |
@@ -636,7 +637,7 @@ HA 空調的到期關機由 HB 每分鐘觀察 HA 狀態、依 Sheet 時數產�
 
 ### Dashboard 登入（裝置配對）
 
-在 LINE 傳送 `登入 123456`（6 位驗證碼）即可核准一台 Dashboard PWA 登入。
+在 LINE 傳送六位驗證碼即可核准一台 Dashboard PWA 登入：整則訊息只有六位數字（可含空格、連字號或全形數字）就會被當成登入碼，也接受 `登入 123456`。
 
 - 驗證碼由 Dashboard 登入頁顯示，使用者在 Bot 輸入後核准，前端輪詢拿到 session
 - 身分（lineUserId / 名字 / 頭像）來自「誰在 Bot 輸入碼」（webhook user_id，已由 LINE 認證）

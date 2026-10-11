@@ -463,11 +463,16 @@ def handle_message(event):
             requested_role, _code_src = "kid", _stripped[len("配對兒童"):]
         elif _stripped.startswith("登入"):
             requested_role, _code_src = "member", _stripped[2:]
+        elif re.fullmatch(r"\d(?:[\s\-]*\d){5}", _stripped):
+            # 整則訊息只有六位數字（可含空格或連字號）也當登入碼，不必多打「登入」。
+            # 裝置自報 kid 的配對仍會是 kid（最嚴格者勝），所以省略前綴不會放寬權限。
+            requested_role, _code_src = "member", _stripped
         else:
             requested_role, _code_src = None, ""
         login_code = re.sub(r"\D", "", _code_src) if requested_role else ""
         if len(login_code) == 6:
-            code = login_code
+            # 中文輸入法常打出全形數字；int() 兩種都認得，zfill 保住開頭的 0。
+            code = str(int(login_code)).zfill(6)
             name = member.get("名稱", "")
             picture = ""
             try:

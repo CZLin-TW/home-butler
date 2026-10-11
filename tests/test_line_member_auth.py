@@ -146,7 +146,9 @@ class LineMemberAuthTests(unittest.TestCase):
                 self.process.assert_not_called()
 
     def test_pairing_preserves_roles_and_invalid_code_response(self):
-        for text, requested in (("登入 123 456", "member"), ("配對兒童 123456", "kid")):
+        for text, requested in (("登入 123 456", "member"), ("配對兒童 123456", "kid"),
+                                ("123456", "member"), (" 123 456 ", "member"), ("123-456", "member"),
+                                ("１２３４５６", "member"), ("登入１２３　４５６", "member")):
             for result in ("member", "kid", None):
                 with self.subTest(text=text, result=result):
                     self.setUp()
@@ -158,6 +160,21 @@ class LineMemberAuthTests(unittest.TestCase):
                     self.assertIn("兒童遙控器" if result == "kid" else "授權登入" if result else "已過期", reply)
                     self.process.assert_not_called()
                     self.save.assert_not_called()
+
+    def test_only_a_message_that_is_exactly_six_digits_is_a_bare_login_code(self):
+        for text in ("12345", "1234567", "123456 謝謝", "冷氣 123456", "12 34 56 7", "１２３４５６ 度", "123.456"):
+            with self.subTest(text=text):
+                self.setUp()
+                self.handler(self.event(text))
+                self.approve.assert_not_called()
+                self.process.assert_called_once()
+
+    def test_bare_code_from_a_non_member_is_denied(self):
+        for uid in ("U-unknown", "U-disabled"):
+            with self.subTest(uid=uid):
+                self.setUp()
+                self.handler(self.event("123456", uid))
+                self.assert_denied()
 
     def test_new_member_id_remains_available_to_admin_without_saving_conversation(self):
         self.handler(self.event(user_id="U-new"))

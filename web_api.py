@@ -447,6 +447,24 @@ def api_device_status(token: str):
     return device_auth.get_status(token)
 
 
+@router.get("/auth/member")
+def api_member_status(request: Request):
+    """Dashboard 延長 session 前確認這個 LINE 身分仍是啟用中的家庭成員。
+
+    讀表失敗照一般規則回 5xx：Dashboard 把那當成「無法確認」，既不延長也不撤銷。
+    只有明確讀到名單、而且對不上啟用成員時才回 active=false。
+    """
+    user_id = request.headers.get("X-Dashboard-User")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="缺少成員身分")
+    ctx = RequestContext()
+    ctx.load(["家庭成員"])
+    try:
+        return {"active": True, "name": actor_from_members(ctx.get("家庭成員"), user_id)}
+    except PermissionError:
+        return {"active": False}
+
+
 @router.post("/auth/remote/verify")
 def api_remote_verify(payload: dict = Body(default={})):
     """遙控器模式：驗證「遙控器」分頁的共用密碼，回受限的 kid 身分（含連錯鎖定）。
