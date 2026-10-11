@@ -22,7 +22,7 @@ class LineMemberAuthTests(unittest.TestCase):
         self.ctx = SimpleNamespace(load=Mock(), get=Mock(return_value=self.members))
         self.context = Mock(return_value=self.ctx)
         self.process = Mock(return_value="已處理")
-        self.approve = Mock(return_value="member")
+        self.approve = Mock(return_value=True)
         self.save, self.cleanup = Mock(), Mock()
         self.loading = Mock(return_value=SimpleNamespace(status_code=200, text=""))
         self.thread = Mock(side_effect=lambda target, daemon: SimpleNamespace(start=target))
@@ -146,23 +146,22 @@ class LineMemberAuthTests(unittest.TestCase):
                 self.process.assert_not_called()
 
     def test_pairing_preserves_roles_and_invalid_code_response(self):
-        for text, requested in (("登入 123 456", "member"), ("配對兒童 123456", "kid"),
-                                ("123456", "member"), (" 123 456 ", "member"), ("123-456", "member"),
-                                ("１２３４５６", "member"), ("登入１２３　４５６", "member")):
-            for result in ("member", "kid", None):
+        for text in ("登入 123 456", "123456", " 123 456 ", "123-456", "１２３４５６", "登入１２３　４５６"):
+            for result in (True, False):
                 with self.subTest(text=text, result=result):
                     self.setUp()
                     self.approve.return_value = result
                     self.handler(self.event(text))
-                    self.approve.assert_called_once_with("123456", "U-enabled", "家人",
-                                                         "fake-picture", requested_role=requested)
+                    self.approve.assert_called_once_with("123456", "U-enabled", "家人", "fake-picture")
                     reply = self.line.reply_message.call_args.args[1].text
-                    self.assertIn("兒童遙控器" if result == "kid" else "授權登入" if result else "已過期", reply)
+                    self.assertIn("授權登入" if result else "已過期", reply)
+                    self.assertNotIn("遙控器", reply)
                     self.process.assert_not_called()
                     self.save.assert_not_called()
 
     def test_only_a_message_that_is_exactly_six_digits_is_a_bare_login_code(self):
-        for text in ("12345", "1234567", "123456 謝謝", "冷氣 123456", "12 34 56 7", "１２３４５６ 度", "123.456"):
+        # 「配對兒童」已移除：它不再是指令，照一般訊息交給管家。
+        for text in ("12345", "1234567", "123456 謝謝", "冷氣 123456", "12 34 56 7", "１２３４５６ 度", "123.456", "配對兒童 123456"):
             with self.subTest(text=text):
                 self.setUp()
                 self.handler(self.event(text))

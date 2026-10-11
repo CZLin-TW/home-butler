@@ -452,24 +452,20 @@ def handle_message(event):
     try:
         print(f"[1] user_id={user_id}, text={text}")
 
-        # Dashboard 裝置配對登入：使用者輸入「登入 123456」或「配對兒童 123456」核准一台 PWA。
+        # Dashboard 裝置配對登入：使用者傳六位驗證碼核准一台 PWA，以自己的成員身分登入。
         # 不經 Claude（早退、零成本）。身分來自 webhook 的 user_id（LINE 認證過）。
+        # 兩種寫法：整則訊息只有六位數字（不必多打字），或「登入 123456」。
         # 容忍空格/分隔（畫面把碼顯示成「123 456」好讀，使用者可能照打）——抽出純數字、
         # 剛好 6 位才當登入碼；否則（如「登入很麻煩」）落到下面正常處理。
-        # 「配對兒童」= 把這台核准成兒童遙控器（requested_role=kid，限制只能用裝置頁）；
-        # 最終角色在 device_auth.approve 用「最嚴格者勝」決定（裝置自報 kid 也算數）。
+        # 受限的遙控器身分不走這裡，只能在登入頁輸入密碼（remote_auth）。
         _stripped = text.strip()
-        if _stripped.startswith("配對兒童"):
-            requested_role, _code_src = "kid", _stripped[len("配對兒童"):]
-        elif _stripped.startswith("登入"):
-            requested_role, _code_src = "member", _stripped[2:]
+        if _stripped.startswith("登入"):
+            _code_src = _stripped[2:]
         elif re.fullmatch(r"\d(?:[\s\-]*\d){5}", _stripped):
-            # 整則訊息只有六位數字（可含空格或連字號）也當登入碼，不必多打「登入」。
-            # 裝置自報 kid 的配對仍會是 kid（最嚴格者勝），所以省略前綴不會放寬權限。
-            requested_role, _code_src = "member", _stripped
+            _code_src = _stripped
         else:
-            requested_role, _code_src = None, ""
-        login_code = re.sub(r"\D", "", _code_src) if requested_role else ""
+            _code_src = ""
+        login_code = re.sub(r"\D", "", _code_src)
         if len(login_code) == 6:
             # 中文輸入法常打出全形數字；int() 兩種都認得，zfill 保住開頭的 0。
             code = str(int(login_code)).zfill(6)
@@ -480,10 +476,7 @@ def handle_message(event):
                 picture = getattr(profile, "picture_url", "") or ""
             except Exception as e:
                 print(f"[LOGIN] get_profile failed: {e}")
-            final_role = device_auth.approve(code, user_id, name, picture, requested_role=requested_role)
-            if final_role == "kid":
-                reply = "✅ 已授權這台為兒童遙控器（只能進裝置頁），回到網頁就會自動進入 🧒"
-            elif final_role:
+            if device_auth.approve(code, user_id, name, picture):
                 reply = f"✅ 已授權登入 Dashboard（以 {name} 的身分），回到網頁就會自動進入 🏠"
             else:
                 reply = "❌ 驗證碼錯誤或已過期，請回 Dashboard 重新取得一組。"

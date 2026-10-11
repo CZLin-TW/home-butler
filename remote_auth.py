@@ -1,5 +1,9 @@
 """遙控器模式登入：用一組共用密碼換取受限的 kid 身分（不需 LINE、不需家長核准）。
 
+2026-10-11 起這是取得受限身分的唯一途徑（原本另有 LINE 的「配對兒童」，已移除）。
+Dashboard 的遙控器 session 會定期延長，延長前用 is_active 確認那一列仍啟用，
+所以取消「啟用」或改掉名稱就能讓已登入的遙控器失效；只改密碼不會。
+
 為什麼需要：iOS 把網頁「加到主畫面」後，那個圖示是獨立的儲存容器、且啟動網址不帶
 ?kid=1，所以「靠網址參數決定兒童模式」在 PWA 場景行不通——每次都落到一般登入。
 改成在登入畫面提供「遙控器模式」+ 密碼，模式選擇在 UI 上，PWA 容器內就能完成，
@@ -49,8 +53,7 @@ def verify(password):
             # constant-time 比對，避免 timing 推測；兩邊都轉成 str（Sheet 可能把純數字存成 int）。
             if stored and secrets.compare_digest(pw, stored):
                 _fail_count = 0
-                name = str(r.get("名稱", "") or "遙控器")
-                return {"ok": True, "user": {"name": name, "role": "kid"}}
+                return {"ok": True, "user": {"name": _name(r), "role": "kid"}}
 
     # 沒對中：累計失敗，達門檻就鎖一段時間。
     _fail_count += 1
@@ -59,3 +62,17 @@ def verify(password):
         _fail_count = 0
         return {"ok": False, "locked": True, "retry_after": LOCKOUT_SEC}
     return {"ok": False}
+
+
+def _name(row):
+    return str(row.get("名稱", "") or "遙控器")
+
+
+def is_active(name):
+    """這個名稱的遙控器是否仍有一列啟用且設了密碼。名稱用 verify 簽進 session 的同一個值。"""
+    wanted = str(name or "")
+    if not wanted:
+        return False
+    ws = get_or_create_sheet(SHEET, HEADERS)
+    return any(_truthy(r.get("啟用")) and str(r.get("密碼", "")) and _name(r) == wanted
+               for r in ws.get_all_records())

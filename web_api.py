@@ -435,10 +435,9 @@ def api_query_sensor(device_name: str = ""):
 
 @router.post("/auth/device/create")
 def api_device_create(payload: dict = Body(default={})):
-    """PWA 取得一組 user_code + device_token。
-    payload.kid=True（兒童入口 ?kid=1）→ 配對標記為 kid，限制權限用。"""
-    role = "kid" if isinstance(payload, dict) and payload.get("kid") else "member"
-    return device_auth.create_pairing(role=role)
+    """PWA 取得一組 user_code + device_token。配對只產生成員身分；
+    舊客戶端帶的 kid 旗標不再有作用（受限身分改由遙控器密碼取得）。"""
+    return device_auth.create_pairing()
 
 
 @router.get("/auth/device/status")
@@ -463,6 +462,12 @@ def api_member_status(request: Request):
         return {"active": True, "name": actor_from_members(ctx.get("家庭成員"), user_id)}
     except PermissionError:
         return {"active": False}
+
+
+@router.get("/auth/remote/status")
+def api_remote_status(name: str = ""):
+    """Dashboard 延長遙控器 session 前確認那組遙控器仍啟用。讀表失敗回 5xx（＝無法確認）。"""
+    return {"active": remote_auth.is_active(name)}
 
 
 @router.post("/auth/remote/verify")
