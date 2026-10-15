@@ -217,9 +217,13 @@ free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際�
 設備控制都不碰那些 ring buffer）。順帶修掉另一個雷：**原本任一個 backfill 拋例外會讓整個 app
 起不來**，現在每步各自 try/except，失敗的下個 tick 自動重試。
 
-**為什麼能拿掉 GAS**：這些工作全是 Sheet-anchored / 冪等（觸發時間、狀態、marker 都在 Sheet），重啟後 thread 讀同一份 Sheet 就能補上，不依賴外部時鐘的精準或存活（code 本就容忍漂移：`is_near_hour` ±5 分、排程 2h 過期窗）。GAS 當年的唯一價值是「喚醒睡著的 Render ＋幹活綁同一個 HTTP beat」，但 thread 要能跑的前提（實例醒著）本來就由 UptimeRobot 扛——GAS 的保溫只是跟它**重複**。
+**為什麼能拿掉 GAS**：這些工作全是 Sheet-anchored / 冪等（觸發時間、狀態、marker 都在 Sheet），重啟後 thread 讀同一份 Sheet 就能補上，不依賴外部時鐘的精準或存活（code 本就容忍漂移：`is_near_hour` ±5 分、排程 2h 過期窗）。GAS 當年的唯一價值是「喚醒睡著的 Render ＋幹活綁同一個 HTTP beat」，但 thread 要能跑的前提（實例醒著）本來就由外部流量扛——GAS 的保溫只是**重複**。
 
-**UptimeRobot 是 load-bearing 保溫，不是普通監控**：每 5 分 ping `/` 防止 Render idle-sleep（Readme 標「防冷啟動」）。拿掉 GAS 後，「保持實例醒著、讓 polling thread 不被凍住」這件事**完全靠它**。所以**別把 UptimeRobot 當可有可無的監控隨手關掉**——關了它，排程與推播會跟著 Render 一起睡死。
+**保溫靠兩個外部來源，UptimeRobot 是不能拿掉的那一個**：Render idle-sleep 前提是約 15 分鐘沒有任何請求進來。
+- Mac mini 的 metrics agent（`agent/macos_metrics.py`）每 60 秒 POST `/api/computers/heartbeat`，平常這就足以讓實例醒著。
+- UptimeRobot 每 5 分 ping `/`（Readme 標「防冷啟動」），在家裡網路之外。
+
+只靠 Mac mini 不夠：家裡停電、斷網或 Mac mini 當機時 heartbeat 一起停，約 15 分鐘後 Render 休眠，排程與推播跟著停；而「agent 失聯」告警本身由 HB 發出、門檻也是 15 分（`AGENT_OFFLINE_ALERT_SECONDS`），很可能在休眠前來不及送出——正好在最需要的時候沉默。所以**別把 UptimeRobot 當可有可無的監控隨手關掉**，它是家裡斷線時唯一還在戳的來源。
 
 唯二的記憶體計時（除濕機去抖 `above_since`/`below_since`、照明 `window_active` 邊緣）本來就在這條 thread 上、且自我修正，重啟最多晚一個去抖窗，無資料損失。
 
