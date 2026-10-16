@@ -20,6 +20,7 @@ from threading import Lock
 import gspread
 
 from sheets import _get_spreadsheet, ensure_columns
+import history_store
 import ring_buffer
 
 MAX_HISTORY_POINTS = 1440          # 24h × 60s 上限
@@ -129,19 +130,18 @@ def _ensure_history_sheet():
 def _sheet_append_async(point: dict, ip: str) -> None:
     """背景寫入一筆 row。失敗不影響主流程，只 log。"""
     global _append_counter
+    row = [
+        point["t"], ip,
+        point.get("cpu_pct"), point.get("ram_pct"), point.get("gpu_pct"),
+        point.get("cpu_temp_c"), point.get("gpu_temp_c"),
+        (point.get("smc_temperature") or {}).get("tcmb_c"),
+        (point.get("memory_pressure") or {}).get("pct"),
+        (point.get("memory_pressure") or {}).get("level"),
+    ]
+    history_store.append("pc", ip, dict(zip(HISTORY_HEADERS, row)))
     try:
         ws = _ensure_history_sheet()
-        ws.append_row(
-            [
-                point["t"], ip,
-                point.get("cpu_pct"), point.get("ram_pct"), point.get("gpu_pct"),
-                point.get("cpu_temp_c"), point.get("gpu_temp_c"),
-                (point.get("smc_temperature") or {}).get("tcmb_c"),
-                (point.get("memory_pressure") or {}).get("pct"),
-                (point.get("memory_pressure") or {}).get("level"),
-            ],
-            value_input_option="USER_ENTERED",
-        )
+        ws.append_row(row, value_input_option="USER_ENTERED")
         with _lock:
             _append_counter += 1
             should_trim = _append_counter >= TRIM_EVERY_N_APPENDS
@@ -190,9 +190,11 @@ def backfill_from_sheet() -> None:
     if _backfilled:
         return
     try:
-        ws = _ensure_history_sheet()
-        records = ws.get_all_records()
         cutoff = time.time() - 86400
+        records = history_store.records("pc", cutoff)
+        if records is None:
+            records = _ensure_history_sheet().get_all_records()
+            history_store.seed("pc", records, "ip")
         loaded = 0
         with _lock:
             for r in records:

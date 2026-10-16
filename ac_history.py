@@ -15,6 +15,7 @@ from threading import Lock
 import gspread
 
 from sheets import _get_spreadsheet
+import history_store
 import ring_buffer
 
 MAX_HISTORY_POINTS = 288           # 24h / 5min
@@ -100,18 +101,17 @@ def _ensure_history_sheet():
 
 def _sheet_append_async(point, device_name, location):
     global _append_counter
+    row = [
+        point["t"], device_name, location,
+        point.get("power", ""),
+        point.get("temperature") if point.get("temperature") is not None else "",
+        point.get("mode", ""),
+        point.get("fan_speed", ""),
+    ]
+    history_store.append("ac", device_name, dict(zip(HEADERS, row)))
     try:
         ws = _ensure_history_sheet()
-        ws.append_row(
-            [
-                point["t"], device_name, location,
-                point.get("power", ""),
-                point.get("temperature") if point.get("temperature") is not None else "",
-                point.get("mode", ""),
-                point.get("fan_speed", ""),
-            ],
-            value_input_option="USER_ENTERED",
-        )
+        ws.append_row(row, value_input_option="USER_ENTERED")
         with _lock:
             _append_counter += 1
             should_trim = _append_counter >= TRIM_EVERY_N_APPENDS
@@ -136,9 +136,11 @@ def backfill_from_sheet() -> None:
     if _backfilled:
         return
     try:
-        ws = _ensure_history_sheet()
-        records = ws.get_all_records()
         cutoff = time.time() - 86400
+        records = history_store.records("ac", cutoff)
+        if records is None:
+            records = _ensure_history_sheet().get_all_records()
+            history_store.seed("ac", records, "device_name")
         loaded = 0
         with _lock:
             for r in records:

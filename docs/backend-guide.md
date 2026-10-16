@@ -384,6 +384,8 @@ Webhook 簽章驗證 LINE 來源，不代表發話者已獲家庭授權。
 | NOTION_TOKEN | Notion Internal Integration Token | 選配 |
 | RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘維持一筆『下一次要做的』待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出待辦實例；上線或收手只需改這個變數，不必 revert code | 選配 |
 | DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
+| DATABASE_URL | 選用的資料庫副本（`history_store.py`，第一段：四份歷史與「系統狀態」）。設了之後這些資料**同時**寫進資料庫與 Sheet，第一次啟動時把 Sheet 現有的列複製一次；不設就完全不連線。接受 PostgreSQL（`postgres://`／`postgresql://`，自動改用 psycopg 3）或 SQLite URL。託管在 Render 時用 Supabase 的 **Session pooler** 連線字串（直連位址只有 IPv6，Render 連不到） | 選配 |
+| DB_READS | `1` 時啟動還原歷史與讀「系統狀態」改從資料庫，資料庫讀不到時自動退回 Sheet。先只設 `DATABASE_URL` 跑幾天、確認一致再開 | 選配 |
 | AGENT_OFFLINE_ALERT_SECONDS | PC agent 幾秒沒回報就推失聯告警，預設 `900`（15 分）。刻意比 Dashboard 畫灰點的 5 分鐘寬——agent self-restart／網路抖動／Render 重啟後 backfill 都會造成幾分鐘空窗，門檻太緊會誤報。下限鎖在 300 秒 | 選配 |
 
 ---
@@ -901,6 +903,7 @@ AI 解析成本與效果的既有實測見 [評估紀錄](../evals/README.md)。
 - 穩定身分：Sheet 新增「待辦ID」欄，舊資料在首次讀取或寫入時補 UUID；Dashboard 與 LINE／Siri 修改／完成優先傳 `todo_id`；模型清單提供可見待辦的 ID，schema 同步開放 `todo_id`、`date_orig`、`time_orig`。舊呼叫仍可用明確的名稱與原日期時間。匹配多筆時列出可見候選的日期時間澄清，不預設今天或第一筆；明確 ID 失效不退回名稱。
 - 天氣：`weather_budget` 的單次查詢預算 10 秒，HTTP timeout 使用剩餘時間；`weather_service` 最多 4 個工作、同日期地點共享進行中請求、滿載立即 503，整批最多等 12 秒後回 504。已開始的同步 HTTP 不能強制中止，但不會無限排隊；失敗不進成功快取。生活摘要 `include_weather=false` 完全不等天氣。
 - 工作健康：帶 API key 的 `GET /api/system/jobs` 提供週期、執行中、開始／成功／下次時間、耗時及最近錯誤類別。這表示 callback 的完成情況，不是每個外部裝置已成功；子流程自行捕捉的錯誤仍需看服務 log。狀態在重啟後重建；業務去重仍在 Sheet。
+- 資料庫副本：帶 API key 的 `GET /api/system/store` 回各種歷史的列數、最新時間與「系統狀態」鍵數，以及是否已改從資料庫讀；不含連線字串。
 - 部署先 home-butler 再 Dashboard。新版前端需要後端 ID／成員邊界。若要復原，先退 Dashboard，再退後端；新增 Sheet 欄位可以保留，不需刪資料。
 - 執行 `python -m unittest discover -s tests -v` 與編譯檢查。測試使用假 Sheets／SDK，不向家電或 LINE 發送訊息。
 - 部署仍限定單一 Python process／worker。RLock、工作排程與記憶體快取不是跨主機鎖；Sheets 也沒有多步交易，手動直接改表不受鎖保護。需要多 worker 或多實例時，必須先抽出唯一 scheduler／writer 並導入可交易的資料庫或分散式協調，不能只增加 worker 數。

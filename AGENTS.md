@@ -229,6 +229,20 @@ free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際�
 
 **切換注意**：部署後要去 Google Apps Script 把舊的兩條觸發（`/notify` 日計時器、`/notify_realtime` 15 分計時器）**刪除或停用**，否則跟 thread 雙跑。重疊期短且工作冪等，無害，但別長期掛著。
 
+# 從 Sheets 搬到資料庫（`history_store.py`，2026-10 起分段進行）
+
+目標是讓資料層換得掉：SQL 只用 SQLite 與 PostgreSQL 都支援的寫法（SQLAlchemy Core），放哪裡只是 `DATABASE_URL`。正式環境用 Supabase（Oregon，與 Render 同區）。
+
+- **第一段（已寫好）**：四份歷史（感測器、空調、除濕機、PC）與「系統狀態」KV。程式自己寫的資料，使用者看不到差別。
+  - 只設 `DATABASE_URL`：兩邊都寫、仍從 Sheet 讀；每種歷史第一次啟動時把 Sheet 的列複製一次（`seed`，資料表非空就不再複製）。
+  - 再設 `DB_READS=1`：啟動還原與「系統狀態」改從資料庫讀，讀不到自動退回 Sheet。
+  - 之後才停止寫 Sheet（還沒做）。資料庫的歷史保留 `RETENTION_DAYS`（400 天），不像 Sheet 只留一天。
+  - 資料表 `history(kind, key, t, data JSON)`：`data` 保留 Sheet 的欄名，所以既有的 backfill 程式原封不動地讀。`system_state(key, value, updated_at)`。啟動時 `create_all`，沒有另外的遷移工具。
+  - 資料庫的任何錯誤都只記 log，不影響 Sheet 寫入、還原或請求。
+- **第二段（未做）**：排程、待辦、食品與它們的封存；要加每日備份匯出。**第三段**：使用者手動填的設定，暫定留在 Sheet。
+- 測試：`tests/test_history_store.py` 預設用 SQLite；CI 另有 `postgres` job 用真的 PostgreSQL 跑同一份。
+- 退回：拿掉 `DB_READS` 就回到讀 Sheet；拿掉 `DATABASE_URL` 就完全回到原狀。
+
 # Agent 失聯告警（`health_alert.py`）
 
 `pc_state` 一直算得出每台 PC 的 `online`，但那個值**只餵給 Dashboard 畫灰點**——

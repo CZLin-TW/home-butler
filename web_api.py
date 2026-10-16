@@ -1051,3 +1051,10 @@ def api_job_health():
     """Job timing and errors only; protected by the existing API-key dependency."""
     from job_runner import jobs
     return jobs.snapshot()
+
+
+@router.get("/system/store")
+def api_store_health():
+    """Row counts of the optional database copy of history/state; never the connection string."""
+    import history_store
+    return history_store.status()

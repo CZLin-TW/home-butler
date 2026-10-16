@@ -517,16 +517,26 @@ _SYSTEM_STATE_HEADERS = ["鍵", "值"]
 
 
 def state_get(key, default=""):
-    """讀系統狀態 KV 分頁裡某個鍵的值（分頁不存在會自動建立）。找不到回 default。"""
+    """讀系統狀態 KV 分頁裡某個鍵的值（分頁不存在會自動建立）。找不到回 default。
+
+    開了 DB_READS 時先問資料庫（history_store）；資料庫沒有這個鍵或讀不到才讀 Sheet。"""
+    import history_store
+    stored = history_store.state_get(_norm(key))
+    if stored is not None:
+        return stored
     sheet = get_or_create_sheet(SYSTEM_STATE_SHEET, _SYSTEM_STATE_HEADERS)
-    for r in sheet.get_all_records():
+    records = sheet.get_all_records()
+    history_store.seed_state({_norm(r.get("鍵")): str(r.get("值", "") or "") for r in records})
+    for r in records:
         if _norm(r.get("鍵")) == _norm(key):
             return str(r.get("值", "") or "")
     return default
 
 
 def state_set(key, value):
-    """upsert 系統狀態 KV 的一個鍵值：存在就更新該列、否則 append 一筆。"""
+    """upsert 系統狀態 KV 的一個鍵值：存在就更新該列、否則 append 一筆。資料庫有設定時兩邊都寫。"""
+    import history_store
+    history_store.state_set(_norm(key), value)
     sheet = get_or_create_sheet(SYSTEM_STATE_SHEET, _SYSTEM_STATE_HEADERS)
     records = sheet.get_all_records()
     for i, r in enumerate(records):
