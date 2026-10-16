@@ -78,8 +78,23 @@ def _get_engine():
         engine = create_engine(_url(raw), pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=1800) \
             if not raw.startswith("sqlite") else create_engine(raw)
         metadata.create_all(engine)
+        _lock_down(engine)
         _engine, _engine_url = engine, raw
         return engine
+
+
+def _lock_down(engine):
+    """On PostgreSQL, turn on row level security for every table here.
+
+    Hosted Postgres such as Supabase also serves the public schema through a REST API keyed by a
+    publishable key. With RLS on and no policies, that API sees nothing; this backend connects as
+    the tables' owner, which RLS does not restrict, so it keeps full access. Idempotent.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        for table in metadata.sorted_tables:
+            conn.exec_driver_sql(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY')
 
 
 def _log(what, error):

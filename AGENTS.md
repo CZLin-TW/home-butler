@@ -239,6 +239,7 @@ free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際�
   - 之後才停止寫 Sheet（還沒做）。資料庫的歷史保留 `RETENTION_DAYS`（400 天），不像 Sheet 只留一天。
   - 資料表 `history(kind, key, t, data JSON)`：`data` 保留 Sheet 的欄名，所以既有的 backfill 程式原封不動地讀。`system_state(key, value, updated_at)`。啟動時 `create_all`，沒有另外的遷移工具。
   - 資料庫的任何錯誤都只記 log，不影響 Sheet 寫入、還原或請求。
+  - **PostgreSQL 上每張表都開 RLS（row level security）**，建表後自動執行（`_lock_down`）。Supabase 會把 public schema 經 REST API（Data API）對外，鑰匙是可公開的 anon key；沒開 RLS 時任何人拿那把鑰匙就能讀寫。開了、又不設任何 policy，那個 API 什麼都看不到；後端以資料表擁有者連線，不受 RLS 限制。新增資料表時不要拿掉這一步。後端不用 Data API，Supabase 那邊也可以直接關掉。
 - **第二段（未做）**：排程、待辦、食品與它們的封存；要加每日備份匯出。**第三段**：使用者手動填的設定，暫定留在 Sheet。
 - 測試：`tests/test_history_store.py` 預設用 SQLite；CI 另有 `postgres` job 用真的 PostgreSQL 跑同一份。
 - 退回：拿掉 `DB_READS` 就回到讀 Sheet；拿掉 `DATABASE_URL` 就完全回到原狀。

@@ -109,6 +109,19 @@ class StoreTests(StoreCase):
         self.reads()
         self.assertEqual(history_store.state_get("其他"), "x")
 
+    def test_tables_are_closed_to_the_hosted_rest_api_on_postgres(self):
+        engine = history_store._get_engine()
+        if engine.dialect.name != "postgresql":
+            self.skipTest("row level security exists only on PostgreSQL")
+        with engine.connect() as conn:
+            flags = dict(conn.exec_driver_sql(
+                "SELECT relname, relrowsecurity FROM pg_class WHERE relname IN ('history', 'system_state')").all())
+        self.assertEqual(flags, {"history": True, "system_state": True})
+        # The owner still reads and writes.
+        history_store.append("sensor", "a", {"timestamp": time.time()})
+        self.reads()
+        self.assertEqual(len(history_store.records("sensor", 0)), 1)
+
     def test_a_broken_database_never_raises(self):
         with patch.object(history_store, "_get_engine", side_effect=RuntimeError("down")):
             history_store.append("sensor", "a", {"timestamp": 1})
