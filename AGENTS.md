@@ -240,7 +240,8 @@ free instance 上要好幾秒到數十秒，那段期間**全站 5xx**。實際�
   - 資料表 `history(kind, key, t, data JSON)`：`data` 保留 Sheet 的欄名，所以既有的 backfill 程式原封不動地讀。`system_state(key, value, updated_at)`。啟動時 `create_all`，沒有另外的遷移工具。
   - 資料庫的任何錯誤都只記 log，不影響 Sheet 寫入、還原或請求。
   - **PostgreSQL 上每張表都開 RLS（row level security）**，建表後自動執行（`_lock_down`）。Supabase 會把 public schema 經 REST API（Data API）對外，鑰匙是可公開的 anon key；沒開 RLS 時任何人拿那把鑰匙就能讀寫。開了、又不設任何 policy，那個 API 什麼都看不到；後端以資料表擁有者連線，不受 RLS 限制。新增資料表時不要拿掉這一步。後端不用 Data API，Supabase 那邊也可以直接關掉。
-- **第二段（未做）**：排程、待辦、食品與它們的封存；要加每日備份匯出。**第三段**：使用者手動填的設定，暫定留在 Sheet。
+- **每日備份（`db_backup.py`）**：每天 03:00 後把資料庫除了 `history` 以外的每張表匯成 gzip JSON，**覆寫**使用者 Google 雲端硬碟資料夾 `BACKUP_FOLDER`（預設「HomeButler備份」）裡的 `homebutler-backup.json.gz`。服務帳號沒有雲端硬碟空間、不能在個人雲端硬碟建新檔，只能改寫使用者擁有、共用給它的檔案，所以那個檔案要由使用者先放好；雲端硬碟保留每個檔案 30 天的舊版本，等於 30 天的每日備份。還原：在雲端硬碟「管理版本」下載某一版，`DATABASE_URL=... python db_backup.py restore <檔案>`（會先清空那些表）。歷史數據刻意不備份（只影響圖表）。最後成功時間存在資料庫 `system_state`；超過 30 小時沒成功，`health_alert` 推播一次，恢復時再說一次。`/api/system/store` 也會回最後成功時間與錯誤。
+- **第二段（未做）**：排程、待辦、食品與它們的封存（備份已先準備好）。**第三段**：使用者手動填的設定，暫定留在 Sheet。
 - 測試：`tests/test_history_store.py` 預設用 SQLite；CI 另有 `postgres` job 用真的 PostgreSQL 跑同一份。
 - 退回：拿掉 `DB_READS` 就回到讀 Sheet；拿掉 `DATABASE_URL` 就完全回到原狀。
 

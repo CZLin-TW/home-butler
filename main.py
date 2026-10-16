@@ -243,6 +243,8 @@ def _on_startup():
     jobs.add("todo-reminders", 300, lambda: _with_context(notify.run_todo_tick))
     jobs.add("daily-push", 300, lambda: _with_context(notify.run_daily_push_if_due))
     jobs.add("agent-health", 300, lambda: _with_context(notify.health_alert.run_checks, ["家庭成員"]))
+    import db_backup
+    jobs.add("db-backup", 900, db_backup.run_if_due)
     jobs.start()
     print("[startup] independent periodic jobs started")
 

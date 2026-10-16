@@ -385,6 +385,7 @@ Webhook 簽章驗證 LINE 來源，不代表發話者已獲家庭授權。
 | RECURRING_TODO_ENABLED | 週期性待辦「生成」總開關（kill-switch），預設**關閉**。設為 `1`/`true`/`yes`/`on` 才會啟用「週期待辦模板 → 每 5 分鐘維持一筆『下一次要做的』待辦」的生成邏輯。關閉時模板 CRUD（新增/修改/停用規則）仍可用，只是不會自動長出待辦實例；上線或收手只需改這個變數，不必 revert code | 選配 |
 | DAILY_PUSH_HOUR | 每日晚間綜合推播的觸發鐘點（24h 制整點），預設 `21`（晚上 9 點）。polling thread 每 tick 一旦過了這個鐘點、且當天還沒推過（Sheet marker 判斷）就觸發一次。沿用原本 GAS 晚間時段；要改推播時間改這個變數即可 | 選配 |
 | DATABASE_URL | 選用的資料庫副本（`history_store.py`，第一段：四份歷史與「系統狀態」）。設了之後這些資料**同時**寫進資料庫與 Sheet，第一次啟動時把 Sheet 現有的列複製一次；不設就完全不連線。接受 PostgreSQL（`postgres://`／`postgresql://`，自動改用 psycopg 3）或 SQLite URL。託管在 Render 時用 Supabase 的 **Session pooler** 連線字串（直連位址只有 IPv6，Render 連不到） | 選配 |
+| BACKUP_FOLDER | 每日資料庫備份所在的 Google 雲端硬碟資料夾名稱，預設 `HomeButler備份`。資料夾要共用給服務帳號，裡面要有使用者自己放的 `homebutler-backup.json.gz`（服務帳號只能改寫、不能新建檔案）。只在設了 `DATABASE_URL` 時運作 | 選配 |
 | DB_READS | `1` 時啟動還原歷史與讀「系統狀態」改從資料庫，資料庫讀不到時自動退回 Sheet。先只設 `DATABASE_URL` 跑幾天、確認一致再開 | 選配 |
 | AGENT_OFFLINE_ALERT_SECONDS | PC agent 幾秒沒回報就推失聯告警，預設 `900`（15 分）。刻意比 Dashboard 畫灰點的 5 分鐘寬——agent self-restart／網路抖動／Render 重啟後 backfill 都會造成幾分鐘空窗，門檻太緊會誤報。下限鎖在 300 秒 | 選配 |
 

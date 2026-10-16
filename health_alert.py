@@ -320,6 +320,20 @@ def check_theater_agent(ctx) -> None:
     )
 
 
+def check_db_backup(ctx, now=None) -> None:
+    """資料庫每日備份超過 db_backup.STALE_HOURS 沒成功就告警一次，恢復時再說一次。沒設資料庫就不檢查。"""
+    import db_backup
+    import history_store
+    if not history_store.enabled():
+        return
+    now = now or time.time()
+    reason = db_backup.last_error or "還沒有任何一次成功"
+    _report(ctx, "db_backup", db_backup.stale(now),
+            f"⚠️ HomeButler 的資料庫備份已超過 {db_backup.STALE_HOURS} 小時沒有成功（{reason}）。"
+            f"請確認 Google 雲端硬碟的「{db_backup.folder_name()}」資料夾與 {db_backup.FILE_NAME} 還在、仍共用給服務帳號。",
+            lambda outage: "✅ HomeButler 的資料庫備份恢復正常。", now=now)
+
+
 def run_checks(ctx, now=None) -> None:
     """由 main.py 的 agent-health 工作每 300 秒呼叫；手動相容入口也可呼叫。兩項檢查各自 try/except 隔離——
     一項壞掉不該連累另一項，更不該連累 tick 上其他真正在幹活的步驟。"""
@@ -331,3 +345,7 @@ def run_checks(ctx, now=None) -> None:
         check_theater_agent(ctx)
     except Exception as e:
         print(f"[health] 劇院 agent 檢查失敗：{e}")
+    try:
+        check_db_backup(ctx, now=now)
+    except Exception as e:
+        print(f"[health] 資料庫備份檢查失敗：{e}")

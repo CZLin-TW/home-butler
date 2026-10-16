@@ -170,9 +170,11 @@ def seed(kind: str, rows: list, key_field: str) -> int:
 
 # ── system state key/value ───────────────────────────────────────────────────────────────────
 
-def state_get(key: str):
-    """The stored value, or None when reads are off, the key is absent or the database fails."""
-    if not reads_enabled():
+def state_get(key: str, direct: bool = False):
+    """The stored value, or None when reads are off, the key is absent or the database fails.
+
+    `direct` reads the database even before DB_READS, for keys only the database holds."""
+    if not (reads_enabled() or (direct and enabled())):
         return None
     try:
         with _get_engine().connect() as conn:
@@ -220,7 +222,9 @@ def status() -> dict:
             counts = dict(conn.execute(select(history.c.kind, func.count()).group_by(history.c.kind)).all())
             latest = dict(conn.execute(select(history.c.kind, func.max(history.c.t)).group_by(history.c.kind)).all())
             states = conn.execute(select(func.count()).select_from(system_state)).scalar()
-        return {"enabled": True, "reads": reads_enabled(), "history": counts, "latest": latest, "state_keys": states}
+        import db_backup
+        return {"enabled": True, "reads": reads_enabled(), "history": counts, "latest": latest, "state_keys": states,
+                "backup": {"last_success": db_backup.last_success(), "last_error": db_backup.last_error}}
     except Exception as e:
         return {"enabled": True, "reads": reads_enabled(), "error": type(e).__name__}
 
