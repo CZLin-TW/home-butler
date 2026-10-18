@@ -27,13 +27,14 @@ class MetricsTests(unittest.TestCase):
 
     def test_payload_keeps_temperature_unknown_and_zero_gpu(self):
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=0):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc', return_value=({'tcmb_c': 44.5, 'tcmz_c': None}, 6.25)), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=0):
             result = metrics.collect('192.0.2.20', 'Mac mini')
         self.assertEqual(result['gpu_pct'], 0)
         self.assertIsNone(result['cpu_temp_c'])
         self.assertIsNone(result['gpu_temp_c'])
         self.assertNotIn('load_average_1_5_15', result)
         self.assertEqual(result['cpu_pct'], 12)
+        self.assertEqual(result['system_power_w'], 6.25)
 
     @patch.object(metrics, "read_memory_pressure_pct", return_value=37)
     def test_memory_pressure_flags_and_unavailable(self, _pct):
@@ -72,6 +73,17 @@ class MetricsTests(unittest.TestCase):
                 self.assertEqual(metrics.read_smc_temperature(), {'tcmb_c': None, 'tcmz_c': None})
         with patch.object(metrics.subprocess, 'run', side_effect=metrics.subprocess.TimeoutExpired('reader', 5)):
             self.assertEqual(metrics.read_smc_temperature(), {'tcmb_c': None, 'tcmz_c': None})
+
+    def test_system_power_is_read_with_the_temperatures_and_fails_to_none(self):
+        def child(power):
+            return types.SimpleNamespace(stdout=json.dumps({'sensors': {'TCMb': {'temperature_c': 44.5}, 'TCMz': {'temperature_c': None}}, **power}))
+        with patch.object(metrics.subprocess, 'run', return_value=child({'power': {'PSTR': {'watts': 3.24}}})):
+            self.assertEqual(metrics.read_smc(), ({'tcmb_c': 44.5, 'tcmz_c': None}, 3.24))
+        # An older probe without power, or an impossible reading, keeps the temperature and drops only the power.
+        for power in [{}, {'power': None}, {'power': {'PSTR': {'watts': None}}}, {'power': {'PSTR': {'watts': 0}}},
+                      {'power': {'PSTR': {'watts': 501}}}, {'power': {'PSTR': {'watts': True}}}, {'power': {'PSTR': {'watts': '3'}}}]:
+            with patch.object(metrics.subprocess, 'run', return_value=child(power)):
+                self.assertEqual(metrics.read_smc(), ({'tcmb_c': 44.5, 'tcmz_c': None}, None), power)
 
     def test_endpoint_and_credential_boundaries(self):
         for url in ['http://example.test', 'https://user:secret@example.test', 'https://example.test/path',
@@ -137,7 +149,7 @@ class ExistingContractTests(unittest.TestCase):
                                      'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None, ensure_columns=None)}):
             state_spec.loader.exec_module(state)
         fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc_temperature', return_value={'tcmb_c': 44.5, 'tcmz_c': None}), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=None):
+        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc', return_value=({'tcmb_c': 44.5, 'tcmz_c': None}, 6.25)), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=None):
             payload = metrics.collect('192.0.2.20', 'Mac mini')
         request = namespace['PCHeartbeatRequest'](**payload)
         # Real record/snapshot; prevent spawning the Sheet writer entirely.
@@ -164,6 +176,11 @@ class ExistingContractTests(unittest.TestCase):
         self.assertIsNone(pc['current']['gpu_pct'])
         self.assertIsNone(pc['history'][0]['cpu_temp_c'])
         self.assertEqual(pc['history'][0]['smc_temperature'], {'tcmb_c': 44.5, 'tcmz_c': None})
+        self.assertEqual((pc['current']['system_power_w'], pc['history'][0]['system_power_w']), (6.25, 6.25))
+        for invalid in [0, -1, 501, True, '6', float('nan'), float('inf')]:
+            with self.assertRaises(ValueError):
+                namespace['PCHeartbeatRequest'](**dict(payload, system_power_w=invalid))
+        self.assertIsNone(namespace['PCHeartbeatRequest'](**{k: v for k, v in payload.items() if k != 'system_power_w'}).system_power_w)
         for invalid in [0, -1, 151, True, '44', float('nan'), float('inf')]:
             with self.assertRaises(ValueError):
                 namespace['SMCTemperature'](tcmb_c=invalid)

@@ -26,9 +26,9 @@ import ring_buffer
 MAX_HISTORY_POINTS = 1440          # 24h × 60s 上限
 OFFLINE_THRESHOLD_S = 300          # 5 分鐘沒 heartbeat 視為離線（agent watchdog 也是 5 分鐘）
 PC_HISTORY_SHEET = "PC 監控歷史"
-# 後三欄是 Mac 的 SoC 溫度（TCMb）與記憶體壓力；Windows／舊資料列留空。
+# 後四欄是 Mac 的 SoC 溫度（TCMb）、記憶體壓力與整機功耗（PSTR）；Windows／舊資料列留空。
 HISTORY_HEADERS = ["timestamp", "ip", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c",
-                   "soc_temp_c", "mem_pressure_pct", "mem_pressure_level"]
+                   "soc_temp_c", "mem_pressure_pct", "mem_pressure_level", "system_power_w"]
 PRESSURE_LEVELS = ("normal", "warning", "critical")
 TRIM_EVERY_N_APPENDS = 100         # ~50 分鐘一次（兩台 PC × 60s）
 SHEET_HARD_LIMIT_ROWS = 10000      # 防呆：trim fail 時的最後一道牆
@@ -62,6 +62,7 @@ def record_heartbeat(payload: dict) -> None:
         "gpu_temp_c": payload.get("gpu_temp_c"),
         "smc_temperature": payload.get("smc_temperature"),
         "memory_pressure": payload.get("memory_pressure"),
+        "system_power_w": payload.get("system_power_w"),
     }
 
     with _lock:
@@ -137,6 +138,7 @@ def _sheet_append_async(point: dict, ip: str) -> None:
         (point.get("smc_temperature") or {}).get("tcmb_c"),
         (point.get("memory_pressure") or {}).get("pct"),
         (point.get("memory_pressure") or {}).get("level"),
+        point.get("system_power_w"),
     ]
     history_store.append("pc", ip, dict(zip(HISTORY_HEADERS, row)))
     try:
@@ -169,10 +171,13 @@ def _mac_fields(r: dict) -> dict:
     soc = soc if soc is not None and 0 < soc <= 150 else None
     pct = int(pct) if pct is not None and pct.is_integer() and 0 <= pct <= 100 else None
     level = level if level in PRESSURE_LEVELS else None
+    watts = _to_float_or_none(r.get("system_power_w"))
+    watts = watts if watts is not None and 0 < watts <= 500 else None
     return {
         # TCMz 讀不到也沒人用，不存；形狀仍與 live heartbeat 一致。
         "smc_temperature": None if soc is None else {"tcmb_c": soc, "tcmz_c": None},
         "memory_pressure": None if pct is None and level is None else {"level": level, "pct": pct},
+        "system_power_w": watts,
     }
 
 

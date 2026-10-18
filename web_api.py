@@ -1006,6 +1006,8 @@ class PCHeartbeatRequest(BaseModel):
     cpu_temp_c: Optional[float] = None  # Windows 上要靠 LibreHardwareMonitor，沒裝就 None
     fah: Optional[FAHStatus] = None
     smc_temperature: Optional[SMCTemperature] = None
+    # Mac: the SMC's total system power (PSTR), averaged over about a second each minute.
+    system_power_w: Optional[float] = Field(default=None, strict=True, gt=0, le=500, allow_inf_nan=False)
     memory_pressure: Optional[MemoryPressure] = None
 
 

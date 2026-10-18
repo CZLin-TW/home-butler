@@ -102,21 +102,30 @@ def read_memory_pressure():
     return {"level": level, "pct": read_memory_pressure_pct()}
 
 
-def read_smc_temperature():
-    # Separate bounded child works under the installed sender's Python -I mode.
+def read_smc():
+    """TCMb/TCMz temperatures and PSTR system power from one bounded child, which works
+    under the installed sender's Python -I mode. Anything missing or out of range is None."""
     missing = {"tcmb_c": None, "tcmz_c": None}
     try:
         result = subprocess.run(
             [sys.executable, "-I", str(Path(__file__).with_name("macos_temperature.py"))],
             capture_output=True, check=True, timeout=5, text=True,
         )
-        sensors = json.loads(result.stdout)["sensors"]
+        sample = json.loads(result.stdout)
+        sensors = sample["sensors"]
         values = {name: sensors[key]["temperature_c"] for name, key in
                   (("tcmb_c", "TCMb"), ("tcmz_c", "TCMz"))}
-        return {name: value if type(value) in (int, float) and math.isfinite(value)
-                and 0 < value <= 150 else None for name, value in values.items()}
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        return missing
+        temperature = {name: value if type(value) in (int, float) and math.isfinite(value)
+                       and 0 < value <= 150 else None for name, value in values.items()}
+        watts = ((sample.get("power") or {}).get("PSTR") or {}).get("watts")
+        watts = watts if type(watts) in (int, float) and math.isfinite(watts) and 0 < watts <= 500 else None
+        return temperature, watts
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+        return missing, None
+
+
+def read_smc_temperature():
+    return read_smc()[0]
 
 
 def collect(ip, hostname):
@@ -127,12 +136,14 @@ def collect(ip, hostname):
     if cpu is None or ram is None:
         raise RuntimeError("CPU/RAM sample unavailable; heartbeat skipped")
     model = cpu_model()
+    temperature, watts = read_smc()
     return {
         "ip": ip, "hostname": hostname, "cpu_model": model,
         "gpu_model": f"{model} integrated GPU" if model.startswith("Apple ") else "",
         "cpu_pct": cpu, "ram_pct": ram, "gpu_pct": read_gpu(),
         "cpu_temp_c": None, "gpu_temp_c": None, "fah": None,
-        "smc_temperature": read_smc_temperature(),
+        "smc_temperature": temperature,
+        "system_power_w": watts,
         "memory_pressure": read_memory_pressure(),
     }
 

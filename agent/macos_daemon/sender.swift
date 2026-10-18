@@ -73,7 +73,7 @@ func payload(from data: Data) throws -> Data {
           let outer = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let raw = outer["heartbeat"] as? [String: Any],
           raw["ip"] as? String == account, raw["hostname"] as? String == Deployment.hostname else { throw Failure.invalidPayload }
-    let keys = Set(["ip", "hostname", "cpu_model", "gpu_model", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c", "fah", "smc_temperature", "memory_pressure"])
+    let keys = Set(["ip", "hostname", "cpu_model", "gpu_model", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp_c", "gpu_temp_c", "fah", "smc_temperature", "system_power_w", "memory_pressure"])
     guard Set(raw.keys) == keys else { throw Failure.invalidPayload }
     for name in ["cpu_model", "gpu_model"] {
         guard let value = raw[name] as? String, value.count <= 128 else { throw Failure.invalidPayload }
@@ -92,6 +92,11 @@ func payload(from data: Data) throws -> Data {
         if smc[name] is NSNull { continue }
         guard let value = smc[name] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
               value.doubleValue.isFinite, value.doubleValue > 0, value.doubleValue <= 150 else { throw Failure.invalidPayload }
+    }
+    // Total system power (SMC PSTR) in watts, or null when it cannot be read.
+    if !(raw["system_power_w"] is NSNull) {
+        guard let value = raw["system_power_w"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+              value.doubleValue.isFinite, value.doubleValue > 0, value.doubleValue <= 500 else { throw Failure.invalidPayload }
     }
     guard let pressure = raw["memory_pressure"] as? [String: Any],
           Set(pressure.keys) == Set(["level", "pct"]) else { throw Failure.invalidPayload }
@@ -446,7 +451,7 @@ func selfTests() throws {
     }
     assert(!partitionValid(version:0x300,entries:[],expected:"cdhash:sender"))
     let good = Data("""
-    {"heartbeat":{"ip":"192.0.2.20","hostname":"Mac mini","cpu_model":"Example CPU","gpu_model":"Example GPU","cpu_pct":0,"ram_pct":50,"gpu_pct":null,"cpu_temp_c":null,"gpu_temp_c":null,"fah":null,"smc_temperature":{"tcmb_c":44.5,"tcmz_c":null},"memory_pressure":{"level":"normal","pct":37}},"local_only":{"load_average_1_5_15":[1,2,3]}}
+    {"heartbeat":{"ip":"192.0.2.20","hostname":"Mac mini","cpu_model":"Example CPU","gpu_model":"Example GPU","cpu_pct":0,"ram_pct":50,"gpu_pct":null,"cpu_temp_c":null,"gpu_temp_c":null,"fah":null,"smc_temperature":{"tcmb_c":44.5,"tcmz_c":null},"system_power_w":3.24,"memory_pressure":{"level":"normal","pct":37}},"local_only":{"load_average_1_5_15":[1,2,3]}}
     """.utf8)
     let parsed = try payload(from: good)
     assert(!String(data: parsed, encoding: .utf8)!.contains("local_only"))
@@ -512,6 +517,13 @@ func selfTests() throws {
         do { _ = try payload(from: Data(bad.utf8)); fatalError("invalid schema accepted") } catch {}
     }
     _ = try payload(from: Data(goodText.replacingOccurrences(of: "\"tcmb_c\":44.5", with: "\"tcmb_c\":null").utf8))
+    _ = try payload(from: Data(goodText.replacingOccurrences(of: "\"system_power_w\":3.24", with: "\"system_power_w\":null").utf8))
+    for invalid in ["true", "0", "-1", "501", "\"3\"", "1e999"] {
+        let bad = goodText.replacingOccurrences(of: "\"system_power_w\":3.24", with: "\"system_power_w\":\(invalid)")
+        do { _ = try payload(from: Data(bad.utf8)); fatalError("invalid power accepted") } catch {}
+    }
+    // A collector from before power was read is refused, so collector and sender always come from one commit.
+    do { _ = try payload(from: Data(goodText.replacingOccurrences(of: "\"system_power_w\":3.24,", with: "").utf8)); fatalError("missing power accepted") } catch {}
     var redirectDenied = false
     NoRedirect().urlSession(URLSession(configuration: .ephemeral), task: URLSession.shared.dataTask(with: endpoint), willPerformHTTPRedirection: HTTPURLResponse(url: endpoint, statusCode: 302, httpVersion: nil, headerFields: nil)!, newRequest: URLRequest(url: URL(string:"https://example.invalid")!)) { redirectDenied = $0 == nil }
     assert(redirectDenied)

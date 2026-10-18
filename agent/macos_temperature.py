@@ -1,4 +1,4 @@
-"""Local-only TCMb/TCMz probe. No network, credentials, or monitor integration.
+"""Local-only TCMb/TCMz temperature and PSTR system power probe. No network, credentials, or monitor integration.
 
 SMC read protocol reference: vladkens/macmon src_lib/sources.rs (MIT).
 Labels follow OSHI; Apple M6 sensor mapping is not officially confirmed.
@@ -9,8 +9,13 @@ import json
 import math
 import platform
 import struct
+import time
 
 KEYS = ('TCMb', 'TCMz')
+# PSTR: the SMC's total system power in watts, as macmon reports it. Read only, like the temperatures.
+POWER_KEY = 'PSTR'
+POWER_READS = 5          # An instantaneous reading jumps; average a few over about a second.
+POWER_SPACING_S = .2
 
 
 class Version(C.Structure):
@@ -39,6 +44,13 @@ def decode_temperature(kind, raw):
     value = struct.unpack('<f', raw)[0]
     # Exclude missing/zero and impossible readings; never fabricate a fallback max.
     return round(value, 2) if math.isfinite(value) and 0 < value <= 150 else None
+
+
+def decode_power(kind, raw):
+    if kind != b'flt ' or len(raw) != 4:
+        return None
+    value = struct.unpack('<f', raw)[0]
+    return value if math.isfinite(value) and 0 < value <= 500 else None
 
 
 class Reader:
@@ -96,18 +108,34 @@ class Reader:
         return output
 
     def read(self, key):
-        if key not in KEYS:
+        if key not in KEYS + (POWER_KEY,):
             raise ValueError('unsupported key')
         request = Data(key=int.from_bytes(key.encode('ascii'), 'big'), command=9)
         info = self._read(request).info
         if info.size != 4 or info.type != int.from_bytes(b'flt ', 'big'):
             return None
         request.command = 5; request.info = info
-        return decode_temperature(b'flt ', bytes(self._read(request).bytes[:4]))
+        decode = decode_power if key == POWER_KEY else decode_temperature
+        return decode(b'flt ', bytes(self._read(request).bytes[:4]))
 
 
-def sample(factory=Reader):
+def average_power(reader, sleep=time.sleep):
+    values = []
+    for index in range(POWER_READS):
+        if index:
+            sleep(POWER_SPACING_S)
+        try:
+            value = reader.read(POWER_KEY)
+        except OSError:
+            value = None
+        if value is not None:
+            values.append(value)
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def sample(factory=Reader, sleep=time.sleep):
     readings = {key: None for key in KEYS}
+    watts = None
     try:
         reader = factory()
     except OSError:
@@ -119,11 +147,13 @@ def sample(factory=Reader):
                     readings[key] = reader.read(key)
                 except OSError:
                     pass
+            watts = average_power(reader, sleep)
         finally:
             reader.close()
     return {'source': 'AppleSMC', 'mapping': 'OSHI CPU die average/max; M6 mapping not officially confirmed',
             'sensors': {key: {'label': 'CPU die average' if key == 'TCMb' else 'CPU die maximum',
-                              'temperature_c': readings[key]} for key in KEYS}}
+                              'temperature_c': readings[key]} for key in KEYS},
+            'power': {POWER_KEY: {'label': 'system total power', 'watts': watts}}}
 
 
 if __name__ == '__main__':

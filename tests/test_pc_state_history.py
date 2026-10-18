@@ -48,7 +48,7 @@ class HistoryRoundTripTests(unittest.TestCase):
         sheet = Worksheet(OLD_HEADERS, [[old, "192.0.2.20", 5, 30, "", "", ""]])
         writer = self.load(sheet)
         self.beat(writer, smc_temperature={"tcmb_c": 44.5, "tcmz_c": None},
-                  memory_pressure={"level": "warning", "pct": 37})
+                  memory_pressure={"level": "warning", "pct": 37}, system_power_w=6.25)
         self.beat(writer, ip="192.0.2.30", cpu_temp_c=61, gpu_temp_c=55)
         self.assertEqual(sheet.headers, writer.HISTORY_HEADERS)
 
@@ -61,6 +61,7 @@ class HistoryRoundTripTests(unittest.TestCase):
         self.assertEqual(mac["history"][1]["smc_temperature"], {"tcmb_c": 44.5, "tcmz_c": None})
         self.assertEqual(mac["history"][1]["memory_pressure"], {"level": "warning", "pct": 37})
         self.assertEqual(mac["current"]["memory_pressure"], {"level": "warning", "pct": 37})
+        self.assertEqual([p["system_power_w"] for p in mac["history"]], [None, 6.25])
         self.assertTrue(mac["online"])
         windows = restarted.snapshot()["192.0.2.30"]["history"][0]
         self.assertEqual((windows["cpu_temp_c"], windows["smc_temperature"], windows["memory_pressure"]), (61, None, None))
@@ -77,6 +78,8 @@ class HistoryRoundTripTests(unittest.TestCase):
         ]:
             got = state._mac_fields(row)
             self.assertEqual((got["smc_temperature"], got["memory_pressure"]), expected)
+        for cell, expected in [("", None), (0, None), (501, None), ("x", None), ("3.24", 3.24), (500, 500)]:
+            self.assertEqual(state._mac_fields({"system_power_w": cell})["system_power_w"], expected, cell)
 
     def test_rows_are_not_widened_until_the_header_is(self):
         sheet = Worksheet(OLD_HEADERS)

@@ -12,6 +12,7 @@
 | GPU 使用率 | AGXAccelerator / PerformanceStatistics / Device Utilization % | 可選；只接受有效 0–100 數值，未公開穩定契約、OS 更新可能失效；不以 renderer/tiler 數值代替 |
 | CPU/GPU 溫度 | 無已驗證的可靠無特權來源 | 固定 null；Dashboard 顯示 unavailable，沒有假設 0°C |
 | SoC 熱點溫度（TCMb） | 唯讀 AppleSMC | 獨立感測器欄位 `smc_temperature.tcmb_c`；實測為整顆晶片的最高點（見下），Apple 未公開；缺值為 null。TCMz 在 M6 讀不到，固定 null |
+| 整機功耗（PSTR） | 唯讀 AppleSMC | `system_power_w`（瓦），每分鐘讀 5 次、間隔 0.2 秒取平均；讀不到或不在 0–500 W 為 null。PSTR 是 SMC 的整機總功耗（macmon 同樣使用），Apple 未公開；2026-10-18 在 M6 Mac mini 閒置讀到約 3 W |
 | load average 1/5/15 分鐘、RAM 總量 | os.getloadavg / psutil | 只在預設本機 JSON 的 local_only；既有後端契約不接收／儲存，不顯示在卡片 |
 
 collector 沒有執行 sudo、powermetrics、特權 SMC helper，也不以 thermal pressure 假裝攝氏。CPU/RAM 取樣失敗會略過 heartbeat，不捏造零值；GPU 讀取失敗保留其餘指標。
@@ -48,7 +49,7 @@ python3 -m venv .venv-macos
 
 ## TCMb／TCMz 整合
 
-`macos_temperature.py` 只讀 AppleSMC 的 TCMb／TCMz，無 sudo、憑證或網路。
+`macos_temperature.py` 只讀 AppleSMC 的 TCMb／TCMz 與 PSTR（整機功耗），無 sudo、憑證或網路。
 程式輸出的標籤沿用 OSHI 的 CPU die average / maximum，但那不符合 M6 的實測（見下），不要照字面解讀。
 缺失／無效值保留 null，不能把 TCMb 代替 TCMz，亦不能稱作 CPU 或 GPU 各自的溫度。
 
