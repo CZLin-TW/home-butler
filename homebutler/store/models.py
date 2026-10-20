@@ -231,3 +231,22 @@ class ReminderLog(Base):
     stage: Mapped[str] = mapped_column(String(24))
     title: Mapped[str] = mapped_column(String(200))
     sent_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+# ── Food ──────────────────────────────────────────────────────────────────────
+
+class FoodItem(Base):
+    """Something in the fridge or the cupboard. Used up = status "consumed" (kept, hidden)."""
+    __tablename__ = "food_items"
+    __table_args__ = (Index("ix_food_active", "household_id", "status"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    name: Mapped[str] = mapped_column(String(120))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    unit: Mapped[str] = mapped_column(String(16), default="個")
+    expires_on: Mapped[date | None] = mapped_column(Date)
+    added_on: Mapped[date] = mapped_column(Date)
+    added_by_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    status: Mapped[str] = mapped_column(String(10), default="active")     # active | consumed
+    consumed_at: Mapped[datetime | None] = mapped_column()
+    added_by: Mapped["Member | None"] = relationship()

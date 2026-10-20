@@ -34,3 +34,11 @@ def current(engine: Engine, schema: str = "hb") -> str | None:
     with engine.connect() as connection:
         options = {"version_table_schema": schema} if engine.dialect.name == "postgresql" else {}
         return MigrationContext.configure(connection, opts=options).get_current_revision()
+
+
+def head() -> str:
+    """The newest version in the code."""
+    from alembic.script import ScriptDirectory
+    cfg = Config()
+    cfg.set_main_option("script_location", str(HERE / "migrations"))
+    return ScriptDirectory.from_config(cfg).get_current_head()
