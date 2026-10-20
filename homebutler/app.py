@@ -83,6 +83,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     from homebutler.assistant.actions import Services
     zone = ZoneInfo(settings.timezone)
     app.state.butler_services = Services(store, link, app.state.schedule_targets, None, zone)
+    if settings.weather_api_key:
+        import httpx
+        from homebutler.integrations.weather import Weather, tls_context
+        app.state.butler_services.weather = Weather(settings.weather_api_key, httpx.Client(verify=tls_context()), zone)
     from homebutler import modules
     modules.install(app, jobs)          # may add schedule targets and butler actions of their own
     from homebutler.jobs.schedules import Scheduler

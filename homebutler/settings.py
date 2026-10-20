@@ -61,6 +61,7 @@ class Settings:
     assistant_model: str = "claude-sonnet-5"
     # Where the Dashboard runs: the system's version number is read from it (the butler can tell it).
     dashboard_url: str = ""
+    weather_api_key: str = field(default="", repr=False)      # 中央氣象署 open data
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -84,6 +85,7 @@ class Settings:
             anthropic_api_key=_text(env, "ANTHROPIC_API_KEY"),
             assistant_model=_text(env, "ASSISTANT_MODEL", cls.assistant_model),
             dashboard_url=_text(env, "DASHBOARD_URL").rstrip("/"),
+            weather_api_key=_text(env, "CWA_API_KEY"),
         )
         if settings.switchbot_register_webhook and not (settings.switchbot_token and settings.switchbot_secret
                                                          and settings.public_base_url.startswith("https://")):
