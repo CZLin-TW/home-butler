@@ -323,3 +323,35 @@ class AcReading(Base):
     mode: Mapped[str] = mapped_column(String(16), default="")
     temperature: Mapped[float | None] = mapped_column()
     fan: Mapped[str] = mapped_column(String(16), default="")
+
+
+# ── Computers (telemetry senders) ─────────────────────────────────────────────
+
+class Computer(Base):
+    """A machine that reports its health every minute. Known by its own key, never by the address it reports."""
+    __tablename__ = "computers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_id: Mapped[int] = mapped_column(ForeignKey("api_tokens.id"), unique=True)
+    hostname: Mapped[str] = mapped_column(String(80), default="")
+    ip: Mapped[str] = mapped_column(String(45), default="")
+    cpu_model: Mapped[str] = mapped_column(String(128), default="")
+    gpu_model: Mapped[str] = mapped_column(String(128), default="")
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column()
+    current: Mapped[dict] = mapped_column(JSON, default=dict)     # the latest report, for the card
+
+
+class ComputerMetric(Base):
+    __tablename__ = "computer_metrics"
+    __table_args__ = (Index("ix_computer_metrics", "computer_id", "t"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    computer_id: Mapped[int] = mapped_column(ForeignKey("computers.id"))
+    t: Mapped[datetime] = mapped_column()
+    cpu_pct: Mapped[float | None] = mapped_column()
+    ram_pct: Mapped[float | None] = mapped_column()
+    gpu_pct: Mapped[float | None] = mapped_column()
+    cpu_temp: Mapped[float | None] = mapped_column()
+    gpu_temp: Mapped[float | None] = mapped_column()
+    soc_temp: Mapped[float | None] = mapped_column()
+    mem_pressure_pct: Mapped[int | None] = mapped_column(Integer)
+    mem_pressure_level: Mapped[str | None] = mapped_column(String(10))
+    power_w: Mapped[float | None] = mapped_column()

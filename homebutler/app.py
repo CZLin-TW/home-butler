@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from homebutler.api import home_assistant
+from homebutler.api import home_assistant, telemetry
 from homebutler.api.auth import Caller, caller
 from homebutler.domain import households
 from homebutler.integrations.ha.link import Link
@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     app.state.settings, app.state.store, app.state.jobs = settings, store, jobs
     app.state.ha = link
     app.include_router(home_assistant.router)
+    app.include_router(telemetry.router)
 
     @app.get("/v2/health")
     def health():
