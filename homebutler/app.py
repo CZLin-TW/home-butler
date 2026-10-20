@@ -69,6 +69,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     app.include_router(devices_relay.router)
     from homebutler.integrations.switchbot_push import HubRelay
     app.state.hub_relay = HubRelay(link)
+    from homebutler import modules
+    modules.install(app, jobs)
 
     @app.get("/v2/health")
     def health():
@@ -77,6 +79,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
 
     @app.get("/v2/system/status")
     def system_status(_: Caller = Depends(caller("admin"))):
-        return {"revision": migrate.current(store.engine, settings.database_schema), "jobs": jobs.status()}
+        return {"revision": migrate.current(store.engine, settings.database_schema), "jobs": jobs.status(),
+                "modules": sorted(app.state.modules)}
 
     return app

@@ -1,7 +1,10 @@
 """Alembic environment: always run from homebutler.store.migrate with an open connection."""
 from alembic import context
 
+from homebutler import modules
 from homebutler.store.models import Base
+
+modules.load()          # their tables too
 
 connection = context.config.attributes["connection"]
 schema = context.config.attributes.get("schema")

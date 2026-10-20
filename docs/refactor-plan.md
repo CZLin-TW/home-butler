@@ -82,7 +82,7 @@ Panasonic 除濕機的登入權杖目前直接放在試算表「智能居家」�
 |---|---|
 | `sensor_readings` | device_id, t, temperature, humidity, co2, light_level |
 | `ac_history` | device_id, t, power, mode, temperature, fan |
-| `dehumidifier_history` | device_id, t, power, mode, humidity, target |
+| `dehumidifier_history` | name, t, power, mode（除濕機模組自己的表，見 §8） |
 | `computer_metrics` | host, t, cpu_pct, ram_pct, gpu_pct, cpu_temp, gpu_temp, soc_temp, mem_pressure_pct, mem_pressure_level, power_w |
 
 保留 400 天，舊資料自動刪除。第一段已存進資料庫的 JSON 歷史在搬移時轉成這些欄位。
@@ -166,12 +166,15 @@ homebutler/
 
 除濕機之後會淘汰（新家改中央除濕），所以**不搬進 HA**，在 HB 裡做成可以整個拿掉的模組：
 
-- `homebutler/dehumidifier/` 放 Panasonic／LG 的連線、依濕度的自動規則（含分時目標），以及它自己的資料表（`dehumidifier_rules`、`dehumidifier_history`）與路由。
-- 核心（待辦、排程、管家、通知）不直接 import 這個模組；它透過固定的介面註冊自己的能力（設備清單、狀態、控制、排程動作、管家可用的動作）。沒有這個模組時，系統其他部分照常運作。
+- `homebutler/dehumidifier/` 放 Panasonic／LG 的連線、依濕度的自動規則（含分時目標），以及它自己的資料表（`dehumidifiers`：一台一列，存規則、規則進度與最後讀到的狀態；`dehumidifier_history`）與路由（`/v2/dehumidifiers`）。已寫好（第 4 階段）。
+- 規則進度（等待計時、感測器失聯次數、手動介入偵測的基準）存在資料庫，**重啟不再歸零**（舊系統放記憶體，重啟後從頭等）。每 5 分鐘讀一次所有除濕機的狀態（舊系統只讀開了自動模式的），所以手動模式的除濕機也有歷史與「幾分鐘前更新」。
+- 除濕機清單來自「智能居家」分頁（類型除濕機、啟用）；房間濕度來自 HA（套用感測器的濕度補償），HA 斷線就算感測器沒回報。
+- 核心（待辦、排程、管家、通知）不直接 import 這個模組；`homebutler/modules.py` 列出可選模組，啟動時呼叫各自的 `install`，模組把自己放進 `app.state.modules`。之後排程、管家、Dashboard 彙整要用除濕機時都經由這裡。沒有這個模組時，系統其他部分照常運作。
 - Dashboard 的除濕機卡片只在後端回報有這項能力時出現。
-- 移除時：刪掉模組、用一個 Alembic 版本刪掉它的資料表、拿掉 Dashboard 的卡片程式；不會在別處留下殘骸。
+- 移除時：刪掉模組資料夾與 `modules.py` 那一行、用一個 Alembic 版本刪掉它的兩張表、拿掉 Dashboard 的卡片程式；不會在別處留下殘骸。
 - 照舊的規則：不 fallback、未知結果不重送、Panasonic 只允許明確 token 417 的認證重試。
-- 憑證改放 Render 環境變數，不放試算表。
+- 憑證改放 Render 環境變數，不放試算表：`PANASONIC_ACCOUNT`、`PANASONIC_PASSWORD`、`PANASONIC_DEVICE_AUTH`（JSON，Device ID 對應該台的 Auth 值；切換時由使用者從試算表貼過去，Claude 不經手）、`LG_PAT` 等。
+- 和舊系統的小差異（都是更保守）：開機成功才接著設模式（舊的開機失敗仍會送模式）；切換自動模式的當下讀不到電源狀態就不做立即判斷（舊的會當成關著而開機）。
 
 ## 9. 切換步驟
 

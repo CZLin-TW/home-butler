@@ -5,10 +5,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import inspect, text
 
+from homebutler import modules
 from homebutler.store import migrate
 from homebutler.store.models import Base, Household, SystemState, utcnow
 from homebutler.store.db import normalize_url
 from homebutler.tests.helpers import StoreTest
+
+modules.load()
 
 
 class StoreTests(StoreTest):
