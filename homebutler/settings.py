@@ -54,6 +54,13 @@ class Settings:
     switchbot_register_webhook: bool = False
     public_base_url: str = ""
     notion_token: str = field(default="", repr=False)
+    # The LINE butler. Without the channel secret and token the webhook refuses everything.
+    line_channel_secret: str = field(default="", repr=False)
+    line_channel_token: str = field(default="", repr=False)
+    anthropic_api_key: str = field(default="", repr=False)
+    assistant_model: str = "claude-sonnet-5"
+    # Where the Dashboard runs: the system's version number is read from it (the butler can tell it).
+    dashboard_url: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -72,12 +79,21 @@ class Settings:
             switchbot_register_webhook=_text(env, "SWITCHBOT_REGISTER_WEBHOOK") == "1",
             public_base_url=_text(env, "PUBLIC_BASE_URL").rstrip("/"),
             notion_token=_text(env, "NOTION_TOKEN"),
+            line_channel_secret=_text(env, "LINE_CHANNEL_SECRET"),
+            line_channel_token=_text(env, "LINE_CHANNEL_ACCESS_TOKEN"),
+            anthropic_api_key=_text(env, "ANTHROPIC_API_KEY"),
+            assistant_model=_text(env, "ASSISTANT_MODEL", cls.assistant_model),
+            dashboard_url=_text(env, "DASHBOARD_URL").rstrip("/"),
         )
         if settings.switchbot_register_webhook and not (settings.switchbot_token and settings.switchbot_secret
                                                          and settings.public_base_url.startswith("https://")):
             raise SettingsError("SWITCHBOT_REGISTER_WEBHOOK needs SWITCHBOT_TOKEN, SWITCHBOT_SECRET and an https PUBLIC_BASE_URL")
         if settings.dashboard_assertion_key and len(settings.dashboard_assertion_key) < 32:
             raise SettingsError("DASHBOARD_ASSERTION_KEY must be at least 32 characters")
+        if bool(settings.line_channel_secret) != bool(settings.line_channel_token):
+            raise SettingsError("LINE_CHANNEL_SECRET and LINE_CHANNEL_ACCESS_TOKEN go together")
+        if settings.line_channel_secret and not settings.anthropic_api_key:
+            raise SettingsError("The LINE butler needs ANTHROPIC_API_KEY")
         if bool(settings.spreadsheet_id) != bool(settings.google_credentials):
             raise SettingsError("SPREADSHEET_ID and GOOGLE_CREDENTIALS go together")
         if not settings.database_schema.isidentifier() or settings.database_schema.lower() == "public":

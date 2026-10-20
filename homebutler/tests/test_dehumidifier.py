@@ -295,6 +295,18 @@ class ServiceTests(StoreTest):
         self.assertEqual(target.run("除濕一", {"power": "on"})["status"], "failed")
         self.assertEqual(len(self.unit.calls), calls)
 
+    def test_butler_actions(self):
+        from homebutler.dehumidifier.assistant import actions
+        act = actions(self.service)
+        self.assertEqual(act["_devices"](), [{"name": "除濕一", "kind": "dehumidifier", "location": "房間一"}])
+        self.assertTrue(act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on", "threshold": 55}).startswith(
+            "✅ 除濕一 已開啟自動除濕模式，目標 55%，使用 感測一，持續 30 分鐘，目前濕度 53.0%"))
+        self.assertIn("自動模式", act["control_dehumidifier"](None, {"power": "on"}))
+        self.assertEqual(act["set_dehumidifier_auto"](None, {"device_name": "房間一", "auto_mode": "off"}), "✅ 除濕一 已關閉自動除濕模式")
+        self.assertEqual(act["control_dehumidifier"](None, {"mode": "目標濕度"}), "✅ 除濕一 指令已送出")
+        self.assertTrue(act["query_dehumidifier"](None, {}).startswith("💧 除濕一：開啟｜模式：目標濕度｜目標濕度：55%"))
+        self.assertIn("找不到", act["query_dehumidifier"](None, {"device_name": "車庫"}))
+
 
 class RouteTests(StoreTest):
     def setUp(self):

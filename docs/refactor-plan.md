@@ -49,7 +49,7 @@ Notion、天氣、Claude <────────┘        │  │ HA 主動�
 | 表 | 主要欄位 | 說明 |
 |---|---|---|
 | `households` | id, name | A 戶、B 戶。對應 HA 的樓層。 |
-| `members` | id, name, title, line_user_id, default_household_id, status, butler_style, alert_opt_in, notion_database_id, notion_filter, notion_permission | 取代「家庭成員」。 |
+| `members` | id, name, title, line_user_id, default_household_id, status, butler_style, alert_opt_in, notion_database_id, notion_filter, notion_permission | 取代「家庭成員」。`butler_style`（管家風格）由成員透過 LINE 設定，存在資料庫，**不再從試算表同步**（它本來就是程式寫入的欄位，和「Hue 照明區域」同理）；搬移時從試算表複製一次。 |
 | `api_tokens` | id, kind, member_id?, label, hash, scopes, created_at, last_used_at, revoked_at | 每個呼叫者一把：HA 整合、Mac mini 監控、Windows 監控、Dashboard（之後若加新的管家入口，也在這裡發）。只存雜湊。 |
 | `remotes` | id, household_id, name, credential_hash, enabled | 取代「遙控器」。 |
 | `pairing_codes` | id, member_id, code_hash, expires_at, used_at | 取代「裝置配對」（LINE 六位數登入碼）。 |
@@ -74,7 +74,7 @@ Panasonic 除濕機的登入權杖目前直接放在試算表「智能居家」�
 | `food_items` | id, household_id, name, quantity, unit, expires_on?, added_on, added_by, status, consumed_at? | 取代「食品庫存」與「食品封存」。 |
 | `schedules` | id, household_id, target_kind, target_name, params, due_at, source, cycle_id, status, attempt_id, result, created_by, finished_at, dismissed_at | 取代「排程指令」與「排程封存」（已寫好，第 5 階段）。source：user／auto_off。status：pending → claimed（送出前先記）→ done／failed／unknown，或 expired、cancelled；失敗與未確認留著等人移除，不重送。不再有封存分頁：看不到的就是已結束的。 |
 | `auto_off_cycles` | id, device_id, started_at, hours, closed_at | 空調自動關機的「本輪」（從看到開機到看到關機）。資料庫保證同一台空調同時只有一輪，取代舊系統塞在參數裡的 `_auto_*` 標記；被刪掉的本輪關機因此不會被重建。 |
-| `conversations` | id, member_id, channel, role, content, created_at | 取代「對話暫存」。保留期限由設定決定，管家只讀最近幾則。 |
+| `conversation_messages` | id, member_id, role, content, created_at | 取代「對話暫存」與「對話封存」（已寫好，第 6 階段）。管家讀最近 6 則，保留 90 天。 |
 | `system_state` | key, value, updated_at | 延用。 |
 
 ### 3.4 歷史（改成正式欄位）

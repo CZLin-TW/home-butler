@@ -2,7 +2,7 @@
 
 They stay in this service and not in Home Assistant because they are to be retired (docs/refactor-plan.md
 §8). Nothing outside this folder imports it; `install` adds its routes, its 5-minute check, its entry
-in app.state.modules and its schedule target. To remove it: delete this folder and its line in
+in app.state.modules, its schedule target and its butler actions. To remove it: delete this folder and its line in
 homebutler/modules.py, and add a migration that drops its two tables.
 
 Its settings, read here only:
@@ -54,5 +54,7 @@ def install(app, jobs, env=None, http=None) -> None:
     service = build(app.state.store, app.state.ha, app.state.settings, env, http)
     app.state.modules["dehumidifier"] = service
     app.state.schedule_targets["dehumidifier"] = ScheduleTarget(service, app.state.settings.default_household)
+    from homebutler.dehumidifier.assistant import actions
+    app.state.butler_services.extra_actions.update(actions(service))
     app.include_router(routes.router)
     jobs.add("dehumidifiers", CHECK_SECONDS, service.check)

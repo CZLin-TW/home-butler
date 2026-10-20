@@ -74,7 +74,6 @@ def apply_members(session: Session, rows: list[dict], default_household: str) ->
         member.household_id = _household(session, row, default_household).id
         member.title = row.get("稱謂", "")
         member.active = row.get("狀態", "") == "啟用"
-        member.butler_style = row.get("管家風格", "")
         member.receives_alerts = truthy(row.get("系統告警"))
         member.notion_database_id = row.get("Notion Database ID", "")
         member.notion_filter = row.get("Notion 篩選", "")

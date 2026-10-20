@@ -60,7 +60,7 @@ class Member(Base):
     title: Mapped[str] = mapped_column(String(80), default="")
     line_user_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    butler_style: Mapped[str] = mapped_column(Text, default="")
+    butler_style: Mapped[str] = mapped_column(Text, default="")     # set by the member through the butler, not the spreadsheet
     receives_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
     notion_database_id: Mapped[str] = mapped_column(String(64), default="")
     notion_filter: Mapped[str] = mapped_column(Text, default="")
@@ -102,6 +102,7 @@ class Remote(Base):
 class PairingCode(Base):
     """A six-digit code a member sends to LINE to sign a browser in. Only a hash is kept."""
     __tablename__ = "pairing_codes"
+    __table_args__ = (UniqueConstraint("device_token_hash", name="uq_pairing_codes_device_token_hash"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     code_hash: Mapped[str] = mapped_column(String(64), unique=True)
     member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
@@ -109,6 +110,9 @@ class PairingCode(Base):
     expires_at: Mapped[datetime] = mapped_column()
     approved_at: Mapped[datetime | None] = mapped_column()
     used_at: Mapped[datetime | None] = mapped_column()
+    # the browser that asked for the code keeps this secret; only it can collect the sign-in
+    device_token_hash: Mapped[str | None] = mapped_column(String(64))
+    picture_url: Mapped[str] = mapped_column(String(500), default="")
 
 
 class SystemState(Base):
@@ -399,3 +403,16 @@ class Schedule(Base):
     finished_at: Mapped[datetime | None] = mapped_column()
     dismissed_at: Mapped[datetime | None] = mapped_column()
     cycle: Mapped[AutoOffCycle | None] = relationship()
+
+
+# ── The butler ────────────────────────────────────────────────────────────────
+
+class ConversationMessage(Base):
+    """What a member and the butler said on LINE; the last few turns are the butler's context."""
+    __tablename__ = "conversation_messages"
+    __table_args__ = (Index("ix_conversation_member", "member_id", "created_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    role: Mapped[str] = mapped_column(String(10))           # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
