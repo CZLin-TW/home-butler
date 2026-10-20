@@ -82,6 +82,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
         migrate.upgrade(store.engine, settings.database_schema)
         with store.transaction() as session:
             households.ensure(session, settings.default_household)
+            if settings.keys():
+                from homebutler.domain import tokens
+                log.info("keys from the environment: %s", tokens.from_environment(session, settings.keys()))
         if settings.switchbot_register_webhook:
             import threading
             def point_webhook_here():
@@ -93,6 +96,20 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
                 except Exception as error:
                     log.warning("SwitchBot webhook not registered (%s)", type(error).__name__)
             threading.Thread(target=point_webhook_here, daemon=True).start()
+        if settings.migrate_from_old:
+            def bring_old_data():
+                from homebutler import migration
+                from homebutler.domain import system_state
+                with store.transaction() as session:
+                    if system_state.get(session, "migrated_from_old_at"):
+                        return                         # once only; a trial copy re-runs it by hand with --replace
+                try:
+                    report = migration.migrate_from(settings, store)
+                    log.info("migration: read %s, written %s, skipped %d", report.read, report.written, len(report.skipped))
+                except Exception:
+                    log.exception("migration failed; nothing was written")
+            # Before the jobs: schedules must not run against a half-filled database.
+            bring_old_data()
         if start_jobs:
             jobs.start()
         yield
@@ -136,7 +153,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     modules.install(app, jobs)          # may add schedule targets and butler actions of their own
     from homebutler.jobs.schedules import Scheduler
     app.state.scheduler = app.state.butler_services.scheduler = Scheduler(store, link, app.state.schedule_targets, zone)
-    jobs.add("schedules", 60, app.state.scheduler.run)
+    if settings.schedules_enabled:
+        jobs.add("schedules", 60, app.state.scheduler.run)
     import asyncio
     app.state.line_lock, app.state.background = asyncio.Lock(), set()
     if settings.line_channel_secret:

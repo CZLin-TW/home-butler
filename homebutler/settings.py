@@ -31,6 +31,20 @@ def _int(env, name, default, low, high):
     return value
 
 
+def _keys(env, name) -> dict:
+    raw = _text(env, name)
+    if not raw:
+        return {}
+    import json
+    try:
+        found = json.loads(raw)
+    except ValueError:
+        raise SettingsError(f"{name} must be JSON like {{\"Mac mini\": \"...\"}}") from None
+    if not isinstance(found, dict) or not all(isinstance(k, str) and k and isinstance(v, str) for k, v in found.items()):
+        raise SettingsError(f"{name} must map names to keys")
+    return found
+
+
 @dataclass(frozen=True)
 class Settings:
     # Where the data lives. Without it the service runs on a local SQLite file (development, tests).
@@ -67,6 +81,25 @@ class Settings:
     # The Drive folder (shared with the service account) holding homebutler-backup.json.gz. Unset: no
     # backups, which is what a trial copy must do so it never overwrites the real one.
     backup_folder: str = ""
+    # The keys of each caller, made by the family (any long random string) and set here; the Dashboard, HA
+    # and each computer get the same value in their own settings. Changing one here retires the old one.
+    dashboard_api_key: str = field(default="", repr=False)
+    home_assistant_api_key: str = field(default="", repr=False)
+    admin_api_key: str = field(default="", repr=False)
+    telemetry_keys: dict = field(default_factory=dict, repr=False)     # {"Mac mini": key, ...}
+    # The switch-over: bring the old system's data in once, at start, when this is "1" (see migration.py).
+    migrate_from_old: bool = False
+    old_database_url: str = field(default="", repr=False)    # where the old history is; default: DATABASE_URL
+    default_light_area: str = ""                              # the lighting area to-do reminders use by default
+    # A trial copy sets SCHEDULES=0: no automatic shutdowns are made and nothing due is sent.
+    schedules_enabled: bool = True
+
+    def keys(self) -> list[tuple[str, str, str]]:
+        """(kind, label, key) for every key set in the environment."""
+        found = [(kind, label, value) for kind, label, value in (
+            ("dashboard", "Dashboard", self.dashboard_api_key), ("home_assistant", "Home Assistant", self.home_assistant_api_key),
+            ("admin", "Admin", self.admin_api_key)) if value]
+        return found + [("telemetry", label, value) for label, value in self.telemetry_keys.items()]
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -94,6 +127,14 @@ class Settings:
             daily_push_hour=_int(env, "DAILY_PUSH_HOUR", cls.daily_push_hour, 0, 23),
             offline_alert_seconds=_int(env, "AGENT_OFFLINE_ALERT_SECONDS", cls.offline_alert_seconds, 300, 86400),
             backup_folder=_text(env, "BACKUP_FOLDER"),
+            dashboard_api_key=_text(env, "DASHBOARD_API_KEY"),
+            home_assistant_api_key=_text(env, "HOME_ASSISTANT_API_KEY"),
+            admin_api_key=_text(env, "ADMIN_API_KEY"),
+            telemetry_keys=_keys(env, "TELEMETRY_KEYS"),
+            migrate_from_old=_text(env, "MIGRATE_FROM_OLD") == "1",
+            old_database_url=_text(env, "OLD_DATABASE_URL"),
+            default_light_area=_text(env, "DEFAULT_LIGHT_AREA"),
+            schedules_enabled=_text(env, "SCHEDULES", "1") != "0",
         )
         if settings.switchbot_register_webhook and not (settings.switchbot_token and settings.switchbot_secret
                                                          and settings.public_base_url.startswith("https://")):
@@ -104,6 +145,11 @@ class Settings:
             raise SettingsError("LINE_CHANNEL_SECRET and LINE_CHANNEL_ACCESS_TOKEN go together")
         if settings.line_channel_secret and not settings.anthropic_api_key:
             raise SettingsError("The LINE butler needs ANTHROPIC_API_KEY")
+        lengths = [value for _, _, value in settings.keys()]
+        if any(not 24 <= len(value) <= 200 for value in lengths) or len(set(lengths)) != len(lengths):
+            raise SettingsError("Every key must be 24 to 200 characters and different from the others")
+        if settings.migrate_from_old and not settings.spreadsheet_id:
+            raise SettingsError("MIGRATE_FROM_OLD needs SPREADSHEET_ID and GOOGLE_CREDENTIALS")
         if settings.backup_folder and not settings.google_credentials:
             raise SettingsError("BACKUP_FOLDER needs GOOGLE_CREDENTIALS")
         if bool(settings.spreadsheet_id) != bool(settings.google_credentials):
