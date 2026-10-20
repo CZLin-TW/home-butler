@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from homebutler.api import home_assistant, telemetry
+from homebutler.api import devices_relay, home_assistant, telemetry
 from homebutler.api.auth import Caller, caller
 from homebutler.domain import households
 from homebutler.integrations.ha.link import Link
@@ -39,6 +39,17 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
         migrate.upgrade(store.engine, settings.database_schema)
         with store.transaction() as session:
             households.ensure(session, settings.default_household)
+        if settings.switchbot_register_webhook:
+            import threading
+            def point_webhook_here():
+                import httpx
+                from homebutler.integrations.switchbot_push import register
+                try:
+                    log.info("SwitchBot webhook: %s", register(settings.public_base_url + "/v2/switchbot/webhook",
+                                                              settings.switchbot_token, settings.switchbot_secret, httpx.Client()))
+                except Exception as error:
+                    log.warning("SwitchBot webhook not registered (%s)", type(error).__name__)
+            threading.Thread(target=point_webhook_here, daemon=True).start()
         if start_jobs:
             jobs.start()
         yield
@@ -55,6 +66,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     app.state.ha = link
     app.include_router(home_assistant.router)
     app.include_router(telemetry.router)
+    app.include_router(devices_relay.router)
+    from homebutler.integrations.switchbot_push import HubRelay
+    app.state.hub_relay = HubRelay(link)
 
     @app.get("/v2/health")
     def health():

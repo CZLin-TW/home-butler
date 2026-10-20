@@ -72,3 +72,35 @@ class HubRelay:
             if self.tasks.get(device) is asyncio.current_task():
                 self.tasks.pop(device, None)
                 self.pending.pop(device, None)
+
+
+API = "https://api.switch-bot.com/v1.1"
+
+
+def signed_headers(token: str, secret: str, now_ms: int | None = None, nonce: str | None = None) -> dict:
+    import base64, hashlib, hmac, uuid
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    nonce = nonce or str(uuid.uuid4())
+    sign = base64.b64encode(hmac.new(secret.encode(), f"{token}{now_ms}{nonce}".encode(), hashlib.sha256).digest()).decode()
+    return {"Authorization": token, "sign": sign, "nonce": nonce, "t": str(now_ms), "Content-Type": "application/json; charset=utf8"}
+
+
+def register(url: str, token: str, secret: str, client) -> str:
+    """Point the account's one webhook at url. Returns what was done: already | updated | created."""
+    def call(path, body):
+        reply = client.post(f"{API}/webhook/{path}", json=body, headers=signed_headers(token, secret), timeout=10)
+        data = reply.json()
+        return data.get("statusCode") == 100, data.get("body") or {}
+    ok, body = call("queryWebhook", {"action": "queryUrl"})
+    urls = (body.get("urls") or []) if ok else []
+    if url in urls:
+        return "already"
+    if urls:
+        ok, _ = call("updateWebhook", {"action": "updateWebhook", "config": {"url": url, "enable": True}})
+        if not ok:
+            raise RuntimeError("SwitchBot refused the webhook update")
+        return "updated"
+    ok, _ = call("setupWebhook", {"action": "setupWebhook", "url": url, "deviceList": "ALL"})
+    if not ok:
+        raise RuntimeError("SwitchBot refused the webhook setup")
+    return "created"
