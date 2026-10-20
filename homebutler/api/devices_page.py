@@ -74,25 +74,29 @@ def devices_page(request: Request, user: DashboardUser = Depends(dashboard_user)
 
 
 @router.get("/history")
-def history(request: Request, hours: int = 24, user: DashboardUser = Depends(dashboard_user)):
+def history(request: Request, hours: int = 24, parts: str = "sensors,acs,computers,dehumidifiers",
+            user: DashboardUser = Depends(dashboard_user)):
+    """`parts` limits what is sent (computers report every minute, so theirs is the largest)."""
     if not 1 <= hours <= 24 * 31:
         raise HTTPException(422, "hours 需介於 1 至 744")
+    wanted = set(parts.split(","))
     since = utcnow() - timedelta(hours=hours)
     out = {"sensors": {}, "acs": {}, "computers": {}, "dehumidifiers": {}}
     with request.app.state.store.transaction() as s:
         names = {d.id: d.name for d in s.scalars(select(Device))}
-        for r in s.scalars(select(SensorReading).where(SensorReading.t >= since).order_by(SensorReading.device_id, SensorReading.t)):
+        for r in (s.scalars(select(SensorReading).where(SensorReading.t >= since).order_by(SensorReading.device_id, SensorReading.t)) if "sensors" in wanted else []):
             out["sensors"].setdefault(names.get(r.device_id, "?"), []).append(
                 {"t": r.t, "temperature": r.temperature, "humidity": r.humidity, "co2": r.co2, "light_level": r.light_level})
-        for r in s.scalars(select(AcReading).where(AcReading.t >= since).order_by(AcReading.device_id, AcReading.t)):
+        for r in (s.scalars(select(AcReading).where(AcReading.t >= since).order_by(AcReading.device_id, AcReading.t)) if "acs" in wanted else []):
             out["acs"].setdefault(names.get(r.device_id, "?"), []).append(
                 {"t": r.t, "power": r.power, "mode": r.mode, "temperature": r.temperature, "fan": r.fan})
-        for r in s.scalars(select(ComputerMetric).where(ComputerMetric.t >= since).order_by(ComputerMetric.computer_id, ComputerMetric.t)):
+        for r in (s.scalars(select(ComputerMetric).where(ComputerMetric.t >= since).order_by(ComputerMetric.computer_id, ComputerMetric.t))
+                  if "computers" in wanted else []):
             out["computers"].setdefault(str(r.computer_id), []).append(
                 {k: getattr(r, k) for k in ("t", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp", "gpu_temp", "soc_temp",
                                             "mem_pressure_pct", "mem_pressure_level", "power_w")})
     module = request.app.state.modules.get("dehumidifier")
-    if module:
+    if module and "dehumidifiers" in wanted:
         out["dehumidifiers"] = module.history(since)
     return out
 

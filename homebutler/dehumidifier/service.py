@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, tzinfo
 
 from sqlalchemy import delete, select
 
-from homebutler.dehumidifier import drivers, rules
+from homebutler.dehumidifier import drivers, lg, panasonic, rules
 from homebutler.dehumidifier.tables import Dehumidifier, DehumidifierReading
 from homebutler.domain import devices
 from homebutler.store.db import Store
@@ -27,6 +27,13 @@ from homebutler.store.models import DeviceSetting, utcnow
 
 log = logging.getLogger("homebutler.dehumidifier")
 RETENTION_DAYS = 400
+# What a person may choose on the card, per brand (the machines accept these).
+OPTIONS = {
+    "Panasonic": {"modes": ["連續除濕", "防霉抑菌", "目標濕度", "空氣清淨", "AI舒適"], "humidity": sorted(panasonic.HUMIDITY_STEPS),
+                  "humidity_needs_mode": "目標濕度"},
+    "LG": {"modes": list(lg.MODE_LABELS.values()), "humidity": list(range(lg.TARGET_MIN, lg.TARGET_MAX + 1, lg.TARGET_STEP)),
+           "humidity_needs_mode": None},
+}
 
 
 class Refused(ValueError):
@@ -335,6 +342,7 @@ class Dehumidifiers:
                 segments, error = rules.parse_curve(sensor.get("curve")) if row.sensor_name else (None, "未選感測器")
                 out.append({
                     "name": unit.name, "location": unit.location, "brand": unit.brand, "controllable": self.driver(unit) is not None,
+                    "options": OPTIONS[unit.brand],
                     "status": {"power": row.power, "mode": row.mode, "target": row.target, "updated_at": row.status_at,
                                "error": row.status_error},
                     "rule": {"auto_mode": row.auto_mode, "sensor_name": row.sensor_name, "duration_min": row.duration_min,

@@ -72,7 +72,8 @@ def area_view(a: LightArea) -> dict:
 
 def food_view(i: FoodItem) -> dict:
     return {"id": i.id, "name": i.name, "quantity": i.quantity, "unit": i.unit,
-            "expires_on": i.expires_on.isoformat() if i.expires_on else None, "added_on": i.added_on.isoformat() if i.added_on else None}
+            "expires_on": i.expires_on.isoformat() if i.expires_on else None, "added_on": i.added_on.isoformat() if i.added_on else None,
+            "added_by": i.added_by.name if i.added_by else None}
 
 
 # ── to-dos ──────────────────────────────────────────────────────────────────
