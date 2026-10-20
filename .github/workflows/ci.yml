@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]   # v2: the rebuild branch (docs/refactor-plan.md); remove when it is merged
   pull_request:
 
 jobs:
