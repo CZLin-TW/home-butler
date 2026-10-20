@@ -10,7 +10,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from homebutler.api import devices_relay, home_assistant, line, pairing, schedules, telemetry
+from homebutler.api import (devices_page, devices_relay, home, home_assistant, household, lighting, line, pairing, schedules,
+                            sign_in, telemetry)
 from homebutler.api.auth import Caller, caller
 from homebutler.domain import households
 from homebutler.integrations.ha.link import Link
@@ -112,6 +113,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     app.include_router(schedules.router)
     app.include_router(line.router)
     app.include_router(pairing.router)
+    for module in (sign_in, household, home, devices_page, lighting):
+        app.include_router(module.router)
+    from homebutler.domain.remotes import Guard
+    app.state.remote_guard = Guard()
     from homebutler.integrations.switchbot_push import HubRelay
     app.state.hub_relay = HubRelay(link)
     from homebutler.domain.device_targets import ACTarget, IRTarget

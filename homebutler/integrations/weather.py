@@ -88,6 +88,31 @@ def _day(series, day: date) -> list[tuple[int, object]]:
     return [(s.hour, _value(p)) for p in series if (s := _start(p)) and s.date() == day]
 
 
+def _current(series, now: datetime):
+    """The value of the 12-hour period covering now; else the latest past one; else the first future one."""
+    timed = [(start, p) for p in series if (start := _start(p))]
+    if not timed:
+        return None
+    for start, period in timed:
+        if start <= now < start + timedelta(hours=12):
+            return _value(period)
+    past = sorted((t for t in timed if t[0] <= now), key=lambda t: t[0], reverse=True)
+    return _value((past or sorted(timed, key=lambda t: t[0]))[0][1])
+
+
+def _window(series, start: datetime, end: datetime) -> list:
+    return [v for p in series if (s := _start(p)) and s < end and s + timedelta(hours=12) > start and (v := _value(p)) is not None]
+
+
+def _notable(values: list):
+    """Rain first, then overcast, else the first."""
+    for word in ("雨", "陰"):
+        for value in values:
+            if word in str(value):
+                return value
+    return values[0] if values else None
+
+
 class Cache:
     def __init__(self, ttl: float, clock=time.monotonic, limit: int = 32):
         self.ttl, self.clock, self.limit = ttl, clock, limit
@@ -227,11 +252,22 @@ class Weather:
         lows, highs = numbers("最低溫度"), numbers("最高溫度")
         feel_low, feel_high, rain = numbers("最低體感溫度"), numbers("最高體感溫度"), numbers("12小時降雨機率")
         label = {0: "今天", 1: "明天", 2: "後天"}.get(ahead, f"週{WEEKDAY[day.weekday()]}")
+        naive, ahead24 = now.replace(tzinfo=None), now.replace(tzinfo=None) + timedelta(hours=24)
+
+        def window_numbers(name):
+            return [n for v in _window(_series(elements, name), naive, ahead24) if (n := _number(v)) is not None]
+        forecast = {
+            "current_segment": {"wx": _current(_series(elements, "天氣現象"), naive),
+                                **{key: _number(_current(_series(elements, name), naive)) for key, name in
+                                   (("min_t", "最低溫度"), ("max_t", "最高溫度"), ("pop", "12小時降雨機率"), ("rh", "平均相對濕度"))}},
+            "next_24h": {"wx": _notable(_window(_series(elements, "天氣現象"), naive, ahead24)),
+                         "min_t": min(window_numbers("最低溫度"), default=None), "max_t": max(window_numbers("最高溫度"), default=None),
+                         "pop": max(window_numbers("12小時降雨機率"), default=None)}}
         return {"location": found["data"].get("LocationName", place or ""), "city": found.get("city", ""), "date_label": label,
                 "date": day.strftime("%m/%d"), "wx": daytime[0] if daytime else (weather[0][1] if weather else "無資料"),
                 "min_t": min(lows) if lows else None, "max_t": max(highs) if highs else None,
                 "min_at": min(feel_low) if feel_low else None, "max_at": max(feel_high) if feel_high else None,
-                "pop": max(rain) if rain else None, "observation": observation}
+                "pop": max(rain) if rain else None, "observation": observation, "forecast": forecast}
 
     def summary(self, when: str = "today", location: str | None = None) -> str:
         """The butler's answer (format as before)."""
