@@ -250,3 +250,76 @@ class FoodItem(Base):
     status: Mapped[str] = mapped_column(String(10), default="active")     # active | consumed
     consumed_at: Mapped[datetime | None] = mapped_column()
     added_by: Mapped["Member | None"] = relationship()
+
+
+# ── Devices (Home Assistant is the source; these mirror it) ───────────────────
+
+class Device(Base):
+    """Something the family sees as one device: an AC, an IR fan, a sensor, a presence zone. Made from
+    what HA shares; `kind` + `name` identify it, so a device keeps its history across HA renames of ids."""
+    __tablename__ = "devices"
+    __table_args__ = (UniqueConstraint("kind", "name", name="uq_devices_kind_name"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    kind: Mapped[str] = mapped_column(String(16))          # ac | ir | sensor | presence
+    name: Mapped[str] = mapped_column(String(160))
+    area: Mapped[str] = mapped_column(String(100), default="")
+    ha_floor_id: Mapped[str] = mapped_column(String(80), default="")
+    first_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
+    removed_at: Mapped[datetime | None] = mapped_column()
+    entities: Mapped[list["DeviceEntity"]] = relationship(back_populates="device")
+
+
+class DeviceEntity(Base):
+    """One HA entity behind a device, by HA's stable registry id."""
+    __tablename__ = "device_entities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    ha_id: Mapped[str] = mapped_column(String(32), unique=True)
+    entity_id: Mapped[str] = mapped_column(String(160))
+    role: Mapped[str] = mapped_column(String(24))          # climate | button | temperature | humidity | co2 | light_level | occupancy | illuminance
+    label: Mapped[str] = mapped_column(String(60), default="")   # an IR button's name
+    removed_at: Mapped[datetime | None] = mapped_column()
+    device: Mapped[Device] = relationship(back_populates="entities")
+
+
+class DeviceSetting(Base):
+    """A row of the hand-edited 智能居家 tab, matched to a device by name. Credentials are never copied."""
+    __tablename__ = "device_settings"
+    name: Mapped[str] = mapped_column(String(160), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))          # ac | ir | sensor | dehumidifier | other
+    location: Mapped[str] = mapped_column(String(100), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    external_id: Mapped[str] = mapped_column(String(80), default="")
+    brand: Mapped[str] = mapped_column(String(32), default="")
+    temperature_offset: Mapped[float] = mapped_column(default=0.0)
+    humidity_offset: Mapped[float] = mapped_column(default=0.0)
+    auto_off_hours_text: Mapped[str] = mapped_column(String(40), default="")
+    auto_off_hold_text: Mapped[str] = mapped_column(String(40), default="")
+    humidity_rule_text: Mapped[str] = mapped_column(Text, default="")
+    removed_at: Mapped[datetime | None] = mapped_column()
+
+
+class SensorReading(Base):
+    __tablename__ = "sensor_readings"
+    __table_args__ = (Index("ix_sensor_readings", "device_id", "t"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    t: Mapped[datetime] = mapped_column()
+    temperature: Mapped[float | None] = mapped_column()
+    humidity: Mapped[float | None] = mapped_column()
+    co2: Mapped[float | None] = mapped_column()
+    light_level: Mapped[int | None] = mapped_column(Integer)
+
+
+class AcReading(Base):
+    __tablename__ = "ac_history"
+    __table_args__ = (Index("ix_ac_history", "device_id", "t"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    t: Mapped[datetime] = mapped_column()
+    power: Mapped[str] = mapped_column(String(4))          # on | off
+    mode: Mapped[str] = mapped_column(String(16), default="")
+    temperature: Mapped[float | None] = mapped_column()
+    fan: Mapped[str] = mapped_column(String(16), default="")

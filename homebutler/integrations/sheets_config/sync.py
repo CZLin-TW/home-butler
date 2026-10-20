@@ -19,13 +19,15 @@ from sqlalchemy.orm import Session
 from homebutler.domain import households
 from homebutler.domain.passwords import hash_password, verify_password
 from homebutler.store.db import Store
-from homebutler.store.models import ConfigSource, Member, Remote, utcnow
+from homebutler.store.models import ConfigSource, DeviceSetting, Member, Remote, utcnow
 
 log = logging.getLogger("homebutler.config")
 
 MEMBERS = "家庭成員"
 REMOTES = "遙控器"
-TABS = [MEMBERS, REMOTES]
+DEVICES = "智能居家"
+TABS = [MEMBERS, REMOTES, DEVICES]
+KINDS = {"空調": "ac", "IR": "ir", "感應器": "sensor", "除濕機": "dehumidifier"}
 TRUE = {"TRUE", "1", "YES", "Y", "ON", "是", "要", "啟用", "V", "✓"}
 
 
@@ -113,7 +115,50 @@ def apply_remotes(session: Session, rows: list[dict], default_household: str) ->
     return problems
 
 
-APPLY = {MEMBERS: apply_members, REMOTES: apply_remotes}
+def _offset(value, name, number, problems):
+    if value in (None, ""):
+        return 0.0
+    try:
+        found = float(value)
+    except (TypeError, ValueError):
+        problems.append(f"第 {number} 列（{name}）的補償值不是數字，當作 0")
+        return 0.0
+    return found if abs(found) <= 20 else 0.0
+
+
+def apply_device_settings(session: Session, rows: list[dict], default_household: str) -> list[str]:
+    """Settings only. The Auth column (a device credential) and the 最後… columns (old state) are never read."""
+    problems, seen = [], set()
+    existing = {s.name: s for s in session.scalars(select(DeviceSetting))}
+    for number, row in enumerate(rows, start=2):
+        name = row.get("名稱", "")
+        if not name:
+            continue
+        if name in seen:
+            problems.append(f"第 {number} 列名稱重複（{name}），略過")
+            continue
+        seen.add(name)
+        setting = existing.get(name) or DeviceSetting(name=name)
+        if name not in existing:
+            session.add(setting)
+        setting.kind = KINDS.get(row.get("類型", ""), "other")
+        setting.location = row.get("位置", "")
+        setting.enabled = row.get("狀態", "啟用") != "停用"
+        setting.external_id = row.get("Device ID", "")
+        setting.brand = row.get("品牌", "")
+        setting.temperature_offset = _offset(row.get("溫度補償"), name, number, problems)
+        setting.humidity_offset = _offset(row.get("濕度補償"), name, number, problems)
+        setting.auto_off_hours_text = row.get("自動關機小時數", "")[:40]
+        setting.auto_off_hold_text = row.get("自動關機暫緩時段", "")[:40]
+        setting.humidity_rule_text = row.get("濕度控制規則", "")
+        setting.removed_at = None
+    for name, setting in existing.items():
+        if name not in seen and setting.removed_at is None:
+            setting.removed_at = utcnow()
+    return problems
+
+
+APPLY = {MEMBERS: apply_members, REMOTES: apply_remotes, DEVICES: apply_device_settings}
 
 
 class ConfigSync:

@@ -2,8 +2,8 @@ import unittest
 
 from homebutler.domain.passwords import verify_password
 from homebutler.integrations.sheets_config.source import rows_from_values
-from homebutler.integrations.sheets_config.sync import MEMBERS, REMOTES, ConfigSync
-from homebutler.store.models import ConfigSource, Household, Member, Remote
+from homebutler.integrations.sheets_config.sync import DEVICES, MEMBERS, REMOTES, ConfigSync
+from homebutler.store.models import ConfigSource, DeviceSetting, Household, Member, Remote
 from homebutler.tests.helpers import StoreTest
 
 
@@ -15,6 +15,9 @@ class FakeSheets:
             MEMBERS: [{"名稱": "CZ", "稱謂": "爸爸", "Line User ID": "U1", "狀態": "啟用", "系統告警": "TRUE", "Notion 權限": ""},
                       {"名稱": "媽", "Line User ID": "U2", "狀態": "停用"}],
             REMOTES: [{"名稱": "平板一", "密碼": "1234", "啟用": "TRUE"}],
+            DEVICES: [{"名稱": "冷氣一", "類型": "空調", "位置": "一", "狀態": "啟用", "自動關機小時數": "1", "自動關機暫緩時段": "07:00-07:00",
+                       "最後電源": "on", "Auth": "secret-token"},
+                      {"名稱": "感測一", "類型": "感應器", "溫度補償": "-0.5", "濕度補償": "abc"}],
         }
     def modified_time(self): return self.modified
     def read(self, tabs):
@@ -35,7 +38,7 @@ class ConfigSyncTests(StoreTest):
 
     def test_members_and_remotes_arrive_and_an_unchanged_file_is_not_reread(self):
         result = self.sync.run()
-        self.assertEqual(sorted(result.applied), sorted([MEMBERS, REMOTES]))
+        self.assertEqual(sorted(result.applied), sorted([MEMBERS, REMOTES, DEVICES]))
         self.assertEqual(self.members(), {"CZ": (True, False, True, False, "爸爸"), "媽": (False, False, False, False, "")})
         with self.store.transaction() as session:
             remote = session.query(Remote).one()
@@ -45,7 +48,7 @@ class ConfigSyncTests(StoreTest):
         self.sync.run()
         self.assertEqual(self.sheets.reads, 1)                    # Google said nothing changed
         self.sheets.modified = "t2"
-        self.assertEqual(self.sync.run().unchanged, [MEMBERS, REMOTES])   # changed file, same content
+        self.assertEqual(self.sync.run().unchanged, [MEMBERS, REMOTES, DEVICES])   # changed file, same content
 
     def test_edits_removals_and_returns(self):
         self.sync.run()
@@ -78,6 +81,17 @@ class ConfigSyncTests(StoreTest):
         self.sheets.read = FakeSheets().read
         self.sync.run()                                            # retried on the next run
         self.assertIn("CZ", self.members())
+
+    def test_device_settings_never_copy_credentials_or_old_state(self):
+        result = self.sync.run()
+        self.assertEqual(len(result.problems[DEVICES]), 1)            # the humidity offset that is not a number
+        with self.store.transaction() as session:
+            rows = {s.name: s for s in session.query(DeviceSetting)}
+            self.assertEqual((rows["冷氣一"].kind, rows["冷氣一"].auto_off_hours_text, rows["冷氣一"].auto_off_hold_text),
+                             ("ac", "1", "07:00-07:00"))
+            self.assertEqual((rows["感測一"].temperature_offset, rows["感測一"].humidity_offset), (-0.5, 0.0))
+            values = [str(v) for s in rows.values() for v in vars(s).values()]
+        self.assertFalse(any("secret-token" in v for v in values))
 
     def test_household_column_when_present(self):
         self.sheets.tabs[MEMBERS][1]["戶別"] = "B"
