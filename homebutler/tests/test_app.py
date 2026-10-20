@@ -70,7 +70,7 @@ class AppTests(StoreTest):
         self.assertEqual(self.get("/v2/system/status").status_code, 401)
         self.assertEqual(self.get("/v2/system/status", self.dashboard).status_code, 401)
         body = self.get("/v2/system/status", self.admin).json()
-        self.assertEqual(body["revision"], "0001")
+        self.assertEqual(body["revision"], "0002")
 
     def test_dashboard_requests_need_both_the_key_and_a_fresh_assertion_of_an_active_member(self):
         good = sign_assertion(KEY, claims())

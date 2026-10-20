@@ -22,7 +22,7 @@ class StoreTests(StoreTest):
 
     def test_upgrade_is_safe_to_repeat(self):
         migrate.upgrade(self.store.engine, self.schema)
-        self.assertEqual(migrate.current(self.store.engine, self.schema), "0001")
+        self.assertEqual(migrate.current(self.store.engine, self.schema), "0002")
 
     def test_times_come_back_as_utc_and_naive_times_are_refused(self):
         taipei = timezone(timedelta(hours=8))

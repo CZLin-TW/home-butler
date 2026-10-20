@@ -6,9 +6,10 @@ carries household_id.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time as time_of_day, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, TypeDecorator, UniqueConstraint
+from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Table, Text, Time,
+                        TypeDecorator, UniqueConstraint)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -126,3 +127,107 @@ class ConfigSource(Base):
     synced_at: Mapped[datetime] = mapped_column(default=utcnow)
     rows: Mapped[int] = mapped_column(Integer, default=0)
     problems: Mapped[list] = mapped_column(JSON, default=list)
+
+
+# ── To-dos ────────────────────────────────────────────────────────────────────
+
+class LightArea(Base):
+    """A lighting target a to-do can flash when it is due (a Hue room or zone through Home Assistant).
+    Discovered from Home Assistant; `display_name` is what the family calls it."""
+    __tablename__ = "light_areas"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    ha_target: Mapped[str] = mapped_column(String(80), unique=True)
+    resource_type: Mapped[str] = mapped_column(String(32), default="grouped_light")
+    source_name: Mapped[str] = mapped_column(String(80), default="")
+    display_name: Mapped[str] = mapped_column(String(80), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    removed_at: Mapped[datetime | None] = mapped_column()
+
+    @property
+    def name(self) -> str:
+        return self.display_name or self.source_name or self.ha_target
+
+    @property
+    def usable(self) -> bool:
+        return self.enabled and self.removed_at is None and self.resource_type == "grouped_light"
+
+
+todo_light_areas = Table(
+    "todo_light_areas", Base.metadata,
+    Column("todo_id", ForeignKey("todos.id", ondelete="CASCADE"), primary_key=True),
+    Column("light_area_id", ForeignKey("light_areas.id"), primary_key=True),
+)
+
+template_light_areas = Table(
+    "template_light_areas", Base.metadata,
+    Column("template_id", ForeignKey("todo_templates.id", ondelete="CASCADE"), primary_key=True),
+    Column("light_area_id", ForeignKey("light_areas.id"), primary_key=True),
+)
+
+
+class TodoTemplate(Base):
+    """A recurring to-do: the rule only. Exactly one open to-do per active template is kept ("the next
+    one"); completing it lets the next appear."""
+    __tablename__ = "todo_templates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    title: Mapped[str] = mapped_column(String(200))
+    rule: Mapped[str] = mapped_column(String(16))           # see domain/todos/recurrence.py RULES
+    weekdays: Mapped[list] = mapped_column(JSON, default=list)   # ISO weekdays 1 (Mon) .. 7 (Sun)
+    month_day: Mapped[int | None] = mapped_column(Integer)
+    interval_days: Mapped[int | None] = mapped_column(Integer)
+    due_time: Mapped[time_of_day | None] = mapped_column(Time)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    visibility: Mapped[str] = mapped_column(String(8), default="private")
+    light_reminder: Mapped[bool] = mapped_column(Boolean, default=False)
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_generated_on: Mapped[date | None] = mapped_column(Date)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    assignee: Mapped["Member | None"] = relationship(foreign_keys=[assignee_id])
+    light_areas: Mapped[list[LightArea]] = relationship(secondary=template_light_areas)
+
+
+class Todo(Base):
+    """A to-do. Dates and times are the household's wall clock (no zone). Done local to-dos are
+    archived (hidden, kept); done Notion to-dos stay unarchived as the marker that keeps them done."""
+    __tablename__ = "todos"
+    __table_args__ = (
+        UniqueConstraint("assignee_id", "external_id", name="uq_todos_external"),
+        Index("ix_todos_open", "household_id", "status", "archived_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    title: Mapped[str] = mapped_column(String(200))
+    due_date: Mapped[date | None] = mapped_column(Date)
+    due_time: Mapped[time_of_day | None] = mapped_column(Time)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    visibility: Mapped[str] = mapped_column(String(8), default="private")   # private | public
+    status: Mapped[str] = mapped_column(String(8), default="open")          # open | done
+    source: Mapped[str] = mapped_column(String(8), default="local")         # local | notion
+    read_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_id: Mapped[str | None] = mapped_column(String(64))
+    light_reminder: Mapped[bool] = mapped_column(Boolean, default=False)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("todo_templates.id"))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column()
+    archived_at: Mapped[datetime | None] = mapped_column()
+    assignee: Mapped["Member | None"] = relationship(foreign_keys=[assignee_id])
+    light_areas: Mapped[list[LightArea]] = relationship(secondary=todo_light_areas)
+
+
+class ReminderLog(Base):
+    """A reminder already sent, so each stage goes out once per person."""
+    __tablename__ = "reminder_log"
+    __table_args__ = (UniqueConstraint("todo_id", "member_id", "stage", name="uq_reminder_once"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    todo_id: Mapped[int] = mapped_column(ForeignKey("todos.id", ondelete="CASCADE"))
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    stage: Mapped[str] = mapped_column(String(24))
+    title: Mapped[str] = mapped_column(String(200))
+    sent_at: Mapped[datetime] = mapped_column(default=utcnow)
