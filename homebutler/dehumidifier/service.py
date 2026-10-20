@@ -359,3 +359,34 @@ class Dehumidifiers:
         with self.store.transaction() as session:
             row = session.get(Dehumidifier, name)
             return bool(row and row.auto_mode)
+
+
+class ScheduleTarget:
+    """Lets schedules act on a dehumidifier. While its auto mode is on a schedule is refused like any
+    other command."""
+    kind = "dehumidifier"
+
+    def __init__(self, service: Dehumidifiers, default_household: str):
+        self.service, self.default_household = service, default_household
+
+    def check(self, session, name: str, params: dict) -> tuple[int, dict]:
+        from homebutler.domain import households
+        from homebutler.domain.schedules import Invalid
+        if name not in {unit.name for unit in self.service.units()}:
+            raise Invalid(f"找不到除濕機「{name}」")
+        params = params if isinstance(params, dict) else {}
+        power, mode, humidity = params.get("power"), params.get("mode"), params.get("humidity")
+        if power not in (None, "on", "off") or not (power or mode or humidity):
+            raise Invalid("除濕機排程需要電源 on／off，或模式、濕度")
+        if humidity is not None and (type(humidity) is not int or not rules.THRESHOLD_MIN <= humidity <= rules.THRESHOLD_MAX):
+            raise Invalid("除濕機濕度需為 30 至 80 的整數")
+        if mode is not None and not isinstance(mode, str):
+            raise Invalid("除濕機模式無效")
+        clean = {k: v for k, v in (("power", power), ("mode", mode), ("humidity", humidity)) if v is not None}
+        return households.ensure(session, self.default_household).id, clean
+
+    def run(self, name: str, params: dict) -> dict:
+        try:
+            return self.service.control(name, params.get("power"), params.get("mode"), params.get("humidity"))
+        except (Refused, LookupError) as error:
+            return {"status": "failed", "message": f"未送出：{error}"}

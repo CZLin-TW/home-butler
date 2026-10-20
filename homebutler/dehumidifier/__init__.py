@@ -1,9 +1,9 @@
 """Dehumidifiers (Panasonic, LG), kept apart so the whole module can be removed later.
 
 They stay in this service and not in Home Assistant because they are to be retired (docs/refactor-plan.md
-§8). Nothing outside this folder imports it; `install` adds its routes, its 5-minute check and its entry
-in app.state.modules. To remove it: delete this folder and its line in homebutler/modules.py, and add a
-migration that drops its two tables.
+§8). Nothing outside this folder imports it; `install` adds its routes, its 5-minute check, its entry
+in app.state.modules and its schedule target. To remove it: delete this folder and its line in
+homebutler/modules.py, and add a migration that drops its two tables.
 
 Its settings, read here only:
   PANASONIC_ACCOUNT, PANASONIC_PASSWORD   the Panasonic Smart App account
@@ -50,7 +50,9 @@ def build(store, link, settings, env=None, http=None):
 
 def install(app, jobs, env=None, http=None) -> None:
     from homebutler.dehumidifier import routes
+    from homebutler.dehumidifier.service import ScheduleTarget
     service = build(app.state.store, app.state.ha, app.state.settings, env, http)
     app.state.modules["dehumidifier"] = service
+    app.state.schedule_targets["dehumidifier"] = ScheduleTarget(service, app.state.settings.default_household)
     app.include_router(routes.router)
     jobs.add("dehumidifiers", CHECK_SECONDS, service.check)

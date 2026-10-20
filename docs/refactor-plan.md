@@ -72,7 +72,8 @@ Panasonic 除濕機的登入權杖目前直接放在試算表「智能居家」�
 | `todos` | id, household_id, title, due_date, due_time?, assignee_id?, visibility, status, source, read_only, external_id?, light_reminder, light_area_ids, template_id?, created_by, created_at, completed_at?, archived_at? | 取代「待辦事項」與「待辦封存」。封存＝`archived_at` 有值。 |
 | `todo_templates` | id, household_id, title, rule（重複規則）, assignee_id?, light_reminder, light_area_ids, active, next_due | 取代「週期待辦模板」。 |
 | `food_items` | id, household_id, name, quantity, unit, expires_on?, added_on, added_by, status, consumed_at? | 取代「食品庫存」與「食品封存」。 |
-| `schedules` | id, household_id, device_id, action, params, run_at, source, status, created_by, created_at, attempted_at?, result? | 取代「排程指令」與「排程封存」。source：user／user_ha／auto_ha。 |
+| `schedules` | id, household_id, target_kind, target_name, params, due_at, source, cycle_id, status, attempt_id, result, created_by, finished_at, dismissed_at | 取代「排程指令」與「排程封存」（已寫好，第 5 階段）。source：user／auto_off。status：pending → claimed（送出前先記）→ done／failed／unknown，或 expired、cancelled；失敗與未確認留著等人移除，不重送。不再有封存分頁：看不到的就是已結束的。 |
+| `auto_off_cycles` | id, device_id, started_at, hours, closed_at | 空調自動關機的「本輪」（從看到開機到看到關機）。資料庫保證同一台空調同時只有一輪，取代舊系統塞在參數裡的 `_auto_*` 標記；被刪掉的本輪關機因此不會被重建。 |
 | `conversations` | id, member_id, channel, role, content, created_at | 取代「對話暫存」。保留期限由設定決定，管家只讀最近幾則。 |
 | `system_state` | key, value, updated_at | 延用。 |
 

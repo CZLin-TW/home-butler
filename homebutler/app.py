@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from homebutler.api import devices_relay, home_assistant, telemetry
+from homebutler.api import devices_relay, home_assistant, schedules, telemetry
 from homebutler.api.auth import Caller, caller
 from homebutler.domain import households
 from homebutler.integrations.ha.link import Link
@@ -36,6 +36,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+        app.state.loop = asyncio.get_running_loop()
         migrate.upgrade(store.engine, settings.database_schema)
         with store.transaction() as session:
             households.ensure(session, settings.default_household)
@@ -67,10 +69,20 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     app.include_router(home_assistant.router)
     app.include_router(telemetry.router)
     app.include_router(devices_relay.router)
+    app.include_router(schedules.router)
     from homebutler.integrations.switchbot_push import HubRelay
     app.state.hub_relay = HubRelay(link)
+    from homebutler.domain.device_targets import ACTarget, IRTarget
+    from homebutler.integrations.ha.commands import Commands
+    commands = Commands(link, lambda: getattr(app.state, "loop", None))
+    app.state.ha_commands = commands
+    app.state.schedule_targets = {"ac": ACTarget(store, commands), "ir": IRTarget(store, commands)}
     from homebutler import modules
-    modules.install(app, jobs)
+    modules.install(app, jobs)          # may add schedule targets of their own
+    from zoneinfo import ZoneInfo
+    from homebutler.jobs.schedules import Scheduler
+    app.state.scheduler = Scheduler(store, link, app.state.schedule_targets, ZoneInfo(settings.timezone))
+    jobs.add("schedules", 60, app.state.scheduler.run)
 
     @app.get("/v2/health")
     def health():

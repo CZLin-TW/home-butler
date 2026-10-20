@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time as time_of_day, timezone
 
-from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Table, Text, Time,
+from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Table, Text, Time, text,
                         TypeDecorator, UniqueConstraint)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -355,3 +355,47 @@ class ComputerMetric(Base):
     mem_pressure_pct: Mapped[int | None] = mapped_column(Integer)
     mem_pressure_level: Mapped[str | None] = mapped_column(String(10))
     power_w: Mapped[float | None] = mapped_column()
+
+
+# ── Schedules ─────────────────────────────────────────────────────────────────
+
+class AutoOffCycle(Base):
+    """One run of an AC, from the moment it was seen on until it was seen off, for the automatic
+    shutdown. At most one open cycle per AC (the database enforces it), so a restart or a repeated "on"
+    can never arm a second shutdown for the same run, and a shutdown the family deleted stays deleted
+    until the AC has been off."""
+    __tablename__ = "auto_off_cycles"
+    __table_args__ = (Index("uq_auto_off_open", "device_id", unique=True, sqlite_where=text("closed_at IS NULL"),
+                            postgresql_where=text("closed_at IS NULL")),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"))
+    started_at: Mapped[datetime] = mapped_column()
+    hours: Mapped[int] = mapped_column(Integer)                  # as set when the run started
+    closed_at: Mapped[datetime | None] = mapped_column()
+
+
+class Schedule(Base):
+    """A device action at a time. `source` is "user" or "auto_off" (made for an AutoOffCycle).
+
+    status: pending → claimed (marked before sending, so a restart never sends twice) → done | failed |
+    unknown; or expired (more than 2 hours late) or cancelled. Unknown and failed stay visible until a
+    person dismisses them; they are never sent again."""
+    __tablename__ = "schedules"
+    __table_args__ = (Index("ix_schedules_due", "status", "due_at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    target_kind: Mapped[str] = mapped_column(String(16))         # ac | ir | dehumidifier (a module)
+    target_name: Mapped[str] = mapped_column(String(160))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    due_at: Mapped[datetime] = mapped_column()
+    source: Mapped[str] = mapped_column(String(10), default="user")
+    cycle_id: Mapped[int | None] = mapped_column(ForeignKey("auto_off_cycles.id"))
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    attempt_id: Mapped[str | None] = mapped_column(String(32), unique=True)
+    result: Mapped[str] = mapped_column(Text, default="")
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"))
+    created_by: Mapped[str] = mapped_column(String(80), default="")     # who, as shown (a member, a remote, 系統)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column()
+    dismissed_at: Mapped[datetime | None] = mapped_column()
+    cycle: Mapped[AutoOffCycle | None] = relationship()

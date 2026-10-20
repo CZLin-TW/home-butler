@@ -281,6 +281,20 @@ class ServiceTests(StoreTest):
             service.set_rule("除濕一", True)
         self.assertFalse(service.views()[0]["controllable"])
 
+    def test_a_schedule_is_refused_while_auto_mode_is_on(self):
+        from homebutler.dehumidifier.service import ScheduleTarget
+        from homebutler.domain.schedules import Invalid
+        target = ScheduleTarget(self.service, "A")
+        with self.store.transaction() as s:
+            self.assertEqual(target.check(s, "除濕一", {"power": "on", "humidity": 55, "extra": 1})[1], {"power": "on", "humidity": 55})
+            for bad in ({}, {"power": "maybe"}, {"humidity": 90}):
+                with self.assertRaises(Invalid):
+                    target.check(s, "除濕一", bad)
+        self.service.set_rule("除濕一", True, threshold=60)
+        calls = len(self.unit.calls)
+        self.assertEqual(target.run("除濕一", {"power": "on"})["status"], "failed")
+        self.assertEqual(len(self.unit.calls), calls)
+
 
 class RouteTests(StoreTest):
     def setUp(self):
