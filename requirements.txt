@@ -12,4 +12,6 @@ httpx==0.28.1
 websockets==16.0
 # 選用的資料庫副本（history_store.py）；沒設 DATABASE_URL 時不會連線。
 SQLAlchemy==2.0.54
+# The rebuilt service (homebutler/): versioned database structure changes.
+alembic==1.16.5
 psycopg[binary]==3.3.6
