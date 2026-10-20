@@ -16,6 +16,8 @@ class StoreTests(StoreTest):
         with self.store.engine.connect() as connection:
             options = {"version_table_schema": self.schema} if connection.dialect.name == "postgresql" else {}
             differences = compare_metadata(MigrationContext.configure(connection, opts=options), Base.metadata)
+        # Alembic's own bookkeeping table is not part of the model (it lives in our schema on PostgreSQL).
+        differences = [d for d in differences if not (d[0] == "remove_table" and d[1].name == "alembic_version")]
         self.assertEqual(differences, [])
 
     def test_upgrade_is_safe_to_repeat(self):
