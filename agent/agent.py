@@ -1,6 +1,6 @@
 """home-butler PC monitoring agent.
 
-每 60 秒讀本機指標 → POST 到 home-butler /api/computers/heartbeat。
+每 60 秒讀本機指標 → POST 到 home-butler（新版 /v2/telemetry/heartbeat，舊版 /api/computers/heartbeat）。
 
 Setup：
     cp agent_config.example.py agent_config.py
@@ -435,12 +435,16 @@ def push(payload: dict) -> None:
     下次 request 觸發 cold start 約 30-60s 才回。原本 15s timeout 必失敗、整個 tick
     丟掉，連續 2-3 tick 失敗就跨過 server 端 OFFLINE_THRESHOLD（300s）變失聯。
     現在 30s × 3 attempts 期望接得住絕大部分 cold-start 情境。"""
-    url = f"{HOME_BUTLER_URL.rstrip('/')}/api/computers/heartbeat"
-    headers = {"X-API-Key": HOME_BUTLER_API_KEY}
+    base = HOME_BUTLER_URL.rstrip('/')
     last_err: Exception | None = None
     for attempt in range(3):
         try:
-            r = httpx.post(url, json=payload, headers=headers, timeout=30.0)
+            # 重寫後的 HomeButler 先試（Bearer 金鑰）；舊的在那裡回 404，就改送舊端點。
+            r = httpx.post(f"{base}/v2/telemetry/heartbeat", json=payload,
+                           headers={"Authorization": f"Bearer {HOME_BUTLER_API_KEY}"}, timeout=30.0)
+            if r.status_code == 404:
+                r = httpx.post(f"{base}/api/computers/heartbeat", json=payload,
+                               headers={"X-API-Key": HOME_BUTLER_API_KEY}, timeout=30.0)
             if r.status_code >= 300:
                 log.info(f"[push] HTTP {r.status_code}: {r.text[:200]}")
             else:

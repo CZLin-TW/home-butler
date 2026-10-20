@@ -28,25 +28,38 @@ def normalize_url(value):
 
 
 async def validate_connection(session, url, key):
+    """Which backend this is: (path, protocol). The rebuilt one (path /v2, protocol 2, Bearer key) is
+    tried first; the old one (path /api, protocol 1, X-API-Key) still works until it is retired."""
     url = normalize_url(url)
-    try:
-        async with session.get(url + "/api/home-assistant/health", headers={"X-API-Key": key},
-                               timeout=aiohttp.ClientTimeout(total=15), allow_redirects=False) as response:
-            if response.status in (401, 403):
-                raise AuthError("Invalid HomeButler key")
-            if response.status != 200:
-                raise LinkError("HomeButler HA endpoint unavailable")
-            data = await response.json()
-            if not isinstance(data, dict) or data.get("protocol") != PROTOCOL:
-                raise LinkError("Unsupported protocol")
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-        raise LinkError("HomeButler connection failed") from None
+    for path, protocol, headers in (("/v2/home-assistant", 2, {"Authorization": f"Bearer {key}"}),
+                                    ("/api/home-assistant", 1, {"X-API-Key": key})):
+        try:
+            async with session.get(url + path + "/health", headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=15), allow_redirects=False) as response:
+                if response.status == 404:
+                    continue
+                if response.status in (401, 403):
+                    raise AuthError("Invalid HomeButler key")
+                if response.status != 200:
+                    raise LinkError("HomeButler HA endpoint unavailable")
+                data = await response.json()
+                if not isinstance(data, dict) or data.get("protocol") != protocol:
+                    raise LinkError("Unsupported protocol")
+                return path, protocol
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            raise LinkError("HomeButler connection failed") from None
+    raise LinkError("HomeButler HA endpoint unavailable")
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None, automations=None):
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None, automations=None,
+                 path="/api/home-assistant", protocol=PROTOCOL, place=None):
         self.session = session
-        self.url = normalize_url(url).replace("https://", "wss://", 1) + "/api/home-assistant/ws"
+        self.url = normalize_url(url).replace("https://", "wss://", 1) + path + "/ws"
+        # Protocol 2 adds each item's area and floor (place); protocol 1 must not, since that backend
+        # refuses unknown fields.
+        self.protocol = protocol
+        self.place = place if protocol >= 2 else None
         self.key, self.snapshot = key, snapshot
         self.changed = asyncio.Event()
         self.closed = False
@@ -75,6 +88,8 @@ class OutboundLink:
             controller = {"ir_command": self.ir_commands, "climate_command": self.commands,
                           "hue_command": self.hue_commands, "theater_command": self.theater_commands}[frame["type"]]
             response = await controller.execute(frame)
+            if self.place and response.get("type") == "climate_result" and isinstance(response.get("state"), dict):
+                response = {**response, "state": self.place([response["state"]])[0]}
             await ws.send_json(response)
             self.notify()
 
@@ -120,12 +135,13 @@ class OutboundLink:
                 self.changed.clear()
                 await asyncio.sleep(0.2)
                 sequence += 1
-                frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot(),
-                         "climates": self.climates() if self.climates else []}
+                place = self.place or (lambda items: items)
+                frame = {"type": "snapshot", "sequence": sequence, "observations": place(self.snapshot()),
+                         "climates": place(self.climates()) if self.climates else []}
                 if self.environment:
-                    frame["environment"] = self.environment()
+                    frame["environment"] = place(self.environment())
                 if self.ir_buttons:
-                    frame["ir_buttons"] = self.ir_buttons()
+                    frame["ir_buttons"] = place(self.ir_buttons())
                 if self._hub_enabled:
                     frame["hub_devices"] = self.hub_devices()
                 if self._automations_enabled:
@@ -159,11 +175,11 @@ class OutboundLink:
             try:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
-                    await ws.send_json({"type": "hello", "protocol": PROTOCOL, "token": self.key,
+                    await ws.send_json({"type": "hello", "protocol": self.protocol, "token": self.key,
                                         "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None, "hue_control": self.hue_commands is not None,
                                         "theater_relay": self.theater_commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
-                    if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != PROTOCOL:
+                    if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != self.protocol:
                         raise LinkError("Invalid handshake")
                     self._hub_enabled = self.hub_updates is not None and "hub_updates" in hello.get("capabilities", [])
                     self._automations_enabled = self.automations is not None and "automation_log" in hello.get("capabilities", [])
@@ -197,7 +213,7 @@ class OutboundLink:
                         self.changed.clear()
                         await asyncio.sleep(0.2)  # coalesce zone transitions
                         sequence += 1
-                        frame = {"type": "snapshot", "sequence": sequence, "observations": self.snapshot()}
+                        frame = {"type": "snapshot", "sequence": sequence, "observations": (self.place or (lambda i: i))(self.snapshot())}
                         if self._automations_enabled:
                             frame["automations"] = self.automations()
                         if len(json.dumps(frame).encode("utf-8")) > 131072:

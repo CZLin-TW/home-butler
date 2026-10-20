@@ -14,13 +14,14 @@ from . import hub_updates, environment
 from .hue import HueCommands
 from .theater import LocalTheaterRelay, TheaterRelay
 from .automations import AutomationLog
+from .placement import placer
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
 async def async_setup_entry(hass, entry):
     session = async_get_clientsession(hass)
     try:
-        await validate_connection(session, entry.data[CONF_URL], entry.data[CONF_KEY])
+        path, protocol = await validate_connection(session, entry.data[CONF_URL], entry.data[CONF_KEY])
     except AuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from None
     except LinkError as err:
@@ -50,7 +51,8 @@ async def async_setup_entry(hass, entry):
                         theater_commands=theater,
                         hub_devices=lambda: hub_updates.devices(hass),
                         hub_updates=lambda frame: hub_updates.receive(hass, frame),
-                        automations=automation_log.snapshot if automation_log else None)
+                        automations=automation_log.snapshot if automation_log else None,
+                        path=path, protocol=protocol, place=placer(hass))
 
     @callback
     def changed(event):

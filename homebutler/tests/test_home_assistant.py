@@ -133,6 +133,11 @@ class WebSocketTests(StoreTest):
     def hello(self, ws, key, protocol=2):
         ws.send_json({"type": "hello", "protocol": protocol, "token": key, "climate_control": True})
 
+    def test_health_says_the_protocol_to_the_ha_key_only(self):
+        self.assertEqual(self.client.get("/v2/home-assistant/health", headers={"Authorization": "Bearer " + self.key}).json(), {"protocol": 2})
+        self.assertEqual(self.client.get("/v2/home-assistant/health", headers={"Authorization": "Bearer " + self.dashboard}).status_code, 401)
+        self.assertEqual(self.client.get("/v2/home-assistant/health").status_code, 401)
+
     def test_a_valid_key_connects_and_snapshots_are_acknowledged(self):
         with self.client.websocket_connect("/v2/home-assistant/ws") as ws:
             self.hello(ws, self.key, protocol=1)

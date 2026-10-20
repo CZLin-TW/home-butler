@@ -152,3 +152,76 @@ async def test_environment_and_hue_work_without_climate_permissions():
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_protocol_2_adds_place_to_every_item_and_to_climate_results():
+    from unittest.mock import AsyncMock
+    from custom_components.home_butler.transport import LinkError
+    incoming, sent = asyncio.Queue(), asyncio.Queue()
+
+    class Socket:
+        async def send_json(self, frame):
+            await sent.put(frame)
+
+        async def receive_json(self):
+            frame = await incoming.get()
+            if isinstance(frame, Exception):
+                raise frame
+            return frame
+    commands = AsyncMock()
+    commands.execute.return_value = {"type": "climate_result", "status": "success", "state": {"entity_id": "climate.ac"}}
+    place = lambda items: [{**i, "area": "客廳", "floor_id": "a"} for i in items]
+    link = OutboundLink(None, "https://example.invalid", "x" * 40, lambda: [{"entity_id": "binary_sensor.x"}],
+                        lambda: [{"entity_id": "climate.ac"}], commands, environment=lambda: [{"entity_id": "sensor.t"}],
+                        path="/v2/home-assistant", protocol=2, place=place)
+    assert link.url == "wss://example.invalid/v2/home-assistant/ws"
+    task = asyncio.create_task(link._serve_climates(Socket()))
+    try:
+        first = await asyncio.wait_for(sent.get(), 2)
+        for key in ("observations", "climates", "environment"):
+            assert first[key][0]["floor_id"] == "a", key
+        await incoming.put({"type": "snapshot_ack", "sequence": 1, "accepted": True})
+        await incoming.put({"type": "climate_command", "request_id": "a" * 32})
+        result = await asyncio.wait_for(sent.get(), 2)
+        assert result["state"] == {"entity_id": "climate.ac", "area": "客廳", "floor_id": "a"}
+        await incoming.put(LinkError("Disconnected"))
+        with pytest.raises(LinkError):
+            await asyncio.wait_for(task, 2)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    old = OutboundLink(None, "https://example.invalid", "x" * 40, lambda: [], place=place)
+    assert old.place is None and old.url.endswith("/api/home-assistant/ws")      # protocol 1 never gets extra fields
+
+
+async def test_the_rebuilt_backend_is_tried_first_and_the_old_one_still_works():
+    from custom_components.home_butler.transport import AuthError, validate_connection
+    seen = []
+
+    class Response:
+        def __init__(self, status, body):
+            self.status, self.body = status, body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def json(self):
+            return self.body
+
+    def session(answers):
+        class Session:
+            def get(self, url, headers, **kwargs):
+                seen.append((url, headers))
+                return Response(*answers[url.split("example.invalid")[1]])
+        return Session()
+    new = session({"/v2/home-assistant/health": (200, {"protocol": 2})})
+    assert await validate_connection(new, "https://example.invalid", "k") == ("/v2/home-assistant", 2)
+    assert seen[-1][1] == {"Authorization": "Bearer k"}
+    old = session({"/v2/home-assistant/health": (404, {}), "/api/home-assistant/health": (200, {"protocol": 1})})
+    assert await validate_connection(old, "https://example.invalid", "k") == ("/api/home-assistant", 1)
+    assert seen[-1][1] == {"X-API-Key": "k"}
+    with pytest.raises(AuthError):
+        await validate_connection(session({"/v2/home-assistant/health": (401, {})}), "https://example.invalid", "k")

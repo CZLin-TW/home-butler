@@ -93,7 +93,7 @@ async def test_sharing_is_off_until_chosen_and_then_follows_triggers(hass, enabl
         entry = MockConfigEntry(domain=DOMAIN, data={"url": "https://example.invalid", "api_key": "x" * 40, "sources": []},
                                 options={"automation_log": chosen} if chosen else {})
         entry.add_to_hass(hass)
-        with (patch("custom_components.home_butler.validate_connection", new=AsyncMock()),
+        with (patch("custom_components.home_butler.validate_connection", new=AsyncMock(return_value=("/api/home-assistant", 1))),
               patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock())):
             assert await async_setup_entry(hass, entry)
             link = hass.data[DOMAIN][entry.entry_id][0]

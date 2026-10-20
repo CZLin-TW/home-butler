@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from homebutler.api.auth import Caller, caller
 from homebutler.domain import tokens
 from homebutler.integrations.ha.messages import (CAPABILITIES, MAX_BYTES, PROTOCOLS, ClimateResult, HueResult, IRResult,
                                                  Snapshot, TheaterResult)
@@ -39,6 +40,12 @@ def _key_ok(store, token) -> bool:
         return False
     with store.transaction() as session:
         return tokens.verify(session, token, "home_assistant") is not None
+
+
+@router.get("/v2/home-assistant/health")
+def health(_: Caller = Depends(caller("home_assistant"))):
+    """What the integration checks before connecting: the key works, and which protocol to speak."""
+    return {"protocol": 2}
 
 
 @router.websocket("/v2/home-assistant/ws")

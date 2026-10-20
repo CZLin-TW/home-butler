@@ -74,7 +74,7 @@ async def test_config_flow_setup_options_and_unload(hass):
     # Exercise the real setup/unload lifecycle separately from flow auto-setup.
     from custom_components.home_butler import async_setup_entry, async_unload_entry
     with (
-        patch("custom_components.home_butler.validate_connection", new=AsyncMock()),
+        patch("custom_components.home_butler.validate_connection", new=AsyncMock(return_value=("/api/home-assistant", 1))),
         patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock()),
     ):
         assert await async_setup_entry(hass, entry)

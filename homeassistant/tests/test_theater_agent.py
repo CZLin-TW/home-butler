@@ -336,7 +336,7 @@ async def test_local_offline_does_not_disable_home_butler(hass):
     hb.add_to_hass(hass)
     client = Mock(async_summary=AsyncMock(side_effect=TheaterError("Offline")))
     with (patch("custom_components.theater_agent.TheaterClient", return_value=client),
-          patch("custom_components.home_butler.validate_connection", new=AsyncMock()),
+          patch("custom_components.home_butler.validate_connection", new=AsyncMock(return_value=("/api/home-assistant", 1))),
           patch("custom_components.home_butler.OutboundLink.run", new=AsyncMock()),
           patch("custom_components.home_butler.TheaterRelay", side_effect=AssertionError("No fallback"))):
         assert not await hass.config_entries.async_setup(local.entry_id)

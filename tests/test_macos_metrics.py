@@ -121,7 +121,7 @@ class MetricsTests(unittest.TestCase):
         try:
             url = f'http://127.0.0.1:{server.server_port}'
             metrics.send({'gpu_pct': None}, url, '')
-            self.assertEqual(seen, [('/api/computers/heartbeat', None, {'gpu_pct': None})])
+            self.assertEqual(seen, [('/v2/telemetry/heartbeat', None, {'gpu_pct': None})])  # the rebuilt backend is tried first
             Handler.redirect = True
             with self.assertRaises(metrics.urllib.error.HTTPError):
                 metrics.send({}, url, '')

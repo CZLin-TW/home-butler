@@ -173,16 +173,23 @@ def send(payload, base_url, key):
         raise ValueError("HOME_BUTLER_API_KEY required for remote send")
     if local and key:
         raise ValueError("Do not send a real API key to the local test receiver")
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["X-API-Key"] = key
-    request = urllib.request.Request(
-        url, data=json.dumps(payload, allow_nan=False).encode(), headers=headers, method="POST",
-    )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    with opener.open(request, timeout=15) as response:
-        if response.status != 200 or json.loads(response.read(4096)) != {"ok": True}:
-            raise RuntimeError("Heartbeat acknowledgement invalid")
+    body = json.dumps(payload, allow_nan=False).encode()
+    # The rebuilt HomeButler first (Bearer key); the old one answers 404 there and is used until retired.
+    for target, auth in ((url.replace("/api/computers/heartbeat", "/v2/telemetry/heartbeat"), "Authorization"), (url, "X-API-Key")):
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers[auth] = "Bearer " + key if auth == "Authorization" else key
+        request = urllib.request.Request(target, data=body, headers=headers, method="POST")
+        try:
+            with opener.open(request, timeout=15) as response:
+                if response.status != 200 or json.loads(response.read(4096)) != {"ok": True}:
+                    raise RuntimeError("Heartbeat acknowledgement invalid")
+                return
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+    raise RuntimeError("No heartbeat endpoint")
 
 
 def main(argv=None):

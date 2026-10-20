@@ -6,7 +6,9 @@ let label = Deployment.label
 let service = Deployment.service
 let account = Deployment.account
 let origin = Deployment.origin
-let endpoint = URL(string: origin + "/api/computers/heartbeat")!
+// The rebuilt HomeButler first; the old one answers 404 there and is used until it is retired.
+let endpoints = [URL(string: origin + "/v2/telemetry/heartbeat")!, URL(string: origin + "/api/computers/heartbeat")!]
+let endpoint = endpoints[1]
 let fm = FileManager.default
 let home = URL(fileURLWithPath: Deployment.home)
 let install = URL(fileURLWithPath: Deployment.install)
@@ -175,16 +177,17 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
     }
 }
 
-func request(body: Data, key: Data) throws -> URLRequest {
+func request(body: Data, key: Data, to url: URL = endpoint) throws -> URLRequest {
     guard let value = String(data: key, encoding: .utf8), !value.isEmpty,
           value == value.trimmingCharacters(in: .whitespacesAndNewlines),
           !value.contains("\r"), !value.contains("\n") else { throw Failure.input }
-    var r = URLRequest(url: endpoint)
+    var r = URLRequest(url: url)
     r.httpMethod = "POST"
     r.httpBody = body
     r.timeoutInterval = 15
     r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    r.setValue(value, forHTTPHeaderField: "X-API-Key")
+    if url == endpoints[0] { r.setValue("Bearer " + value, forHTTPHeaderField: "Authorization") }
+    else { r.setValue(value, forHTTPHeaderField: "X-API-Key") }
     return r
 }
 
@@ -205,17 +208,23 @@ func transmit(_ body: Data, _ key: Data) throws {
     config.timeoutIntervalForResource = 20
     let session = URLSession(configuration: config, delegate: NoRedirect(), delegateQueue: nil)
     defer { session.invalidateAndCancel() }
-    let done = DispatchSemaphore(value: 0)
-    var accepted = false
-    let task = session.dataTask(with: try request(body: body, key: key)) { data, response, error in
-        if error == nil, let response = response as? HTTPURLResponse, let data {
-            accepted = acknowledged(response.statusCode, data)
+    for url in endpoints {
+        let done = DispatchSemaphore(value: 0)
+        var accepted = false
+        var missing = false
+        let task = session.dataTask(with: try request(body: body, key: key, to: url)) { data, response, error in
+            if error == nil, let response = response as? HTTPURLResponse, let data {
+                accepted = acknowledged(response.statusCode, data)
+                missing = response.statusCode == 404
+            }
+            done.signal()
         }
-        done.signal()
+        task.resume()
+        guard done.wait(timeout: .now() + 22) == .success else { task.cancel(); throw Failure.acknowledgement }
+        if accepted { return }
+        if !missing { throw Failure.acknowledgement }   // only "no such endpoint" moves on to the old one
     }
-    task.resume()
-    guard done.wait(timeout: .now() + 22) == .success else { task.cancel(); throw Failure.acknowledgement }
-    guard accepted else { throw Failure.acknowledgement }
+    throw Failure.acknowledgement
 }
 
 func heartbeat(sample: () throws -> Data, credential: () throws -> Data,
@@ -469,6 +478,8 @@ func selfTests() throws {
     } catch { assert(events.isEmpty) }
     let req = try request(body: parsed, key: Data("FAKE".utf8))
     assert(req.url == endpoint && req.httpMethod == "POST" && req.value(forHTTPHeaderField: "X-API-Key") == "FAKE")
+    let v2 = try request(body: Data("{}".utf8), key: Data("FAKE".utf8), to: endpoints[0])
+    assert(v2.url == endpoints[0] && v2.value(forHTTPHeaderField: "Authorization") == "Bearer FAKE" && v2.value(forHTTPHeaderField: "X-API-Key") == nil)
     assert(acknowledged(200, Data("{\"ok\":true}".utf8)))
     for (code, value) in [(302,"{\"ok\":true}"),(500,"{\"ok\":true}"),(200,"{\"ok\":1}"),(200,"{\"ok\":false}")] { assert(!acknowledged(code, Data(value.utf8))) }
     for text in ["FAKE-ascii-0123", "FAKE-UTF8-測試-κ"] {
