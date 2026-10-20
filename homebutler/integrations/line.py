@@ -55,3 +55,14 @@ class Line:
             return str(response.json().get("pictureUrl") or "") if response.status_code == 200 else ""
         except Exception:
             return ""
+
+    def quota_left(self) -> tuple[int, int] | None:
+        """(left, total) pushes this month, or None if LINE did not say."""
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            quota = self.http.get(f"{API}/message/quota", headers=headers, timeout=10).json()
+            used = self.http.get(f"{API}/message/quota/consumption", headers=headers, timeout=10).json()["totalUsage"]
+            total = int(quota.get("value", 200))
+            return total - int(used), total
+        except Exception:
+            return None

@@ -33,6 +33,9 @@ class Commands:
     def ir(self, ha_id: str) -> dict:
         return self._run(lambda: self.link.ir_command(ha_id))
 
+    def theater(self, action: str, payload: dict | None = None) -> dict:
+        return self._run(lambda: self.link.theater_command(action, payload or {}))
+
     def breathe(self, target: str) -> None:
         """The Lights port: raises unless HA confirmed it."""
         result = self._run(lambda: self.link.hue_command("hue.breathe", {"resource_id": target, "resource_type": "grouped_light"}))

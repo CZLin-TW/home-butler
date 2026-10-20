@@ -62,6 +62,11 @@ class Settings:
     # Where the Dashboard runs: the system's version number is read from it (the butler can tell it).
     dashboard_url: str = ""
     weather_api_key: str = field(default="", repr=False)      # 中央氣象署 open data
+    daily_push_hour: int = 21
+    offline_alert_seconds: int = 900
+    # The Drive folder (shared with the service account) holding homebutler-backup.json.gz. Unset: no
+    # backups, which is what a trial copy must do so it never overwrites the real one.
+    backup_folder: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -86,6 +91,9 @@ class Settings:
             assistant_model=_text(env, "ASSISTANT_MODEL", cls.assistant_model),
             dashboard_url=_text(env, "DASHBOARD_URL").rstrip("/"),
             weather_api_key=_text(env, "CWA_API_KEY"),
+            daily_push_hour=_int(env, "DAILY_PUSH_HOUR", cls.daily_push_hour, 0, 23),
+            offline_alert_seconds=_int(env, "AGENT_OFFLINE_ALERT_SECONDS", cls.offline_alert_seconds, 300, 86400),
+            backup_folder=_text(env, "BACKUP_FOLDER"),
         )
         if settings.switchbot_register_webhook and not (settings.switchbot_token and settings.switchbot_secret
                                                          and settings.public_base_url.startswith("https://")):
@@ -96,6 +104,8 @@ class Settings:
             raise SettingsError("LINE_CHANNEL_SECRET and LINE_CHANNEL_ACCESS_TOKEN go together")
         if settings.line_channel_secret and not settings.anthropic_api_key:
             raise SettingsError("The LINE butler needs ANTHROPIC_API_KEY")
+        if settings.backup_folder and not settings.google_credentials:
+            raise SettingsError("BACKUP_FOLDER needs GOOGLE_CREDENTIALS")
         if bool(settings.spreadsheet_id) != bool(settings.google_credentials):
             raise SettingsError("SPREADSHEET_ID and GOOGLE_CREDENTIALS go together")
         if not settings.database_schema.isidentifier() or settings.database_schema.lower() == "public":
