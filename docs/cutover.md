@@ -53,7 +53,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## 切換當晚（約 30 分鐘）
 
-1. **推 HomeButler 的 `main`**（v2 合併）。Render 等 CI 通過後部署；新服務啟動時建立新資料表、登記金鑰、搬資料。
+1. **推 HomeButler 的 `main`**（v2 合併）。Render 等 CI 通過後部署（CI 結束後要再等幾分鐘才開始，不必手動部署）；新服務啟動時建立新資料表、登記金鑰、搬資料。
    - 確認：`/` 回 ok；Render Logs 有 `migration: read ... written ...`，對照試跑時的筆數。
    - 確認：LINE 傳一句話給管家有回應；傳「查看風格」看得到原本的設定。
    - HA 用舊版整合會在一分鐘內自動連上（Render Logs 或 Dashboard 的 HA 狀態）。
@@ -61,8 +61,11 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
    - 確認：首頁、裝置頁、待辦、庫存、照明都正常；裝置頁每張卡有「幾秒前更新」。
    - 遙控器平板要重新用密碼登入一次（舊的 session 沒有遙控器編號）。
 3. **Windows PC**（推完後盡快做：它現在和 Mac mini 用同一把鑰匙，換之前兩台的回報會記在同一台電腦底下）：把 Windows 監控金鑰貼進那台的 `agent_config.py` 的 `HOME_BUTLER_API_KEY`，重啟代理程式（已不用就跳過）。
+   代理程式自己重啟過的話，`schtasks /end` 關不掉它（新的實例碰到單一實例鎖會自己退出，舊的繼續用舊鑰匙）；
+   要用系統管理員 PowerShell 關掉跑 `agent.py` 的 python 再 `schtasks /run /tn ButlerAgent`。
+   之後它記錄裡每 10 秒一行 `[ws] … HTTP 403` 是舊的 Hue 備援連線，新系統沒有，可以忽略。
 4. **HA 整合升到 1.9.0**（可以隔天做）：照 `homeassistant/README.md` 安裝並重啟 HA，確認 HA 真的起來了。
-5. **Render**：移除 `MIGRATE_FROM_OLD`；把 `HOME_BUTLER_API_KEY` 換成新的一串亂碼（舊的 Siri 捷徑從此失效；Mac mini 的舊鑰匙仍在 `TELEMETRY_KEY_MAC_MINI` 裡，不受影響）。
+5. **Render**：移除 `MIGRATE_FROM_OLD`（留著也只搬一次）。`HOME_BUTLER_API_KEY` 新系統不讀，舊 Siri 捷徑的網址也已不存在；它是退回舊系統時要用的，留到兩週後收尾再刪。
 
 ## 退回
 
@@ -70,6 +73,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 代價：切換後在新系統裡新增或修改的資料不會回到舊系統。HA 整合 1.9.0 也能連舊系統，不必降級。
 
 ## 切換後兩週內的收尾
+
+- 刪掉 Render 的 `HOME_BUTLER_API_KEY`、`MIGRATE_FROM_OLD`（過了退回期限）。
 
 - 確認每日備份有寫入雲端硬碟。
 - 刪掉試算表裡不再使用的分頁（只留家庭成員、遙控器、智能居家）。
