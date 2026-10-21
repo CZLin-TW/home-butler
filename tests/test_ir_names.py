@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 from command_result import CommandResult
 from device_name_resolution import resolve_ir_device
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 def device(name="主臥電扇", device_id="bedroom", **fields):

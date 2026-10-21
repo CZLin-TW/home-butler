@@ -10,7 +10,7 @@ import test_home_assistant as base
 import ha_ir
 from command_result import CommandResult
 from device_name_resolution import resolve_ir_device
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 B = {"id": "d" * 32, "entity_id": "button.fan_up", "name": "主臥電扇", "button": "風速+", "available": True}
 

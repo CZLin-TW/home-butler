@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 import test_voice_reply
 from request_timing import request_timing, timing_stage, timed_model_call
 

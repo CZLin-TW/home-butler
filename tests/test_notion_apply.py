@@ -4,7 +4,7 @@ from threading import Lock
 from types import SimpleNamespace
 import unittest
 
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 from test_notion_reconcile import row, values
 from notion_reconcile import plan_changes
 from todo_coordination import todo_write_lock

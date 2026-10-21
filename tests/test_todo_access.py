@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from todo_access import actor_from_members, visible, select_todo, todo_selection_message
 from todo_coordination import todo_write, todo_write_lock
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 class TodoAccessTests(unittest.TestCase):

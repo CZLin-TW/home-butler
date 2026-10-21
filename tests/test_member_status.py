@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import unittest
 
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 from todo_access import actor_from_members
 
 

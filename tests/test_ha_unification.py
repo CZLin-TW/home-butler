@@ -9,7 +9,7 @@ import test_home_assistant as link_tests
 import test_sensor_polling as polling_tests
 from test_home_assistant import HA
 from test_sensor_polling import SENSOR
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 class UnifiedSensorTests(unittest.TestCase):

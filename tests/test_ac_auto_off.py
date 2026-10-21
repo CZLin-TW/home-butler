@@ -8,7 +8,7 @@ import ac_auto_off as auto
 from schedule_execution import execute_pending, HA_MANUAL_SOURCE
 from command_result import CommandResult
 from test_schedule_execution import Sheet, Context, schedule, ensure_columns, update_fields
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 class AutoOffTests(unittest.TestCase):

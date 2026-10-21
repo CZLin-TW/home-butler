@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from schedule_execution import HA_MANUAL_SOURCE, ATTENTION_STATES, ATTEMPT_COLUMN
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 from test_schedule_execution import Sheet, Context, schedule, update_fields
 
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, ValidationError, model_validator
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 tree = ast.parse(Path("lighting_api.py").read_text(encoding="utf-8"))
 node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HueAreaStateRequest")

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock
 
 from request_timing import timing_stage, timed_model_call
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 class VoiceHistoryTests(unittest.TestCase):

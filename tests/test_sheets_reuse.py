@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 def a1(row, col):

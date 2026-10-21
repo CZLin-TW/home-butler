@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from test_homebridge import load
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 SENSOR = {"名稱": "室溫", "Device ID": "sensor", "類型": "感應器", "狀態": "啟用", "位置": "客廳",
           "溫度補償": -1, "濕度補償": -2}

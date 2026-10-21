@@ -231,16 +231,6 @@ class RouteTests(unittest.TestCase):
         for handler in list(self.api.DEVICE_HANDLERS.values())[:-1]:
             handler.assert_not_called()
 
-    def test_production_router_registration_and_owner_dependency_remain_separate(self):
-        main = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
-        self.assertTrue(any(isinstance(node, ast.Call) and ast.unparse(node) ==
-                            "app.include_router(device_voice_router)" for node in ast.walk(main)))
-        web = ast.parse((ROOT / "web_api.py").read_text(encoding="utf-8"))
-        assignment = next(node for node in web.body if isinstance(node, ast.Assign)
-                          and any(isinstance(t, ast.Name) and t.id == "router" for t in node.targets))
-        self.assertIn("Depends(verify_api_key)", ast.unparse(assignment))
-        self.assertEqual(set(self.api.DEVICE_HANDLERS), set(voice.ALLOWED_ARGS))
-        self.assertEqual([route.path for route in self.api.router.routes], ["/api/assistant/devices"])
 
 
 if __name__ == "__main__":

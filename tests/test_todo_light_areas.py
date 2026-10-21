@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from pydantic import BaseModel, Field
 from todo_light_areas import decode_area_ids, encode_area_ids, normalize_area_ids
 from todo_access import select_todo, visible
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 ROOT = Path(__file__).resolve().parents[1]
 AREAS = {"living": {"Hue 名稱": "客廳"}, "bedroom": {"Hue 名稱": "主臥"}}

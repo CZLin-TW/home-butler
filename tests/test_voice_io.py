@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from request_timing import request_timing, timing_stage
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 from test_request_timing import records
 
 

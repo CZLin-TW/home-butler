@@ -188,7 +188,7 @@ class HaClimateTests(unittest.TestCase):
         """The production dispatch, loaded without importing the LINE stack."""
         from threading import RLock
         from command_result import CommandResult
-        from test_callback_concurrency import endpoint
+        from endpoint_helper import endpoint
         env = {"CommandResult": CommandResult, "CONTROL_LOCK": RLock(),
                "get_device_id_by_name": lambda name, ctx: "ir-id",
                "get_all_devices_by_type": lambda *a: [],

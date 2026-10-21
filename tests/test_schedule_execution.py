@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from command_result import CommandResult
 from schedule_execution import execute_pending, ATTENTION_STATES, VISIBLE_STATES, ATTEMPT_COLUMN, RESULT_COLUMN, HA_MANUAL_SOURCE
-from test_callback_concurrency import endpoint
+from endpoint_helper import endpoint
 
 
 def schedule(**changes):

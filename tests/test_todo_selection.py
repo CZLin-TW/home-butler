@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from test_callback_concurrency import endpoint, ROOT
+from endpoint_helper import endpoint, ROOT
 from test_notion_reconcile import row, values
 from notion_reconcile import plan_changes
 from todo_access import select_todo, todo_selection_message, visible

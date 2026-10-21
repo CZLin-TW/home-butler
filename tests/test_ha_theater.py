@@ -105,7 +105,7 @@ class HaTheaterTests(unittest.TestCase):
     def route(self):
         """Load the dispatch functions without the LINE stack config would pull."""
         from fastapi import HTTPException
-        from test_callback_concurrency import endpoint
+        from endpoint_helper import endpoint
         env = {"HTTPException": HTTPException,
                "_agent_error": lambda code, err: HTTPException(status_code=code, detail=str(err)),
                "send_agent_command": self.agent_command}

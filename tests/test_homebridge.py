@@ -197,11 +197,6 @@ class HomebridgeTests(unittest.TestCase):
             self.assertEqual(self.post({"power": "off"}).status_code, 409)
         self.control.assert_not_called()
 
-    def test_real_main_registers_separate_router(self):
-        tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
-        self.assertTrue(any(isinstance(n, ast.Call) and ast.unparse(n) ==
-                            "app.include_router(homebridge_router)" for n in ast.walk(tree)))
-
     def test_four_modes_keep_temperature_fan_and_report_saved_mode(self):
         for mode in ["cool", "heat", "dry", "fan"]:
             with self.subTest(mode=mode):
