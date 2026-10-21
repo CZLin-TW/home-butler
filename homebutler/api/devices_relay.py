@@ -14,6 +14,7 @@ MAX_WEBHOOK_BYTES = 16384
 
 
 @router.post("/v2/switchbot/webhook")
+@router.post("/switchbot/webhook")     # the address SwitchBot already has; kept so a switch back needs no re-registration
 async def switchbot_webhook(request: Request):
     """Unsigned by SwitchBot, so it carries no authority: at most one bounded re-read of a hub HA chose.
     Always answers the same way, telling a caller nothing."""

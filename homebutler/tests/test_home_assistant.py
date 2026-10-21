@@ -138,6 +138,14 @@ class WebSocketTests(StoreTest):
         self.assertEqual(self.client.get("/v2/home-assistant/health", headers={"Authorization": "Bearer " + self.dashboard}).status_code, 401)
         self.assertEqual(self.client.get("/v2/home-assistant/health").status_code, 401)
 
+    def test_the_old_integration_finds_its_addresses(self):
+        self.assertEqual(self.client.get("/api/home-assistant/health", headers={"X-API-Key": self.key}).json(), {"protocol": 1})
+        self.assertEqual(self.client.get("/api/home-assistant/health", headers={"X-API-Key": self.dashboard}).status_code, 401)
+        with self.client.websocket_connect("/api/home-assistant/ws") as ws:
+            self.hello(ws, self.key, protocol=1)
+            ack = ws.receive_json()
+            self.assertEqual((ack["type"], ack["protocol"]), ("hello_ack", 1))
+
     def test_a_valid_key_connects_and_snapshots_are_acknowledged(self):
         with self.client.websocket_connect("/v2/home-assistant/ws") as ws:
             self.hello(ws, self.key, protocol=1)

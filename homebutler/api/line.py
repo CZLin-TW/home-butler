@@ -17,6 +17,7 @@ MAX_BODY = 1_000_000
 
 
 @router.post("/v2/line/webhook")
+@router.post("/callback")          # the address set in the LINE console since the old system; kept so no setting changes
 async def webhook(request: Request):
     bot = getattr(request.app.state, "line_bot", None)
     body = await request.body()

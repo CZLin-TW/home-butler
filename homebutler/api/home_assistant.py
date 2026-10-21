@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from homebutler.api.auth import Caller, caller
@@ -48,7 +48,17 @@ def health(_: Caller = Depends(caller("home_assistant"))):
     return {"protocol": 2}
 
 
+@router.get("/api/home-assistant/health")
+def health_for_the_old_integration(request: Request, x_api_key: str = Header(default="")):
+    """The integration HA has now (1.8.0) asks here, with its key in X-API-Key, and speaks protocol 1.
+    Answering it means HA need not be upgraded at the moment of the switch, nor downgraded to switch back."""
+    if not _key_ok(request.app.state.store, x_api_key):
+        raise HTTPException(401, "需要有效的金鑰")
+    return {"protocol": 1}
+
+
 @router.websocket("/v2/home-assistant/ws")
+@router.websocket("/api/home-assistant/ws")
 async def home_assistant(websocket: WebSocket):
     store, link = websocket.app.state.store, websocket.app.state.ha
     await websocket.accept()

@@ -103,3 +103,16 @@ class JobTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OldAddressTests(StoreTest):
+    def test_the_addresses_outside_services_already_have_still_answer(self):
+        from fastapi.testclient import TestClient
+        from homebutler.app import create_app
+        from homebutler.settings import Settings
+        app = create_app(Settings(database_schema=self.schema), store=self.store, start_jobs=False)
+        with TestClient(app) as client:
+            self.assertEqual(client.get("/").json(), {"ok": True})                 # UptimeRobot
+            self.assertEqual(client.head("/").status_code, 200)
+            self.assertEqual(client.post("/switchbot/webhook", content=b"{}").json(), {"ok": True})
+            self.assertEqual(client.post("/callback", content=b"{}").status_code, 400)   # LINE: refused without a signature

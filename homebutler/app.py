@@ -173,6 +173,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
                                                     settings.daily_push_hour).run)
     _background_jobs(app, jobs, settings, store, link, commands, zone)
 
+    @app.api_route("/", methods=["GET", "HEAD"])
     @app.get("/v2/health")
     def health():
         """For uptime checks: says nothing about the household."""
