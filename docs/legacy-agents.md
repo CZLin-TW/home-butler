@@ -503,10 +503,7 @@ Build Filters **只存在 Render 後台**，`render.yaml` 沒有對應設定（�
 
 ## 各台差異
 
-| Hostname | IP | Python | Windows user | 額外 capability |
-|---|---|---|---|---|
-| `A7600X_N4070Ti` | 192.168.68.53 | `C:\Python313\python.exe` | `chuan` | — |
-| `XEON-1230V2` | 192.168.68.55 | `C:\Program Files\Python314\python.exe` | `User1` | —（`theater` 已於 2026-10-02 移到 Mac mini，這台只剩 PC 指標） |
+原本這裡是一張列出兩台 Windows 電腦的機器名稱、區域網路位址與帳號的表；因為是公開 repo 已移除。兩台各自用自己的 Python 路徑，`theater` 已於 2026-10-02 移到 Mac mini。
 
 bat 範本（python 路徑要對應該台，不要兩台共用同一個 bat）：
 ```bat
