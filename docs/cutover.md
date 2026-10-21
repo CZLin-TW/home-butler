@@ -33,7 +33,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 | `DASHBOARD_API_KEY` | Dashboard 金鑰 |
 | `DASHBOARD_ASSERTION_KEY` | Dashboard 簽章金鑰 |
 | `ADMIN_API_KEY` | 管理用金鑰 |
-| `TELEMETRY_KEYS` | `{"Mac mini": "<現在的 HOME_BUTLER_API_KEY 的值>", "PC": "<Windows 監控金鑰>"}`（Mac mini 沿用舊鑰匙，只剩監控用途） |
+| `TELEMETRY_KEY_MAC_MINI` | 現在 `HOME_BUTLER_API_KEY` 的值（Mac mini 沿用舊鑰匙，只剩監控用途） |
+| `TELEMETRY_KEY_PC` | Windows 監控金鑰 |
 | `PANASONIC_DEVICE_AUTH` | 用 Mac mini 上的 `panasonic-auth.sh` 放進剪貼簿再貼上 |
 | `DEFAULT_LIGHT_AREA` | 待辦燈光提醒預設的區域名稱（舊系統寫死的那個） |
 | `BACKUP_FOLDER` | 備份資料夾名稱（舊系統沒設時用預設名稱；新系統要明確設） |
@@ -61,7 +62,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
    - 遙控器平板要重新用密碼登入一次（舊的 session 沒有遙控器編號）。
 3. **Windows PC**：把 Windows 監控金鑰貼進那台的 `agent_config.py` 的 `HOME_BUTLER_API_KEY`，重啟代理程式（已不用就跳過）。
 4. **HA 整合升到 1.9.0**（可以隔天做）：照 `homeassistant/README.md` 安裝並重啟 HA，確認 HA 真的起來了。
-5. **Render**：移除 `MIGRATE_FROM_OLD`；把 `HOME_BUTLER_API_KEY` 換成新的一串亂碼（舊的 Siri 捷徑從此失效；Mac mini 的舊鑰匙仍在 `TELEMETRY_KEYS` 裡，不受影響）。
+5. **Render**：移除 `MIGRATE_FROM_OLD`；把 `HOME_BUTLER_API_KEY` 換成新的一串亂碼（舊的 Siri 捷徑從此失效；Mac mini 的舊鑰匙仍在 `TELEMETRY_KEY_MAC_MINI` 裡，不受影響）。
 
 ## 退回
 

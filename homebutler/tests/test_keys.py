@@ -29,6 +29,8 @@ class EnvironmentKeyTests(StoreTest):
         settings = Settings.from_env({"DASHBOARD_API_KEY": DASH, "TELEMETRY_KEYS": '{"Mac mini": "%s"}' % MAC})
         self.assertEqual(settings.keys(), [("dashboard", "Dashboard", DASH), ("telemetry", "Mac mini", MAC)])
         self.assertNotIn(DASH, repr(settings))
+        one_each = Settings.from_env({"TELEMETRY_KEY_MAC_MINI": MAC, "TELEMETRY_KEY_PC": OLD_HA})
+        self.assertEqual(sorted(one_each.keys()), [("telemetry", "Mac Mini", MAC), ("telemetry", "Pc", OLD_HA)])
         for env in ({"DASHBOARD_API_KEY": "short"}, {"DASHBOARD_API_KEY": DASH, "ADMIN_API_KEY": DASH},
                     {"TELEMETRY_KEYS": "not json"}, {"TELEMETRY_KEYS": '["x"]'}):
             with self.assertRaises(SettingsError):

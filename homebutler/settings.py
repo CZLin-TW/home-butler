@@ -130,7 +130,10 @@ class Settings:
             dashboard_api_key=_text(env, "DASHBOARD_API_KEY"),
             home_assistant_api_key=_text(env, "HOME_ASSISTANT_API_KEY"),
             admin_api_key=_text(env, "ADMIN_API_KEY"),
-            telemetry_keys=_keys(env, "TELEMETRY_KEYS"),
+            # TELEMETRY_KEY_<NAME>=<key> for each computer (simplest to paste), or all in TELEMETRY_KEYS as JSON.
+            telemetry_keys={**_keys(env, "TELEMETRY_KEYS"),
+                            **{name[len("TELEMETRY_KEY_"):].replace("_", " ").title(): value.strip()
+                               for name, value in env.items() if name.startswith("TELEMETRY_KEY_") and value.strip()}},
             migrate_from_old=_text(env, "MIGRATE_FROM_OLD") == "1",
             old_database_url=_text(env, "OLD_DATABASE_URL"),
             default_light_area=_text(env, "DEFAULT_LIGHT_AREA"),
