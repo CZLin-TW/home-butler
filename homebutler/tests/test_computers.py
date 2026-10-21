@@ -41,6 +41,14 @@ class TelemetryTests(StoreTest):
             self.assertTrue(computers.online(machines["PC"], utcnow()))
             self.assertFalse(computers.online(machines["PC"], utcnow() + timedelta(minutes=6)))
 
+    def test_a_sender_not_yet_updated_reports_at_the_old_address(self):
+        old = lambda key: self.client.post("/api/computers/heartbeat", json=BEAT, headers={"X-API-Key": key})
+        self.assertEqual(old(self.mac).status_code, 200)
+        self.assertEqual(old(self.ha).status_code, 401)
+        self.assertEqual(old("").status_code, 401)
+        with self.store.transaction() as s:
+            self.assertEqual([c.hostname for c in s.query(Computer)], ["Mac mini"])
+
     def test_other_keys_and_bad_reports_are_refused(self):
         self.assertEqual(self.post(None).status_code, 401)
         self.assertEqual(self.post(self.ha).status_code, 401)

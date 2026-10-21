@@ -13,7 +13,7 @@
 | SwitchBot 的推送 | `/switchbot/webhook` | 同上（也接 `/v2/switchbot/webhook`）；**不要**設 `SWITCHBOT_REGISTER_WEBHOOK`，網址就維持原樣 |
 | UptimeRobot | `/` | 回 `{"ok": true}` |
 | HA 現在的整合（1.8.0） | `/api/home-assistant/health`、`/ws` | 接受，用協定 1；之後升到 1.9.0 會自動改用 `/v2` 與協定 2 |
-| Mac mini、Windows 的監控 | `/api/computers/heartbeat` | 新版回報程式先試 `/v2/telemetry/heartbeat`，404 才用舊的 |
+| Mac mini、Windows 的監控 | `/api/computers/heartbeat`（`X-API-Key`） | 接受，金鑰要是監控用的；新版回報程式先試 `/v2/telemetry/heartbeat`，404 才用舊的 |
 | Render 的啟動指令 | `uvicorn main:app` | `main.py` 已是新系統的進入點 |
 
 ## 事先準備（切換前，舊系統照常運作）
@@ -60,7 +60,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 2. **推 Dashboard 的 `main`**（v2 合併）。Vercel 建置通過後部署。
    - 確認：首頁、裝置頁、待辦、庫存、照明都正常；裝置頁每張卡有「幾秒前更新」。
    - 遙控器平板要重新用密碼登入一次（舊的 session 沒有遙控器編號）。
-3. **Windows PC**：把 Windows 監控金鑰貼進那台的 `agent_config.py` 的 `HOME_BUTLER_API_KEY`，重啟代理程式（已不用就跳過）。
+3. **Windows PC**（推完後盡快做：它現在和 Mac mini 用同一把鑰匙，換之前兩台的回報會記在同一台電腦底下）：把 Windows 監控金鑰貼進那台的 `agent_config.py` 的 `HOME_BUTLER_API_KEY`，重啟代理程式（已不用就跳過）。
 4. **HA 整合升到 1.9.0**（可以隔天做）：照 `homeassistant/README.md` 安裝並重啟 HA，確認 HA 真的起來了。
 5. **Render**：移除 `MIGRATE_FROM_OLD`；把 `HOME_BUTLER_API_KEY` 換成新的一串亂碼（舊的 Siri 捷徑從此失效；Mac mini 的舊鑰匙仍在 `TELEMETRY_KEY_MAC_MINI` 裡，不受影響）。
 
