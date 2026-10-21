@@ -46,6 +46,18 @@ class StoreTests(StoreTest):
         with self.store.transaction() as session:
             self.assertIsNone(session.query(Household).filter_by(key="X").first())
 
+    def test_tables_stay_out_of_public_in_postgres(self):
+        """The old system has a public.system_state of its own; ours must land in our schema whatever the pooler does
+        with connection parameters (Supabase's drops "options", which once put the tables in public)."""
+        if self.store.engine.dialect.name != "postgresql":
+            self.skipTest("PostgreSQL only")
+        with self.store.engine.connect() as connection:
+            self.assertEqual(connection.execute(text("select current_schema()")).scalar(), self.schema)
+            where = connection.execute(text("select table_schema from information_schema.tables where table_name = 'system_state'")).scalars().all()
+        self.assertIn(self.schema, where)
+        self.assertNotIn("public", where)
+        self.assertNotIn("options", self.store.engine.url.query)
+
     def test_row_level_security_on_every_table_in_postgres(self):
         if self.store.engine.dialect.name != "postgresql":
             self.skipTest("PostgreSQL only")

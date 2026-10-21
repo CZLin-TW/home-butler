@@ -35,9 +35,18 @@ def make_engine(url: str, schema: str = "hb") -> Engine:
         return engine
     if not schema.isidentifier():
         raise ValueError("Invalid schema")
-    # Every connection looks in our schema first; prepared statements stay off for Supabase's pooler.
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5,
-                         connect_args={"options": f"-csearch_path={schema}", "prepare_threshold": None})
+    # Prepared statements stay off for Supabase's pooler.
+    engine = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, connect_args={"prepare_threshold": None})
+
+    @event.listens_for(engine, "connect")
+    def _our_schema_first(connection, _record):
+        # A plain SET, not the "options" connection parameter: Supabase's pooler drops that silently,
+        # and the tables would land in public next to the old system's.
+        cursor = connection.cursor()
+        cursor.execute(f'SET search_path TO "{schema}"')
+        cursor.close()
+        connection.commit()
+    return engine
 
 
 class Store:
