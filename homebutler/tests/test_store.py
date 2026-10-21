@@ -53,9 +53,10 @@ class StoreTests(StoreTest):
             self.skipTest("PostgreSQL only")
         with self.store.engine.connect() as connection:
             self.assertEqual(connection.execute(text("select current_schema()")).scalar(), self.schema)
-            where = connection.execute(text("select table_schema from information_schema.tables where table_name = 'system_state'")).scalars().all()
-        self.assertIn(self.schema, where)
-        self.assertNotIn("public", where)
+            # An unqualified name finds ours, even when public has a table of the same name (CI's database may).
+            found = connection.execute(text("select relnamespace::regnamespace::text from pg_class "
+                                            "where oid = 'system_state'::regclass")).scalar()
+        self.assertEqual(found.strip('"'), self.schema)
         self.assertNotIn("options", self.store.engine.url.query)
 
     def test_row_level_security_on_every_table_in_postgres(self):
