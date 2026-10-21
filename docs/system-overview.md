@@ -1,101 +1,102 @@
-# 三個 repo 的系統導覽
+# 系統導覽
 
-架構為何長成這樣（環境式 Siri → FP2 → Aqara 實名制 → 只剩 HomeKit → 需要本地橋接）見
-[動機與限制](why-home-assistant.md)。
+整個家庭系統由哪些部分組成、各自在哪裡跑、資料怎麼流、怎麼部署。**設計原則**（新功能放哪、什麼絕不能做）見 [架構原則](local-hub-architecture.md)；
+架構為什麼長成這樣（想用自然語句叫 Siri → FP2 的狀態要回傳 → Aqara 的 API 要實名申請 → 只剩 HomeKit → 需要本地橋接）見 [為什麼是 Home Assistant](why-home-assistant.md)。
 
-後續工作與驗收缺口見 [2026-09-14 HA 遷移盤點](ha-migration-audit.md)。
-新建置先讀 [README](../Readme.md)，設定／API 見 [後端參考](backend-guide.md)。
-不裝 HA 或固定 v1.44.0 的成套 SHA 與指令見 [版本選擇](version-selection.md)。
+本頁描述 2026-10-21 切換後的新系統。設備位址、配對資料與憑證以各部署端設定為準，不寫進公開文件。
 
-v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
-HA 管理光照實體；HB 夜燈引擎自 v1.53.0 移除，夜燈規則改在 HA 建立（舊 Sheet 保留但不執行）。
-這條快速資料路徑仍依賴 Render，詳見 [Hub 光照](../homeassistant/hub-light.md)。
+## 組成
 
-2026-09-13 起依 [家庭中樞架構](local-hub-architecture.md) 分階段移轉：
-HA 承接本地設備／即時自動化與 HomeKit，HB 保留家庭應用與 AI。
-v1.48.0 HOME_ASSISTANT_IR_NAMES 逐台將 IR 電扇 handler 改走 HA 選定的本地按鈕；HA 自動化直接
-button.press → 原生 SwitchBot 連線，不經 Render。安裝與來源白名單見 [IR 按鈕](../homeassistant/ir-buttons.md)。
-v1.47.0 Apple Home 可透過 HA 本機 `ac_room_temperature` 合併室溫 sensor，再將指令轉至原生空調；
-HB 仍直接控制原生實體。配對無 Render 依賴、無自動調溫，見 [設定方式](../homeassistant/room-temperature.md)。
-空調遷移由 HOME_ASSISTANT_AC_NAMES 逐台啟用：Dashboard／LINE → HB → HA → SwitchBot Cloud；Apple Home → HA HomeKit Bridge → 原生 climate。未遷移設備保留下列既有路徑。HA 空調使用整數目標；
-排程仍由 HB 保管並經 HA 下達——手動排程來源「使用者（HA）」，依 Sheet 時數產生的關機排程來源「自動（HA）」。
-v1.58.0 已移除舊來源「自動」「防黴」、半度目標與室溫回饋補償；殘留舊列到期會標成已過期。
-
-本頁記錄目前的責任與接手入口；設備位址、配對資料與憑證以各部署端設定為準，不複製到公開文件。
-
-2026-10-02 部署分工已核對：HAOS VM 與獨立 theater-agent／Apple TV monitor 常駐於 Mac mini；HB 與 Dashboard 仍在各自雲端。劇院入口經 HA，本地規則仍由 theater-agent 執行。舊 Windows 只保留 PC 指標 agent，家庭控制不再依賴該 PC；舊 HA／Homebridge VM 及兩劇院排程已停用。詳細驗證與未完成實機驗收見各 repo 驗證紀錄。
-
-| Repo | 責任 | 主要入口 |
-| --- | --- | --- |
-| [Dashboard](https://github.com/CZLin-TW/Dashboard) | UI、LINE 配對登入、JWT Session、可信使用者身分與 API 代理、瀏覽器快取、獨立 demo | [README](https://github.com/CZLin-TW/Dashboard/blob/main/README.md)、[AGENTS](https://github.com/CZLin-TW/Dashboard/blob/main/AGENTS.md)、[demo](https://github.com/CZLin-TW/Dashboard/blob/main/docs/demo-mode.md) |
-| [home-butler](https://github.com/CZLin-TW/home-butler) | LINE／Siri 意圖與家庭 API、Sheets、權限、提醒及未遷移設備規則；`agent/` 提供 PC 指標與劇院中繼，未啟用 HA Hue 時亦負責 Hue | [README](../Readme.md)、[AGENTS](../AGENTS.md)、[PC agent](../agent/README.md) |
-| [theater-agent](https://github.com/CZLin-TW/theater-agent)（私人） | AVR／KEF 連動、KEF 事件、Bravia 畫面恢復、Apple TV 監控及本服務的健康更新流程 | [README](https://github.com/CZLin-TW/theater-agent/blob/main/README.md)、[AGENTS](https://github.com/CZLin-TW/theater-agent/blob/main/AGENTS.md)、[可靠性](https://github.com/CZLin-TW/theater-agent/blob/main/docs/reliability.md)；需要既有 repo 存取權 |
+| 部分 | 在哪裡跑 | 責任 | 入口文件 |
+| --- | --- | --- | --- |
+| [home-butler](https://github.com/CZLin-TW/home-butler)（HB） | Render（雲端），資料在 Supabase（PostgreSQL） | 家庭資料、排程、LINE 管家、通知、Dashboard 的後端；`homeassistant/` 有 HA 的自訂整合，`agent/` 有電腦監控程式 | [AGENTS](../AGENTS.md)、[重構計畫](refactor-plan.md) |
+| [Dashboard](https://github.com/CZLin-TW/Dashboard) | Vercel（雲端） | 家人的操作畫面、LINE 配對登入、到 HB 的唯一通道（白名單） | [AGENTS](https://github.com/CZLin-TW/Dashboard/blob/main/AGENTS.md)、[README](https://github.com/CZLin-TW/Dashboard/blob/main/README.md) |
+| Home Assistant（HA） | 家中主機上的虛擬機 | 唯一的設備層：空調、紅外線、感測器、照明、劇院開關；即時自動化；Apple 家庭的 HomeKit 橋接 | [HA 整合](../homeassistant/README.md) |
+| [theater-agent](https://github.com/CZLin-TW/theater-agent)（私人） | 家中主機 | AVR／KEF 連動、Bravia 畫面恢復、Apple TV 監控；經 HA 的整合對外 | 該 repo 的 README、AGENTS（需要存取權） |
+| 攝影機存在感測（私人） | 家中主機 | 從攝影機畫面判斷各區域有沒有人，經 MQTT 送進 HA | 該 repo 的文件 |
+| 電腦監控 | Mac：家中主機上的系統服務；Windows：預定淘汰的 PC | 每 60 秒回報系統指標給 HB，各用自己的金鑰 | [macOS](../agent/macos_daemon/README.md)、[PC agent](../agent/README.md) |
 
 ## 資料與控制路徑
 
 ```text
-瀏覽器 → Dashboard（Session／API 邊界）→ home-butler
-LINE／Siri 捷徑 ─────────────────────→ home-butler
-                                       ├→ HA → SwitchBot Cloud（已遷移空調／電扇）
-                                       │     ├→ Hue Bridge（啟用 HA Hue 後）
-                                       │     └→ 本地 Theater Agent 整合 → theater-agent（選配）
-                                       ├→ Sheets／其他設備雲端（未遷移功能）
-                                       └→ PC agent WebSocket
-                                            ├→ Hue Bridge（僅未切換 HA Hue 時）
-                                            └→ 同機 theater-agent → AVR／KEF／Bravia
-                                                     └ Apple TV monitor（獨立程序）
-Apple 家庭／Siri → HA HomeKit Bridge → 已匯出配件
-HA 本地自動化 → HA 裝置整合（Hue、SwitchBot、FP2 等）
-HA 選定觀測／環境感測／空調狀態 → 主動 WSS → home-butler → Dashboard
+家人 ─ 瀏覽器 ─> Dashboard（/api/hb 白名單＋身分簽章）─┐
+家人 ─ LINE ──────────────────────────────────────────┼─> HomeButler ─> Supabase
+                     Notion、天氣、Claude <─────────────┘      │  ▲
+                     除濕機雲端 <── HB 的除濕機隔離模組         │  │ HA 主動連進來的 WebSocket
+                                                              ▼  │ （狀態一變就送、每 30 秒心跳）
+                                               Home Assistant（唯一的設備層）
+                                                ├─ SwitchBot 雲端：空調、紅外線、Hub 2
+                                                ├─ Hue、FP2、攝影機存在感測（MQTT）
+                                                └─ 劇院（Theater Agent 整合 → theater-agent）
+家人 ─ Apple 家庭／Siri ─> HA 的 HomeKit 橋接器
+HA 本地自動化 ─> HA 的設備整合
+SwitchBot 雲端 webhook ─> HB（只轉「去重讀」提示）─> HA        ← 待移除
+電腦監控 ─> HB（只能回報指標）
 ```
 
-Dashboard 關閉不會停止後端排程或劇院連動。PC agent 的 heartbeat、WebSocket 在線、劇院 API 在線、Apple TV 心跳及實際設備狀態是不同層級；某層在線不表示整條鏈路已通過控制測試。
+- HB 從不直接連設備；HA 斷線、或超過 90 秒沒有新資料，所有設備狀態顯示「未知」，指令一律拒絕。
+- Dashboard 關掉不影響任何排程或自動化；它只是畫面。
+- 各層「在線」意義不同：HA 連著不代表某台設備正常，電腦有心跳不代表劇院正常。只有實際操作過才算通過。
 
-Siri 有兩條權限路徑：完整 `/api/assistant` 用 `HOME_BUTLER_API_KEY`，`user_id` 只決定對話身分；家電專用 `/api/assistant/devices` 用獨立 `DEVICE_VOICE_API_KEY`，由 `device_voice_api.py`／`device_voice.py` 限制可見目錄、動作、參數及設備名稱。家電入口不讀寫家庭對話、不接受身分覆寫，也不能用同一把金鑰呼叫其他 API。
-**兩條路徑對排程的權限不同**：完整入口可建立／修改排程（HA 空調會標成「使用者（HA）」），
-家電專用入口的 `device_voice.ALLOWED_ARGS` 沒有任何 schedule 動作，只能控制與查詢當下狀態——這是刻意保留的限制，不要為了對齊而放寬。
-HA 空調的到期關機由 `ac_auto_off` 以「自動（HA）」排程負責，與語音入口無關。啟用及分享方式見 [README 家電專用捷徑](../Readme.md#device-only-voice)。
+## 誰呼叫誰、用什麼證明身分
 
-## 週期與事件的責任
-
-舊 Homebridge 插件仍保留在 home-butler 的 `homebridge/` 作為歷史相容程式；家庭空調已改由 HA 發布。
-以下為舊插件機制，不代表家庭仍以它控制空調。插件與 Windows PC agent 分開部署，
-不需要第四個 repo。以獨立橋接 Key 和設備名稱清單限制明確 AC 控制；每輪完成後約 5 秒
-重新讀取後端快取，不呼叫 AI、不增加 Sheets 輪詢。冷氣狀態仍為最後指令；室溫來自同房間
-感測器。冷／暖房使用空調控制，除濕／送風使用同配件內的模式開關；關閉模式開關會在後端
-新讀資料後核對當前模式，已切換時不關機。權限、安裝、同步延遲及限制見 [橋接文件](../homebridge/README.md)。
-
-| 工作 | 實作／頻率 | 限制 |
+| 呼叫者 | 怎麼證明 | 能做什麼 |
 | --- | --- | --- |
-| 家電排程 | `main.py` 註冊 `schedules`，每 60 秒 | 工作耗時、服務休眠及外部 I/O 仍影響延遲；送出前記錄執行識別碼，未知結果不自動重送 |
-| 感測器／歷史、Notion、待辦、每日推播檢查、agent 健康 | 各自獨立工作，每 300 秒 | 工作不重疊，錯過週期跳過密集補跑；不是一條 realtime 工作依序包辦 |
-| 待辦燈光提醒 | `lighting-reminders`，每 60 秒 | 僅 HA Hue 啟用時執行；v1.53.0 後已無每 300 秒的照明自動規則工作 |
-| HA Hue 待辦燈光提醒 | 每 60 秒，僅 HA Hue 切換啟用時 | 同區域每分鐘最多一次；舊 PC queue 回空，不傳私人待辦文字給 HA |
-| PC 指標 | `agent/agent.py` 每 tick 回報，預設 60 秒 | 心跳只代表 PC agent 的回報 |
-| AVR／KEF | theater-agent 的 AVR push、KEF 長輪詢事件、每輪完成後等 15 秒補漏 | 事件需核對連動旗標及 AVR 狀態；不能保證 15 秒內完成硬體喚醒 |
-| Apple TV／畫面 | Apple TV push 加主動查詢與畫面恢復狀態機 | 只恢復自己關閉的畫面；細節以私人 repo 為準 |
-| Dashboard 刷新 | 各頁 hook／query store | 部分使用可見性控制，部分裝置頁歷史仍用定期 timer；不等同家電 push |
+| Dashboard | Dashboard 自己的金鑰，加上每個請求一張 60 秒內有效、代表某位成員或某台遙控器的簽章 | 那個人能做的事；遙控器只到裝置頁 |
+| LINE | LINE 的簽章 | 管家（只接受啟用中的成員） |
+| HA 的 HomeButler 整合 | HA 專用金鑰 | 回報設備與狀態、接收指令 |
+| 每台電腦的監控 | 各自一把 | 只能回報指標 |
+| 管理 | 管理金鑰 | `GET /v2/system/status`：資料庫結構版本、背景工作狀態、已載入的模組 |
 
-`GET /api/system/jobs`（既有 API key）可讀 home-butler 工作的開始／成功／下次時間及錯誤；這是 callback 健康，不是每個外部設備都成功。
+公開、不需要身分的只有 `/` 與 `/v2/health`（給外部監控用，不透露家裡任何資訊）。
 
-## 部署、版本及回復
+## 背景工作（HB，同一個程序裡）
 
-- Dashboard 的 `package.json:version` 是 Dashboard／LINE 顯示版本；home-butler 約每小時重新讀 `/api/version`。劇院兩程序另外顯示實際執行 SHA。純文件或註解不調整顯示版本。
-- 有 API／資料契約相依時先部署 home-butler，再部署 Dashboard；回復先退 Dashboard，再退後端。新增 Sheet 欄位可保留，回復程式不代表回復業務資料。
-- theater-agent 的可選 `health` 欄位保持向後相容；只有劇院內部變更時，不必為此修改其餘兩個 repo 的功能。
-- home-butler 後端維持單程序／單 worker；目前的記憶體鎖與 Sheets 操作不能保障多實例交易。部署前檢查相依資料與設定，不能只增加 worker。
-- PC agent 是 pull 後編譯並自我重啟。theater-agent 才有獨立候選驗證、兩程序健康守護及失敗回復；不要把後者的保護套用到所有服務。
-- 一般程式回復以 `git revert` 建立新 commit，依正常部署流程發布；保留 runtime 設定、配對、旗標與未提交工作。Git push、CI 成功、磁碟 SHA 和程序正在執行的 SHA 分開核對。
+每項工作各自一條執行緒、各自的間隔；一項失敗不影響其他項，跑太久不會重疊，錯過的週期不會一口氣補跑。
+**只能有一個程序**：多開一個，每項工作都會跑兩次。
 
-## 新 session 的閱讀與驗證
+| 工作 | 間隔 | 做什麼 |
+| --- | --- | --- |
+| `schedules` | 60 秒 | 空調自動關機的本輪判斷，派送到期的排程（送出前先標 claimed，結果不明就停在「待確認」） |
+| `devices` | 60 秒 | 讓設備清單與 HA 一致 |
+| `light_reminders` | 60 秒 | 待辦的燈光提醒 |
+| `history` | 5 分鐘 | 記錄感測器與空調的歷史 |
+| `todo_reminders`／`todo_recurring` | 5 分鐘 | 週期待辦產生下一筆、到期提醒 |
+| `notion` | 5 分鐘 | Notion 待辦同步 |
+| `daily_summary` | 5 分鐘檢查 | 每日推播（每天一次） |
+| `backup` | 5 分鐘檢查 | 每日備份到雲端硬碟（要設 `BACKUP_FOLDER` 才做） |
+| `health` | 5 分鐘 | 失聯告警（電腦、劇院、備份、HA 超過 15 分鐘沒連上），只在狀態翻轉時推播 |
+| `config` | 60 秒（`CONFIG_CHECK_SECONDS`） | 試算表三張手動設定分頁有被改過才同步進資料庫 |
+| `dehumidifiers` | 5 分鐘 | 除濕機模組：讀狀態、跑自動規則 |
+| `prune` | 1 小時 | 清掉超過 90 天的管家對話紀錄 |
 
-1. 先讀目標 repo 的 AGENTS 與 README，再依本頁找到相依專案；不依賴舊聊天或仍在運行的本機服務。
-2. UI 工作使用 Dashboard 的獨立 demo；後端使用 `tests/` 假外部 I/O。不要把 legacy 硬體診斷當作離線測試。
-3. 修改資料契約同步 routes、型別、fixtures／simulator 與相關測試；修改行為同步 README 原段落、註解及驗證紀錄。
-4. 在報告中分開寫靜態檢查、離線測試、瀏覽器 demo、部署觀察與實機功能驗證；只有實際做過的項目才能列為通過。
+Dashboard 的更新頻率：裝置頁開著時每 7 秒讀一次，圖表歷史每 5 分鐘；首頁沒展開設備時每 30 秒。
 
-驗證入口：[home-butler](verification.md)、[Dashboard](https://github.com/CZLin-TW/Dashboard/blob/main/docs/verification.md)、[theater-agent](https://github.com/CZLin-TW/theater-agent/blob/main/docs/verification.md)（私人）。
+## 部署與退回
 
-## macOS 指標常駐
+| 推上 `main` | 會發生什麼 |
+| --- | --- |
+| home-butler | CI 通過後 Render 部署（文件、`agent/`、`homeassistant/`、`tests/` 不觸發）；啟動時自動套用資料庫結構版本。HA 整合要手動安裝；Mac 監控程式只在它的檔案有變動時，由它自己的更新程式在 CI 通過後安裝 |
+| Dashboard | Vercel 先跑 lint 與測試，過了就部署，改文件也會部署 |
+| theater-agent | 家中主機約五分鐘內自動拉下、驗證、重啟；只改文件時只更新檔案 |
 
-`agent/macos_daemon/` 是獨立 telemetry sender 的 source 與部署工具，沿用 heartbeat 契約；不連相機／theater／家電。System LaunchDaemon 使用非 root UID、60 秒新採樣，System Keychain 限定 sender。repo 更新不自動部署；實際二進位／設定／憑證留部署端。操作與中斷恢復見 [macOS daemon](../agent/macos_daemon/README.md)。
+- 有 API 或資料格式相依時**先部署 HB、再部署 Dashboard**；退回時反過來，先退 Dashboard。
+- 系統版本以 Dashboard 的 `package.json` 為準，LINE 管家顯示的版本也從那裡讀。
+- 一般程式退回用 `git revert` 產生新提交，照正常流程部署。
+- **已經套用到正式資料庫的遷移版本檔不能拿掉。**資料庫停在程式不認得的版本時，啟動會直接失敗（`Can't locate revision`，2026-10-22 實測）。
+  退回含遷移的提交時保留那個版本檔，或另加一個新版本把結構改回去；結構只往前加。
+- 推送成功、CI 通過、實際執行的版本是三件事，要分開確認。
+
+## 新的工作階段先讀什麼
+
+1. 目標 repo 的 `AGENTS.md`，再依本頁找相依的部分。不要依賴舊對話，也不要假設本機有服務在跑。
+2. 畫面的工作用 Dashboard 的測試模式（模擬家庭）；後端用 `venv/bin/python -m homebutler.tests.run`（假的 HA 與雲端服務）。**不用家裡的實體家電測試。**
+3. 改了 API 或資料格式，同步改路由、型別、測試模式的模擬資料與測試；改了行為，同步改各 repo 文件原本的段落與驗證紀錄。
+4. 回報時把靜態檢查、離線測試、測試模式畫面、部署觀察、實機驗證分開寫；只有實際做過的才能說通過。
+
+驗證紀錄：[home-butler](verification.md)、[Dashboard](https://github.com/CZLin-TW/Dashboard/blob/main/docs/verification.md)、[theater-agent](https://github.com/CZLin-TW/theater-agent/blob/main/docs/verification.md)（私人）。
+
+## 舊系統的文件
+
+下面幾份描述的是 2026-10-21 切換前的系統（試算表當資料庫、Siri 捷徑、homebridge、逐台遷移的開關），只作為歷史參考，與本頁或 [AGENTS](../AGENTS.md) 矛盾時以後者為準：
+[舊系統說明](legacy-agents.md)、[後端參考](backend-guide.md)、[版本選擇](version-selection.md)、[HA 遷移盤點](ha-migration-audit.md)、[README](../Readme.md) 的大部分內容。

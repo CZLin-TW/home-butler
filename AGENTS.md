@@ -7,6 +7,7 @@
 
 **加新行為時改本檔對應的段落，不要在開頭追加新章節。**動手簡化架構之前先讀
 [為什麼是 Home Assistant](docs/why-home-assistant.md)——現在的形狀是一串外部限制推出來的。
+新功能放哪、元件怎麼連的原則在 [架構原則](docs/local-hub-architecture.md)；各部分在哪裡跑、怎麼部署在 [系統導覽](docs/system-overview.md)。
 
 ## 分層
 
@@ -40,6 +41,8 @@ main.py              進入點（Render 執行 uvicorn main:app）
   HA 斷線時一切設備狀態都是「未知」，不是「關」。
 - **單一程序、單一 worker。**背景工作在這個程序裡跑；多 worker 會讓每個工作跑兩次。
 - **每張表開 RLS**（遷移版本裡做）。新增資料表時照做。
+- **已套用到正式資料庫的遷移版本檔不能刪。**資料庫停在程式不認得的版本時啟動會失敗（`Can't locate revision`）。
+  退回含遷移的提交時保留版本檔，或另加新版本把結構改回去。
 - **schema 用連線後的 `SET search_path` 設定**（`store/db.py`），不要改回連線參數 `options`：Supabase 的連線中繼站會悄悄丟掉它，表就會建到 `public`、撞上舊系統的同名表（2026-10-21 切換時實際發生）。
 - **金鑰一個用途一把**（Dashboard、HA、每台電腦、管理），值放在環境變數，啟動時登記；換掉一把，舊的自動失效。
   Dashboard 代表某個人呼叫時，另帶一張 5 分鐘內有效的身分簽章。
