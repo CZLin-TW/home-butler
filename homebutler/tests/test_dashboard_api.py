@@ -127,6 +127,21 @@ class ApiTests(StoreTest):
         self.assertEqual(self.client.post("/v2/devices/ac/冷氣一", json={"power": "off"}, headers=self.headers()).status_code, 504)
         self.assertEqual(self.client.post("/v2/devices/ac/沒有", json={"power": "off"}, headers=self.headers()).status_code, 409)
 
+    def test_room_order_is_shared_and_set_by_members(self):
+        with self.store.transaction() as s:
+            home = s.query(Member).one().household_id
+            ir = Device(kind="ir", name="風扇一", household_id=home, area="房間二")
+            s.add(ir); s.flush()
+            s.add(DeviceEntity(device_id=ir.id, ha_id="b1", entity_id="button.one", role="button", label="開"))
+        remote = self.headers(str(self.remote_id), "remote")
+        self.assertEqual(self.client.get("/v2/devices", headers=remote).json()["rooms"], ["房間一", "房間二"])
+        self.assertEqual(self.client.put("/v2/rooms/order", json={"rooms": ["房間二"]}, headers=self.headers()).json(), {"rooms": ["房間二"]})
+        self.assertEqual(self.client.get("/v2/devices", headers=remote).json()["rooms"], ["房間二", "房間一"])
+        self.assertEqual(self.client.put("/v2/rooms/order", json={"rooms": ["房間一"]}, headers=remote).status_code, 403)
+        self.assertEqual(self.client.put("/v2/rooms/order", json={"rooms": ["房間一", "房間一"]}, headers=self.headers()).status_code, 422)
+        self.assertEqual(self.client.put("/v2/rooms/order", json={"rooms": [" "]}, headers=self.headers()).status_code, 422)
+        self.assertEqual(self.client.get("/v2/devices", headers=self.headers()).json()["rooms"], ["房間二", "房間一"])
+
     def test_lighting_keeps_the_area_table_and_names(self):
         listed = self.client.get("/v2/lighting", headers=self.headers()).json()["areas"]
         area_id = listed[0]["area_id"]

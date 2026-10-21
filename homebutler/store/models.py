@@ -288,6 +288,17 @@ class DeviceEntity(Base):
     device: Mapped[Device] = relationship(back_populates="entities")
 
 
+class Room(Base):
+    """Where the Dashboard lists a room. A room is the location text the devices carry (the 智能居家
+    setting, else the HA area); only the order lives here. Rooms without a row come after, by name."""
+    __tablename__ = "rooms"
+    __table_args__ = (UniqueConstraint("household_id", "name", name="uq_rooms_household_name"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    position: Mapped[int] = mapped_column(Integer)
+
+
 class DeviceSetting(Base):
     """A row of the hand-edited 智能居家 tab, matched to a device by name. Credentials are never copied."""
     __tablename__ = "device_settings"

@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from homebutler.api.auth import DashboardUser, dashboard_user
-from homebutler.domain import computers, devices, schedules
-from homebutler.store.models import AcReading, Computer, ComputerMetric, Device, DeviceEntity, SensorReading, utcnow
+from homebutler.domain import computers, devices, rooms, schedules
+from homebutler.store.models import AcReading, Computer, ComputerMetric, Device, DeviceEntity, Remote, SensorReading, utcnow
 
 router = APIRouter(prefix="/v2")
 AC_OPTIONS = {"modes": [{"value": v, "label": l} for v, l in (("cool", "冷氣"), ("heat", "暖氣"), ("dry", "除濕"), ("fan_only", "送風"),
@@ -34,7 +34,7 @@ def _devices(session, kind):
     return list(found.values())
 
 
-def page(request: Request) -> dict:
+def page(request: Request, household_id: int) -> dict:
     app = request.app
     state, now = app.state.ha.state(), utcnow()
     zone = ZoneInfo(app.state.settings.timezone)
@@ -60,17 +60,45 @@ def page(request: Request) -> dict:
         planned = [schedules.as_dict(x, zone) for x in schedules.visible(s)]
         auto_off = schedules.auto_off_view(s, state, now, zone)
     module = app.state.modules.get("dehumidifier")
-    return {"generated_at": now,
+    dehumidifiers = module.views() if module else None
+    with app.state.store.transaction() as s:
+        ordered = rooms.ordered(s, household_id, [x["location"] for x in acs + irs + sensors + (dehumidifiers or [])])
+    return {"generated_at": now, "rooms": ordered,
             "home_assistant": {k: state[k] for k in ("connected", "online", "received_at", "age_seconds", "stale_after_seconds", "capabilities")},
             "acs": acs, "irs": irs, "sensors": sensors, "presence": state["observations"],
-            "dehumidifiers": module.views() if module else None, "computers": machines,
+            "dehumidifiers": dehumidifiers, "computers": machines,
             "schedules": planned, "auto_off": auto_off, "automations": app.state.ha.automation_log(),
             "options": {"ac": AC_OPTIONS, "schedule_targets": sorted(app.state.schedule_targets)}}
 
 
 @router.get("/devices")
 def devices_page(request: Request, user: DashboardUser = Depends(dashboard_user)):
-    return page(request)
+    return page(request, _household(request, user))
+
+
+def _household(request: Request, user: DashboardUser) -> int:
+    if user.member is not None:
+        return user.member.household_id
+    with request.app.state.store.transaction() as s:
+        return s.get(Remote, user.remote_id).household_id
+
+
+class RoomOrder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rooms: list[str] = Field(max_length=100)
+
+
+@router.put("/rooms/order")
+def save_room_order(body: RoomOrder, request: Request, user: DashboardUser = Depends(dashboard_user)):
+    """The household's room order, first to last. Members only: the order is shared by the whole family."""
+    if user.member is None:
+        raise HTTPException(403, "遙控器不能調整房間順序")
+    names = [n.strip() for n in body.rooms]
+    if any(not n or len(n) > 100 for n in names) or len(set(names)) != len(names):
+        raise HTTPException(422, "房間名稱不可空白或重複")
+    with request.app.state.store.transaction() as s:
+        rooms.save(s, user.member.household_id, names)
+    return {"rooms": names}
 
 
 @router.get("/history")
