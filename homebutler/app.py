@@ -25,7 +25,7 @@ log = logging.getLogger("homebutler")
 
 def _background_jobs(app, jobs, settings, store, link, commands, zone) -> None:
     """The household's routine work: to-dos and their reminders, Notion, health alerts, backups."""
-    from homebutler.domain import conversation
+    from homebutler.domain import conversation, history
     from homebutler.jobs import todos as todo_jobs
     from homebutler.store.models import utcnow
     line = getattr(app.state, "line", None)
@@ -59,7 +59,8 @@ def _background_jobs(app, jobs, settings, store, link, commands, zone) -> None:
 
     def prune():
         with store.transaction() as session:
-            return conversation.prune(session, utcnow())
+            now = utcnow()
+            return conversation.prune(session, now) + history.prune(session, now)
     jobs.add("prune", 3600, prune)
 
 
