@@ -73,7 +73,10 @@ def page(request: Request, household_id: int) -> dict:
 
 @router.get("/devices")
 def devices_page(request: Request, user: DashboardUser = Depends(dashboard_user)):
-    return page(request, _household(request, user))
+    view = page(request, _household(request, user))
+    if user.member is None:
+        del view["presence"]      # who is in which room is for the family, not the wall tablet
+    return view
 
 
 def _household(request: Request, user: DashboardUser) -> int:
@@ -101,6 +104,16 @@ def save_room_order(body: RoomOrder, request: Request, user: DashboardUser = Dep
     return {"rooms": names}
 
 
+SENSOR_FIELDS = ("t", "temperature", "humidity", "co2", "light_level")
+AC_FIELDS = ("t", "power", "mode", "temperature", "fan")
+COMPUTER_FIELDS = ("t", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp", "gpu_temp", "soc_temp",
+                   "mem_pressure_pct", "mem_pressure_level", "power_w")
+
+
+def _reading(row, part: str) -> dict:
+    return {k: getattr(row, k) for k in (SENSOR_FIELDS if part == "sensors" else AC_FIELDS)}
+
+
 @router.get("/history")
 def history(request: Request, hours: int = 24, parts: str = "sensors,acs,computers,dehumidifiers",
             user: DashboardUser = Depends(dashboard_user)):
@@ -111,18 +124,21 @@ def history(request: Request, hours: int = 24, parts: str = "sensors,acs,compute
     since = utcnow() - timedelta(hours=hours)
     out = {"sensors": {}, "acs": {}, "computers": {}, "dehumidifiers": {}}
     with request.app.state.store.transaction() as s:
-        names = {d.id: d.name for d in s.scalars(select(Device))}
-        for r in (s.scalars(select(SensorReading).where(SensorReading.t >= since).order_by(SensorReading.device_id, SensorReading.t)) if "sensors" in wanted else []):
-            out["sensors"].setdefault(names.get(r.device_id, "?"), []).append(
-                {"t": r.t, "temperature": r.temperature, "humidity": r.humidity, "co2": r.co2, "light_level": r.light_level})
-        for r in (s.scalars(select(AcReading).where(AcReading.t >= since).order_by(AcReading.device_id, AcReading.t)) if "acs" in wanted else []):
-            out["acs"].setdefault(names.get(r.device_id, "?"), []).append(
-                {"t": r.t, "power": r.power, "mode": r.mode, "temperature": r.temperature, "fan": r.fan})
-        for r in (s.scalars(select(ComputerMetric).where(ComputerMetric.t >= since).order_by(ComputerMetric.computer_id, ComputerMetric.t))
-                  if "computers" in wanted else []):
-            out["computers"].setdefault(str(r.computer_id), []).append(
-                {k: getattr(r, k) for k in ("t", "cpu_pct", "ram_pct", "gpu_pct", "cpu_temp", "gpu_temp", "soc_temp",
-                                            "mem_pressure_pct", "mem_pressure_level", "power_w")})
+        # One device at a time, so each query walks the (device, t) index rather than the whole table.
+        if "sensors" in wanted or "acs" in wanted:
+            for device in list(s.scalars(select(Device).where(Device.kind.in_(("sensor", "ac"))).order_by(Device.id))):
+                model, part = (SensorReading, "sensors") if device.kind == "sensor" else (AcReading, "acs")
+                if part not in wanted:
+                    continue
+                rows = list(s.scalars(select(model).where(model.device_id == device.id, model.t >= since).order_by(model.t)))
+                if rows:
+                    out[part][device.name] = [_reading(r, part) for r in rows]
+        if "computers" in wanted:
+            for computer_id in list(s.scalars(select(Computer.id).order_by(Computer.id))):
+                rows = list(s.scalars(select(ComputerMetric).where(ComputerMetric.computer_id == computer_id,
+                                                                   ComputerMetric.t >= since).order_by(ComputerMetric.t)))
+                if rows:
+                    out["computers"][str(computer_id)] = [{k: getattr(r, k) for k in COMPUTER_FIELDS} for r in rows]
     module = request.app.state.modules.get("dehumidifier")
     if module and "dehumidifiers" in wanted:
         out["dehumidifiers"] = module.history(since)

@@ -17,10 +17,10 @@ KEEP = timedelta(days=400)
 
 def prune(session: Session, now: datetime) -> int:
     cutoff, removed = now - KEEP, 0
-    for device_id in session.scalars(select(Device.id)):
+    for device_id in list(session.scalars(select(Device.id))):
         for model in (SensorReading, AcReading):
             removed += session.execute(delete(model).where(model.device_id == device_id, model.t < cutoff)).rowcount
-    for computer_id in session.scalars(select(Computer.id)):
+    for computer_id in list(session.scalars(select(Computer.id))):
         removed += session.execute(delete(ComputerMetric).where(ComputerMetric.computer_id == computer_id,
                                                                 ComputerMetric.t < cutoff)).rowcount
     return removed

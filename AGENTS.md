@@ -13,6 +13,11 @@
 
 - **HA 是唯一的設備層。**空調、紅外線、感測器、照明、劇院都經 HA；HB 自己不直接連任何設備。
   例外只有除濕機（`homebutler/dehumidifier/`，隔離模組，之後整個移除）。
+  核心沒有 import 它，但有幾處直接寫著除濕機，移除模組時要一起改（2026-10-23 盤點，因為要淘汰所以先不整理）：
+  `assistant/` 的提示詞（三個除濕機動作與用法規則；改提示詞要先問使用者）、`actions.py`（排程種類、`_missing_module`）、`pipeline.py`（`REALTIME`）、`context.py`（種類名稱）；
+  `integrations/sheets_config/sync.py`（設備種類）、`jobs/backup.py`（略過的歷史表）、`api/devices_page.py`（裝置頁與歷史圖）；
+  Dashboard 的 `src/lib/dehumidifier.ts`、`hb-rules.ts` 的四條規則與裝置頁的卡片。
+  模組自己的歷史查詢（`service.py` 的 `history`）只用時間條件、走不到 `(name, t)` 索引；表很小，不修。
 - **HB 只當大腦**：家庭資料、排程、LINE 管家、通知、Dashboard 的後端，以及 Notion、天氣、Claude 這類資料服務。
 - **分工原則不變**：即時反應歸 HA；家人要事先知道、能調整的排程歸 HB 並在 Dashboard 顯示。
   同一條規則只能有一個控制主體，不要兩邊各做一份。

@@ -8,7 +8,7 @@ from homebutler.app import create_app
 from homebutler.domain import households, tokens
 from homebutler.domain.passwords import hash_password
 from homebutler.settings import Settings
-from homebutler.store.models import (Device, DeviceEntity, DeviceSetting, FoodItem, LightArea, Member, Remote, SensorReading, Todo,
+from homebutler.store.models import (AcReading, Device, DeviceEntity, DeviceSetting, FoodItem, LightArea, Member, Remote, SensorReading, Todo,
                                      utcnow)
 from homebutler.tests.helpers import StoreTest
 
@@ -118,8 +118,17 @@ class ApiTests(StoreTest):
         self.assertEqual(page["home_assistant"]["age_seconds"], 3.0)
         self.assertIn("dehumidifier", page["options"]["schedule_targets"])
         self.assertEqual(page["dehumidifiers"], [])
+        self.assertNotIn("presence", page)                     # the tablet is not told who is where
+        self.assertEqual(self.client.get("/v2/devices", headers=self.headers()).json()["presence"][0]["name"], "客廳")
+        with self.store.transaction() as s:
+            sensor, ac = s.query(Device).filter_by(name="感測一").one(), s.query(Device).filter_by(name="冷氣一").one()
+            s.add_all([SensorReading(device_id=sensor.id, t=utcnow() - timedelta(hours=1), humidity=51.0),
+                       SensorReading(device_id=sensor.id, t=utcnow() - timedelta(hours=7), humidity=40.0),
+                       AcReading(device_id=ac.id, t=utcnow(), power="off")])
         history = self.client.get("/v2/history?hours=6", headers=self.headers()).json()
-        self.assertEqual(history["sensors"]["感測一"][0]["humidity"], 52.0)
+        self.assertEqual([r["humidity"] for r in history["sensors"]["感測一"]], [51.0, 52.0])   # oldest first, 6 hours only
+        self.assertEqual(history["acs"]["冷氣一"][0]["power"], "off")
+        self.assertEqual(self.client.get("/v2/history?hours=6&parts=acs", headers=self.headers()).json()["sensors"], {})
         self.assertEqual(self.client.post("/v2/devices/ac/冷氣一", json={"power": "on", "temperature": 25.5}, headers=self.headers()).status_code, 200)
         self.assertEqual(self.commands.sent, [{"power": "on", "temperature": 26}])
         self.assertEqual(self.client.post("/v2/devices/ac/冷氣一", json={"temperature": 40}, headers=self.headers()).status_code, 409)
