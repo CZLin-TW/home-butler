@@ -50,7 +50,8 @@ def page(request: Request, household_id: int) -> dict:
         acs = [{"name": d.name, "location": location(d), **devices.ac_view(next((climates.get(e.ha_id) for e in es if e.role == "climate"), None))}
                for d, es in _devices(s, "ac")]
         irs = [{"name": d.name, "location": location(d),
-                "buttons": [{"label": e.label, "available": bool(buttons.get(e.ha_id, {}).get("available"))} for e in es if e.role == "button"]}
+                "buttons": [{"label": e.label, "available": bool(buttons.get(e.ha_id, {}).get("available"))}
+                            for e in devices.ordered_buttons(es, state)]}
                for d, es in _devices(s, "ir")]
         sensors = [{"name": d.name, "location": location(d), "available": bool(live.get(d.name)),
                     **devices.adjusted(live.get(d.name, {}), settings.get(d.name))} for d, _ in _devices(s, "sensor")]

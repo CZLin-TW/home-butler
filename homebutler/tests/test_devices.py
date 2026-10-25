@@ -79,6 +79,18 @@ class RegistryTests(StoreTest):
             self.assertEqual(devices.sync_registry(s, link.state(), "A")["removed"], 1)
             self.assertIsNotNone(s.query(Device).filter_by(name="冷氣二").one().removed_at)
 
+    def test_buttons_follow_the_order_set_in_ha(self):
+        # First seen as 風速+ then 電源; HA's own list for the remote puts 電源 first.
+        buttons = [{"id": hid(5), "entity_id": "button.fan_up", "name": "電扇", "button": "風速+", "available": True, "position": 1},
+                   {"id": hid(4), "entity_id": "button.fan_power", "name": "電扇", "button": "電源", "available": True, "position": 0}]
+        link, socket = link_with({**SNAPSHOT, "ir_buttons": buttons})
+        with self.store.transaction() as s:
+            devices.sync_registry(s, link.state(), "A")
+            fan = s.query(Device).filter_by(kind="ir").one()
+            self.assertEqual([e.label for e in devices.ordered_buttons(fan.entities, link.state())], ["電源", "風速+"])
+            unplaced = {**link.state(), "ir_buttons": [{**b, "position": None} for b in link.state()["ir_buttons"]]}
+            self.assertEqual([e.label for e in devices.ordered_buttons(fan.entities, unplaced)], ["風速+", "電源"])  # first seen
+
     def test_nothing_is_removed_while_ha_is_offline(self):
         link, socket = link_with()
         with self.store.transaction() as s:

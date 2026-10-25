@@ -21,8 +21,9 @@ def identity(hass, entity_id):
     if len(labels) != 1:
         raise ValueError("Unconfigured button")
     label = labels[0]
+    # The order the buttons were typed in this remote's settings, so HomeButler lists every remote the same way.
     return {"id": item.id, "entity_id": item.entity_id,
-            "name": config.data["name"], "button": label}
+            "name": config.data["name"], "button": label, "position": config.data["buttons"].index(label)}
 
 
 def select_buttons(hass, entities):
@@ -38,15 +39,17 @@ def snapshot(hass, sources):
     result = []
     for source in sources:
         item = er.async_get(hass).async_get(source["id"])
-        available = False
+        available, position = False, None
         if item:
             try:
                 current = identity(hass, item.entity_id)
                 available = (current["name"] == source["name"] and current["button"] == source["button"]
                              and hass.states.get(item.entity_id).state != "unavailable")
+                position = current["position"]
             except ValueError:
                 pass
-        result.append({**source, "entity_id": item.entity_id if item else source["entity_id"], "available": available})
+        result.append({**source, "entity_id": item.entity_id if item else source["entity_id"], "available": available,
+                       "position": position})
     return result
 
 

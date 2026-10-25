@@ -78,6 +78,15 @@ async def test_ha_bridge_selected_button_service_and_deduplication(hass):
     assert api.send_command.await_count == 2
 
 
+async def test_snapshot_gives_each_button_its_place_in_the_remote_settings(hass):
+    source, native, entry, api, ids = await setup_fan(hass)
+    sources = select_buttons(hass, [ids["風速-"], ids["電源"], ids["風速+"]])     # picked in another order
+    places = {s["button"]: s["position"] for s in snapshot(hass, sources)}
+    assert places == {"電源": 0, "風速+": 1, "風速-": 2}
+    stored_before_1_10 = [{k: v for k, v in s.items() if k != "position"} for s in sources]
+    assert [s["position"] for s in snapshot(hass, stored_before_1_10)] == [2, 0, 1]
+
+
 async def test_native_reload_rename_remove_and_unrelated_entities_fail_closed(hass):
     source, native, entry, api, ids = await setup_fan(hass)
     registry = er.async_get(hass)

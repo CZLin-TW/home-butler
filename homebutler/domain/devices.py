@@ -128,6 +128,14 @@ def sync_registry(session: Session, state: dict, default_household: str) -> dict
     return {"added": added, "removed": removed}
 
 
+def ordered_buttons(entities: list[DeviceEntity], state: dict) -> list[DeviceEntity]:
+    """A remote's buttons in the order set in HA (the remote's own button list), so every remote reads the
+    same way; buttons HA gives no position for follow, in the order first seen."""
+    position = {b["id"]: b.get("position") for b in state.get("ir_buttons", [])}
+    buttons = [e for e in entities if e.role == "button"]
+    return sorted(buttons, key=lambda e: (position.get(e.ha_id) is None, position.get(e.ha_id) or 0, e.id))
+
+
 def settings_by_name(session: Session) -> dict[str, DeviceSetting]:
     return {s.name: s for s in session.scalars(select(DeviceSetting).where(DeviceSetting.removed_at.is_(None)))}
 

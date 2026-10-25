@@ -67,7 +67,7 @@ def device_info(session: Session, state: dict, extra: list[dict]) -> str:
     for device, entity in rows:
         entry = found.setdefault(device.id, {"device": device, "buttons": [], "climate": None})
         if entity.role == "button":
-            entry["buttons"].append(entity.label)
+            entry["buttons"].append(entity)
         elif entity.role == "climate":
             entry["climate"] = climates.get(entity.ha_id)
     lines = []
@@ -75,7 +75,8 @@ def device_info(session: Session, state: dict, extra: list[dict]) -> str:
         device = entry["device"]
         setting = settings.get(device.name)
         location = (setting.location if setting and setting.location else device.area)
-        buttons = f"，按鈕：{'、'.join(entry['buttons'])}" if entry["buttons"] else ""
+        labels = [e.label for e in devices.ordered_buttons(entry["buttons"], state)]
+        buttons = f"，按鈕：{'、'.join(labels)}" if labels else ""
         state_part = _ac_state(entry["climate"]) if device.kind == "ac" else ""
         lines.append(f"{device.name}（類型：{KIND_LABELS[device.kind]}，位置：{location}{buttons}{state_part}）")
     lines += [f"{e['name']}（類型：{KIND_LABELS.get(e['kind'], e['kind'])}，位置：{e['location']}）" for e in extra]

@@ -78,6 +78,8 @@ class IRButtonState(BaseModel):
     floor_id: str = Field(default="", max_length=80)
     button: str = Field(min_length=1, max_length=60)
     available: bool = Field(strict=True)
+    # Where the button sits in the remote's own list in HA (0 first); integrations before 1.10 leave it out.
+    position: Optional[int] = Field(default=None, ge=0, le=119, strict=True)
 
 
 class IRResult(BaseModel):
