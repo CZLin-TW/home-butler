@@ -10,12 +10,11 @@ from .observations import snapshot
 from .transport import AuthError, LinkError, OutboundLink, validate_connection
 from .climates import ClimateCommands, snapshot as climate_snapshot
 from .ir_buttons import IRCommands, snapshot as ir_snapshot
-from . import hub_updates, environment
+from . import environment
 from .hue import HueCommands
 from .theater import LocalTheaterRelay, TheaterRelay
 from .automations import AutomationLog
 from .placement import placer
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 
 async def async_setup_entry(hass, entry):
@@ -49,8 +48,6 @@ async def async_setup_entry(hass, entry):
                         environment=(lambda: environment.snapshot(hass, sensors)) if sensors else None,
                         hue_commands=HueCommands(hass, groups) if groups else None,
                         theater_commands=theater,
-                        hub_devices=lambda: hub_updates.devices(hass),
-                        hub_updates=lambda frame: hub_updates.receive(hass, frame),
                         automations=automation_log.snapshot if automation_log else None,
                         path=path, protocol=protocol, place=placer(hass))
 
@@ -79,7 +76,6 @@ async def async_setup_entry(hass, entry):
 
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):
         entry.async_on_unload(hass.bus.async_listen(event_type, changed))
-    entry.async_on_unload(async_dispatcher_connect(hass, hub_updates.SOURCES_SIGNAL, link.notify))
     task = hass.async_create_background_task(link.run(), "HomeButler outbound link")
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = (link, task)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

@@ -30,7 +30,7 @@
                                                 └─ 劇院（Theater Agent 整合 → theater-agent）
 家人 ─ Apple 家庭／Siri ─> HA 的 HomeKit 橋接器
 HA 本地自動化 ─> HA 的設備整合
-SwitchBot 雲端 webhook ─> HB（只轉「去重讀」提示）─> HA        ← 待移除
+SwitchBot 雲端 webhook ─> 家中主機的 Tailscale Funnel（只放行 HA 的 webhook 路徑）─> HA
 電腦監控 ─> HB（只能回報指標）
 ```
 

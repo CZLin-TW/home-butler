@@ -29,7 +29,7 @@ homebutler/
   settings.py        所有環境變數，啟動時讀一次；值不對就停並說出變數名（不說值）
   store/             SQLAlchemy 資料表（models.py）與 Alembic 版本（migrations/）；PostgreSQL 用 schema hb，每張表開 RLS
   domain/            規則本身（待辦、食品、設備、排程與自動關機、成員、金鑰、配對、對話）
-  integrations/      外部服務（HA 連線、LINE、試算表設定同步、Notion、天氣、SwitchBot 推送轉交）
+  integrations/      外部服務（HA 連線、LINE、試算表設定同步、Notion、天氣）
   assistant/         LINE 管家：提示詞（逐字沿用舊版，改之前先問使用者）、動作、回覆規則
   api/               路由：Dashboard 的 /v2、HA 的 WebSocket、LINE webhook、監控回報
   jobs/              背景工作（排程、提醒、Notion、每日推播、告警、備份、設定同步）

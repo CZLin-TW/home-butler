@@ -1,8 +1,7 @@
-"""The two relays that pass through this service to Home Assistant: SwitchBot's webhook (a hint to re-read
-a Hub 2; see integrations/switchbot_push.py, marked for removal) and the home theater controls."""
-from __future__ import annotations
+"""The home theater controls, passed through this service to Home Assistant.
 
-import json
+(SwitchBot's webhook used to come here too; since 2026-10-25 SwitchBot notifies Home Assistant directly.)"""
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
@@ -10,21 +9,6 @@ from pydantic import BaseModel, ConfigDict
 from homebutler.api.auth import DashboardUser, dashboard_user
 
 router = APIRouter()
-MAX_WEBHOOK_BYTES = 16384
-
-
-@router.post("/v2/switchbot/webhook")
-@router.post("/switchbot/webhook")     # the address SwitchBot already has; kept so a switch back needs no re-registration
-async def switchbot_webhook(request: Request):
-    """Unsigned by SwitchBot, so it carries no authority: at most one bounded re-read of a hub HA chose.
-    Always answers the same way, telling a caller nothing."""
-    raw = await request.body()
-    if len(raw) <= MAX_WEBHOOK_BYTES:
-        try:
-            await request.app.state.hub_relay.notify(json.loads(raw))
-        except ValueError:
-            pass
-    return {"ok": True}
 
 
 async def _theater(request: Request, action: str, payload: dict) -> dict:

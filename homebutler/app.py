@@ -86,17 +86,6 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
             if settings.keys():
                 from homebutler.domain import tokens
                 log.info("keys from the environment: %s", tokens.from_environment(session, settings.keys()))
-        if settings.switchbot_register_webhook:
-            import threading
-            def point_webhook_here():
-                import httpx
-                from homebutler.integrations.switchbot_push import register
-                try:
-                    log.info("SwitchBot webhook: %s", register(settings.public_base_url + "/v2/switchbot/webhook",
-                                                              settings.switchbot_token, settings.switchbot_secret, httpx.Client()))
-                except Exception as error:
-                    log.warning("SwitchBot webhook not registered (%s)", type(error).__name__)
-            threading.Thread(target=point_webhook_here, daemon=True).start()
         if settings.migrate_from_old:
             def bring_old_data():
                 from homebutler import migration
@@ -135,8 +124,6 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
         app.include_router(module.router)
     from homebutler.domain.remotes import Guard
     app.state.remote_guard = Guard()
-    from homebutler.integrations.switchbot_push import HubRelay
-    app.state.hub_relay = HubRelay(link)
     from homebutler.domain.device_targets import ACTarget, IRTarget
     from homebutler.integrations.ha.commands import Commands
     commands = Commands(link, lambda: getattr(app.state, "loop", None))

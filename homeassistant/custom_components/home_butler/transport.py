@@ -52,7 +52,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, hub_devices=None, hub_updates=None, environment=None, hue_commands=None, theater_commands=None, automations=None,
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, environment=None, hue_commands=None, theater_commands=None, automations=None,
                  path="/api/home-assistant", protocol=PROTOCOL, place=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + path + "/ws"
@@ -66,8 +66,6 @@ class OutboundLink:
         self.connected = False
         self.climates, self.commands = climates, commands
         self.ir_buttons, self.ir_commands = ir_buttons, ir_commands
-        self.hub_devices, self.hub_updates = hub_devices, hub_updates
-        self._hub_enabled = False
         self.environment, self.hue_commands = environment, hue_commands
         # The theater relay runs in its own lane: a Dashboard page load must never
         # block an AC command, and a concurrent relay call must never tear down the
@@ -103,8 +101,6 @@ class OutboundLink:
                     if acknowledgements.full():
                         raise LinkError("Unexpected acknowledgement")
                     acknowledgements.put_nowait(frame)
-                elif frame.get("type") == "hub_update" and self._hub_enabled:
-                    self.hub_updates(frame)
                 elif frame.get("type") == "theater_command" and self.theater_commands:
                     # Busy is an ordinary refusal here, not a protocol violation.
                     if theater_task and not theater_task.done():
@@ -142,8 +138,6 @@ class OutboundLink:
                     frame["environment"] = place(self.environment())
                 if self.ir_buttons:
                     frame["ir_buttons"] = place(self.ir_buttons())
-                if self._hub_enabled:
-                    frame["hub_devices"] = self.hub_devices()
                 if self._automations_enabled:
                     frame["automations"] = self.automations()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
@@ -176,12 +170,11 @@ class OutboundLink:
                 async with self.session.ws_connect(self.url, heartbeat=20, max_msg_size=131072,
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": self.protocol, "token": self.key,
-                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hub_updates": self.hub_updates is not None, "hue_control": self.hue_commands is not None,
+                                        "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hue_control": self.hue_commands is not None,
                                         "theater_relay": self.theater_commands is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != self.protocol:
                         raise LinkError("Invalid handshake")
-                    self._hub_enabled = self.hub_updates is not None and "hub_updates" in hello.get("capabilities", [])
                     self._automations_enabled = self.automations is not None and "automation_log" in hello.get("capabilities", [])
                     self.connected = True
                     if failed:
@@ -198,7 +191,7 @@ class OutboundLink:
                         raise LinkError("Backend Hue upgrade required")
                     if self.theater_commands and "theater_relay" not in hello.get("capabilities", []):
                         raise LinkError("Backend theater upgrade required")
-                    if (self.commands is not None or self._hub_enabled or self.environment
+                    if (self.commands is not None or self.environment
                             or self.hue_commands or self.theater_commands):
                         await self._serve_climates(ws)
                         delay = 5

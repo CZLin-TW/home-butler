@@ -8,10 +8,9 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.debounce import Debouncer
 
-from custom_components.switchbot_hub_light import push
+from custom_components.switchbot_hub_light import poll
 from custom_components.switchbot_hub_light.const import poll_interval
 from test_hub_light import setup_hub, cleanup_provider
-from test_hub_push import hint, DEVICE
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "cleanup_provider")
 
@@ -39,8 +38,8 @@ def clock(monkeypatch):
             return [timer for timer in self.timers if timer["active"]]
 
     clock = Clock()
-    monkeypatch.setattr(push, "monotonic", lambda: clock.now)
-    monkeypatch.setattr(push, "async_call_later", clock.schedule)
+    monkeypatch.setattr(poll, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(poll, "async_call_later", clock.schedule)
     return clock
 
 
@@ -75,51 +74,6 @@ async def test_local_timer_reads_one_native_sample_and_unload_cancels(hass, cloc
     assert manager.closed and not manager.tasks and not manager.pending and not clock.active
     clock.advance(600)
     coordinator.update_method.assert_awaited_once()
-
-
-async def test_push_resets_backup_deadline_and_pending_poll_merges_with_push(hass, clock):
-    native, source, entry, coordinator, own, manager = await setup(hass)
-    coordinator.update_method = AsyncMock(return_value={"lightLevel": 5})
-    clock.advance(59)
-    manager.receive(hint())
-    await drain(hass, manager)
-    clock.advance(1)
-    assert not manager.tasks  # No extra poll one second after Push.
-    clock.advance(58)
-    assert not manager.tasks
-    clock.advance(1)
-    assert manager.tasks
-    manager.receive(hint())  # Hint arriving before scheduled read is absorbed.
-    await drain(hass, manager)
-    assert coordinator.update_method.await_count == 2
-    assert len(clock.active) == 1
-
-
-async def test_hint_during_poll_keeps_last_edge_without_overlapping(hass, clock, monkeypatch):
-    native, source, entry, coordinator, own, manager = await setup(hass)
-    monkeypatch.setattr(push, "MIN_REFRESH_SECONDS", 0)
-    started, release = asyncio.Event(), asyncio.Event()
-    calls = 0
-
-    async def read():
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            started.set()
-            await release.wait()
-        return {"lightLevel": calls}
-
-    coordinator.update_method = read
-    clock.advance(60)
-    await asyncio.wait_for(started.wait(), 2)
-    for _ in range(10):
-        manager.receive(hint())
-    clock.advance(60)
-    assert calls == 1 and len(manager.tasks) == 1
-    release.set()
-    await drain(hass, manager)
-    assert calls == 2 and hass.states.get(own.entity_id).state == "2"
-    assert len(clock.active) == 1
 
 
 async def test_failure_retries_next_interval_and_native_reload_is_resolved(hass, clock):

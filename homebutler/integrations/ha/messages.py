@@ -1,6 +1,5 @@
 """The messages HA and this service exchange. Every field is checked; anything unexpected is refused and
 the connection dropped (HA reconnects), so a malformed frame can never become device state."""
-import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -8,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 PROTOCOLS = (1, 2)
 MAX_BYTES = 131072
 # What this service offers; HA turns on what it supports in its hello.
-CAPABILITIES = ["observations", "climate_control", "ir_control", "hub_updates", "environment", "hue_control",
+CAPABILITIES = ["observations", "climate_control", "ir_control", "environment", "hue_control",
                 "theater_relay", "automation_log"]
 
 
@@ -169,7 +168,6 @@ class Snapshot(BaseModel):
     ir_buttons: list[IRButtonState] = Field(default_factory=list, max_length=120)
     environment: list[EnvironmentReading] = Field(default_factory=list, max_length=80)
 
-    hub_devices: list[str] = Field(default_factory=list, max_length=20)
     # Absent unless the household opted in on the HA side.
     automations: Optional[AutomationReport] = None
 
@@ -181,9 +179,6 @@ class Snapshot(BaseModel):
                 raise ValueError("Duplicate environmental sensors")
         if len({(s.name, s.kind) for s in self.environment}) != len(self.environment):
             raise ValueError("Ambiguous sensor mapping")
-        if len(set(self.hub_devices)) != len(self.hub_devices) or any(
-                not re.fullmatch(r"[0-9A-F]{12}", device) for device in self.hub_devices):
-            raise ValueError("Invalid Hub 2 subscriptions")
         for key in ("id", "entity_id"):
             values = [getattr(item, key) for item in self.observations]
             if len(values) != len(set(values)):

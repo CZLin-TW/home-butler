@@ -1,4 +1,4 @@
-"""The Home Assistant connection: who may connect, snapshots, commands, and the SwitchBot hint relay."""
+"""The Home Assistant connection: who may connect, snapshots and commands."""
 import asyncio
 import unittest
 
@@ -7,7 +7,6 @@ from starlette.websockets import WebSocketDisconnect
 
 from homebutler.app import create_app
 from homebutler.domain import tokens
-from homebutler.integrations import switchbot_push
 from homebutler.integrations.ha.link import STALE_SECONDS, Link
 from homebutler.integrations.ha.messages import ClimateResult, Snapshot, TheaterResult
 from homebutler.settings import Settings
@@ -177,38 +176,6 @@ class WebSocketTests(StoreTest):
             with self.assertRaises(WebSocketDisconnect):
                 ws.receive_json()
         self.assertFalse(self.app.state.ha.online())
-
-
-class HubRelayTests(unittest.TestCase):
-    def body(self, **change):
-        context = {"deviceType": "WoHub2", "deviceMac": "AA:BB:CC:DD:EE:FF", "lightLevel": 7, "timeOfSample": 1000}
-        return {"eventType": "changeReport", "context": {**context, **change}}
-
-    def test_only_recent_hub_2_changes_count(self):
-        now = 1_760_000_000
-        self.assertEqual(switchbot_push.hub_changed(self.body(timeOfSample=now - 10), now=now), "AABBCCDDEEFF")
-        self.assertEqual(switchbot_push.hub_changed(self.body(timeOfSample=(now - 10) * 1000), now=now), "AABBCCDDEEFF")   # ms
-        for bad in (self.body(timeOfSample=now - 500), self.body(deviceType="Meter"), self.body(lightLevel=21),
-                    self.body(deviceMac="zz"), {"eventType": "other"}, None):
-            self.assertIsNone(switchbot_push.hub_changed(bad, now=now))
-
-    def test_relays_only_hubs_ha_asked_for_never_the_value(self):
-        link = Link()
-        socket = Socket()
-        link.connect(socket, {"hub_updates"})
-        link.receive(socket, Snapshot.model_validate({"type": "snapshot", "sequence": 1, "observations": [], "hub_devices": ["AABBCCDDEEFF"]}))
-        relay = switchbot_push.HubRelay(link)
-        import time
-        now = time.time()
-        async def go():
-            ok = await relay.notify(self.body(timeOfSample=now))
-            other = await relay.notify(self.body(timeOfSample=now, deviceMac="11:22:33:44:55:66"))
-            await asyncio.sleep(0.05)
-            return ok, other
-        ok, other = asyncio.run(go())
-        self.assertEqual((ok, other), (True, False))
-        self.assertEqual(len(socket.sent), 1)
-        self.assertEqual(set(socket.sent[0]), {"type", "device_id", "received_at"})     # no light level crosses
 
 
 if __name__ == "__main__":

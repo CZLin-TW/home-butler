@@ -1,8 +1,7 @@
 # Home Butler：HA 主動連接 HomeButler
 
-v1.50.0 Hub 2 推送通知：既有 SwitchBot → Render Webhook → HA WSS → 原生 API 驗證讀取。
-HA 管理光照實體；HB 夜燈引擎自 v1.53.0 移除，夜燈規則改在 HA 建立（舊 Sheet 保留但不執行）。
-這條快速資料路徑仍依賴 Render，詳見 [Hub 光照](hub-light.md)。
+Hub 2 的變化由 SwitchBot 直接通知 HA（2026-10-25 起，經家中主機的 Tailscale Funnel，HA 內建 SwitchBot Cloud 整合自己註冊與接收）；
+不再經過 HomeButler（`home_butler` 1.10.0 拿掉 Hub 訂閱）。夜燈規則在 HA，詳見 [Hub 光照](hub-light.md)。
 
 Hub 2 光照可透過獨立 [光照等級整合](hub-light.md) 補入 HA；其 1～20 級不是 lux，
 目前不加入本整合的 illuminance 同步通道。

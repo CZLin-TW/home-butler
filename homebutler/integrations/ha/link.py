@@ -48,7 +48,6 @@ class Link:
     climates: list = field(default_factory=list)
     ir_buttons: list = field(default_factory=list)
     environment: list = field(default_factory=list)
-    hub_devices: list = field(default_factory=list)
     automations: dict | None = None
     uncertain: set = field(default_factory=set)
     device_lane: dict = field(default_factory=dict)
@@ -111,7 +110,6 @@ class Link:
             self.climates = fresh
             self.ir_buttons = [i.model_dump() for i in snapshot.ir_buttons]
             self.environment = [i.model_dump() for i in snapshot.environment]
-            self.hub_devices = list(snapshot.hub_devices) if "hub_updates" in self.capabilities else []
             # Every snapshot carries the whole report; one without it means sharing was turned off.
             self.automations = snapshot.automations.model_dump() if snapshot.automations else None
             listeners = list(self.listeners)

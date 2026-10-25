@@ -3,7 +3,7 @@ from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from .source import light_level, resolve
-from .push import DIAGNOSTIC_SIGNAL
+from .poll import DIAGNOSTIC_SIGNAL
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 

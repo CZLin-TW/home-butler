@@ -114,5 +114,4 @@ class OldAddressTests(StoreTest):
         with TestClient(app) as client:
             self.assertEqual(client.get("/").json(), {"ok": True})                 # UptimeRobot
             self.assertEqual(client.head("/").status_code, 200)
-            self.assertEqual(client.post("/switchbot/webhook", content=b"{}").json(), {"ok": True})
             self.assertEqual(client.post("/callback", content=b"{}").status_code, 400)   # LINE: refused without a signature

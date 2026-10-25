@@ -63,10 +63,6 @@ class Settings:
     timezone: str = "Asia/Taipei"
     # SwitchBot (only to point its webhook here; HA does all device work). Registration is off unless asked,
     # because an account has one webhook address: a trial copy must never take it from the live service.
-    switchbot_token: str = field(default="", repr=False)
-    switchbot_secret: str = field(default="", repr=False)
-    switchbot_register_webhook: bool = False
-    public_base_url: str = ""
     notion_token: str = field(default="", repr=False)
     # The LINE butler. Without the channel secret and token the webhook refuses everything.
     line_channel_secret: str = field(default="", repr=False)
@@ -113,10 +109,6 @@ class Settings:
             default_household=_text(env, "DEFAULT_HOUSEHOLD", cls.default_household),
             dashboard_assertion_key=_text(env, "DASHBOARD_ASSERTION_KEY"),
             timezone=_text(env, "TZ_NAME", cls.timezone),
-            switchbot_token=_text(env, "SWITCHBOT_TOKEN"),
-            switchbot_secret=_text(env, "SWITCHBOT_SECRET"),
-            switchbot_register_webhook=_text(env, "SWITCHBOT_REGISTER_WEBHOOK") == "1",
-            public_base_url=_text(env, "PUBLIC_BASE_URL").rstrip("/"),
             notion_token=_text(env, "NOTION_TOKEN"),
             line_channel_secret=_text(env, "LINE_CHANNEL_SECRET"),
             line_channel_token=_text(env, "LINE_CHANNEL_ACCESS_TOKEN"),
@@ -139,9 +131,6 @@ class Settings:
             default_light_area=_text(env, "DEFAULT_LIGHT_AREA"),
             schedules_enabled=_text(env, "SCHEDULES", "1") != "0",
         )
-        if settings.switchbot_register_webhook and not (settings.switchbot_token and settings.switchbot_secret
-                                                         and settings.public_base_url.startswith("https://")):
-            raise SettingsError("SWITCHBOT_REGISTER_WEBHOOK needs SWITCHBOT_TOKEN, SWITCHBOT_SECRET and an https PUBLIC_BASE_URL")
         if settings.dashboard_assertion_key and len(settings.dashboard_assertion_key) < 32:
             raise SettingsError("DASHBOARD_ASSERTION_KEY must be at least 32 characters")
         if bool(settings.line_channel_secret) != bool(settings.line_channel_token):
