@@ -55,3 +55,53 @@ class TelemetryTests(StoreTest):
         for bad in ({**BEAT, "system_power_w": 0}, {**BEAT, "cpu_pct": 120}, {**BEAT, "memory_pressure": {"pct": 37.5}},
                     {**BEAT, "smc_temperature": {"tcmb_c": 44, "other": 1}}, {k: v for k, v in BEAT.items() if k != "ip"}):
             self.assertEqual(self.post(self.mac, bad).status_code, 422, bad)
+
+
+class ThroughHomeAssistantTests(StoreTest):
+    """Machines HA reads on the home network and passes on with its snapshots."""
+
+    def report(self, sampled_at, **beat):
+        return computers.Report(source="mac-mini", sampled_at=sampled_at, heartbeat={**BEAT, **beat},
+                                watchdogs=[{"name": "funnel", "healthy": True, "last_line": "ok", "extra": "ignored"}])
+
+    def test_the_first_report_takes_over_the_keyed_card_and_each_sample_counts_once(self):
+        with self.store.transaction() as s:
+            token, _ = tokens.issue(s, "telemetry", "Mac mini")
+            computers.record(s, token, computers.Heartbeat.model_validate(BEAT), utcnow())
+        with self.store.transaction() as s:
+            self.assertIsNotNone(computers.record_report(s, self.report(100), utcnow()))
+            self.assertIsNone(computers.record_report(s, self.report(100), utcnow()))      # same sample again
+            self.assertIsNotNone(computers.record_report(s, self.report(160, cpu_pct=30), utcnow()))
+        with self.store.transaction() as s:
+            mac = s.query(Computer).one()                                                   # one card, history goes on
+            self.assertEqual((mac.source, mac.token_id is not None), ("mac-mini", True))
+            self.assertEqual(s.query(ComputerMetric).filter_by(computer_id=mac.id).count(), 3)
+            self.assertEqual(mac.current["cpu_pct"], 30)
+            self.assertEqual(mac.current["watchdogs"], [{"name": "funnel", "healthy": True, "last_line": "ok",
+                                                         "last_action": None, "paused": False}])
+
+    def test_a_new_machine_through_ha_gets_its_own_card(self):
+        with self.store.transaction() as s:
+            computers.record_report(s, self.report(100, ip="10.0.0.77"), utcnow())
+            self.assertEqual(s.query(Computer).one().token_id, None)
+
+    def test_a_report_must_name_its_source_plainly(self):
+        for bad in ("", "Mac Mini", "../x", "a" * 41):
+            with self.assertRaises(ValueError):
+                computers.Report(source=bad, sampled_at=1, heartbeat=BEAT)
+
+    def test_a_snapshot_carries_reports_to_the_recording_job(self):
+        from homebutler.integrations.ha.link import Link
+        from homebutler.integrations.ha.messages import Snapshot
+        from homebutler.jobs import devices as device_jobs
+
+        class Socket:
+            async def send_json(self, frame): pass
+        link, socket = Link(), Socket()
+        link.connect(socket, {"observations", "computer_reports"})
+        link.receive(socket, Snapshot.model_validate({"type": "snapshot", "sequence": 1, "observations": [],
+                                                      "computers": [self.report(100).model_dump()]}))
+        self.assertEqual(device_jobs.record_computers(self.store, link), 1)
+        self.assertEqual(device_jobs.record_computers(self.store, link), 0)       # the next snapshot repeats it
+        link.disconnect(socket)
+        self.assertEqual(link.computer_reports(), [])                                # HA away: nothing to record

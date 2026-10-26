@@ -64,7 +64,7 @@ main.py              進入點（Render 執行 uvicorn main:app）
 | 對象 | 什麼變動會觸發 |
 | --- | --- |
 | Render 後端 | 後端程式與相依檔（Render 後台的 Build Filters 排除了文件、`agent/`、`homeassistant/`、`tests/` 等）。Auto-Deploy 設為 CI 通過後才部署 |
-| Mac mini 監控程式 | 只看 `agent/macos_daemon/auto_update/update.py` 的 `FILES` 清單，CI 通過、兩次自然回報才接受 |
+| Mac mini 監控程式 | 舊的 `agent/macos_daemon/` 自動更新只看 `auto_update/update.py` 的 `FILES` 清單（2026-10-27 起改由 HA 讀取，舊機制停用後移除）。新的 `agent/mac_metrics_server.py` 不會自動安裝，由對話在家中主機手動套用 |
 | Windows 代理程式 | 任何變動都可能讓它重啟一次（那台預定淘汰） |
 | HA 自訂整合 | 不會自動安裝，要手動裝並重啟 HA |
 

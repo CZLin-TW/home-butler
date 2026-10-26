@@ -343,10 +343,13 @@ class AcReading(Base):
 # ── Computers (telemetry senders) ─────────────────────────────────────────────
 
 class Computer(Base):
-    """A machine that reports its health every minute. Known by its own key, never by the address it reports."""
+    """A machine that reports its health every minute: through Home Assistant, known by the source name HA
+    gives it (2026-10 on), or directly with a key of its own (the Windows PC until it retires). Never by
+    the address it reports."""
     __tablename__ = "computers"
     id: Mapped[int] = mapped_column(primary_key=True)
-    token_id: Mapped[int] = mapped_column(ForeignKey("api_tokens.id"), unique=True)
+    token_id: Mapped[int | None] = mapped_column(ForeignKey("api_tokens.id"), unique=True)
+    source: Mapped[str | None] = mapped_column(String(80), unique=True)
     hostname: Mapped[str] = mapped_column(String(80), default="")
     ip: Mapped[str] = mapped_column(String(45), default="")
     cpu_model: Mapped[str] = mapped_column(String(128), default="")

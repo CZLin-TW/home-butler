@@ -1,7 +1,8 @@
 """Health alerts on LINE, every 5 minutes. They only watch; nothing here controls a device.
 
 Checks (each on its own; one failing never skips the others):
-- each computer that reports its health: silent for more than AGENT_OFFLINE_ALERT_SECONDS (15 min);
+- each computer that reports its health: silent for more than AGENT_OFFLINE_ALERT_SECONDS (15 min); one that
+  reports through HA is not judged while HA is away (that alert covers it);
 - Home Assistant's connection to this service: down for more than 15 minutes (new: HA is now the only
   way to the devices, so its absence matters more than any one computer);
 - the theater relay: 3 failed status reads in a row, checked only while HA is online and offers it;
@@ -86,10 +87,11 @@ class Health:
     def computers(self) -> None:
         now = self.clock()
         with self.store.transaction() as s:
-            found = [(c.id, c.hostname or "電腦", c.last_heartbeat_at) for c in s.scalars(select(Computer))]
-        for computer_id, name, last in found:
-            if last is None:
-                continue
+            found = [(c.id, c.hostname or "電腦", c.last_heartbeat_at, c.source) for c in s.scalars(select(Computer))]
+        ha_up = self.link.online()
+        for computer_id, name, last, source in found:
+            if last is None or (source and not ha_up):
+                continue                       # reported through HA: HA's own alert covers its absence
             silent = now - last
             self._report(f"computer:{computer_id}", silent > self.offline,
                          f"🔴 電腦監控失聯\n\n{name}\n最後回報：{last.astimezone(self.zone).strftime('%m/%d %H:%M')}"

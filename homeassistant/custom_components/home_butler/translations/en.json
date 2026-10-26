@@ -42,7 +42,8 @@
           "theater_url": "Legacy theater address (cleared when selecting the local integration)",
           "theater_key": "Legacy theater API key",
           "theater_entry": "Local Theater Agent integration (recommended)",
-          "automation_log": "Share the automation list and recent runs (read-only)"
+          "automation_log": "Share the automation list and recent runs (read-only)",
+          "computers": "Computers on the home network to pass on (one `source=http://<address>:<port>/metrics` per line)"
         }
       }
     },

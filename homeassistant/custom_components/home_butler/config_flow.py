@@ -10,6 +10,7 @@ from .const import CONF_EXPORT, CONF_KEY, CONF_SOURCES, CONF_THEATER_ENTRY, CONF
 from .observations import current_entity_ids, select_sources
 from .transport import AuthError, LinkError, normalize_url, validate_connection
 from .climates import select_climates
+from . import computers
 from .ir_buttons import select_buttons
 from .environment import select_environment, current_mapping
 from .hue import group_options, select_groups
@@ -106,6 +107,7 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
                 return self.async_create_entry(title="", data={CONF_SOURCES: sources, "climates": climates, "ir_buttons": buttons, "environment": environment, "hue_groups": groups,
                                                                CONF_THEATER_ENTRY: theater_entry,
                                                                "automation_log": bool(user_input.get("automation_log", entry.options.get("automation_log", False))),
+                                                               "computers": computers.parse(user_input.get("computers", computers.unparse(entry.options.get("computers", [])))),
                                                                CONF_THEATER_URL: theater_url, CONF_THEATER_KEY: theater_key if theater_url else ""})
             except ValueError:
                 errors["base"] = "invalid_input"
@@ -133,4 +135,6 @@ class HomeButlerOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_THEATER_ENTRY, default=selected_theater):
                 selector.SelectSelector(selector.SelectSelectorConfig(options=theater_options)),
             vol.Optional("automation_log", default=bool(entry.options.get("automation_log", False))): bool,
+            vol.Optional("computers", default=computers.unparse(entry.options.get("computers", []))):
+                selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         }), errors=errors)

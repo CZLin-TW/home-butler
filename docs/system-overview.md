@@ -14,7 +14,7 @@
 | Home Assistant（HA） | 家中主機上的虛擬機 | 唯一的設備層：空調、紅外線、感測器、照明、劇院開關；即時自動化；Apple 家庭的 HomeKit 橋接 | [HA 整合](../homeassistant/README.md) |
 | [theater-agent](https://github.com/CZLin-TW/theater-agent)（私人） | 家中主機 | AVR／KEF 連動、Bravia 畫面恢復、Apple TV 監控；經 HA 的整合對外 | 該 repo 的 README、AGENTS（需要存取權） |
 | 攝影機存在感測（私人） | 家中主機 | 從攝影機畫面判斷各區域有沒有人，經 MQTT 送進 HA | 該 repo 的文件 |
-| 電腦監控 | Mac：家中主機上的系統服務；Windows：預定淘汰的 PC | 每 60 秒回報系統指標給 HB，各用自己的金鑰 | [macOS](../agent/macos_daemon/README.md)、[PC agent](../agent/README.md) |
+| 電腦監控 | Mac：家中主機上的只讀小服務（`agent/mac_metrics_server.py`）；Windows：預定淘汰的 PC | Mac 由 HA 每分鐘讀取、經 HA 的連線轉給 HB（不帶金鑰）；Windows 每 60 秒用自己的金鑰直接回報 | [mac_metrics_server.py](../agent/mac_metrics_server.py)、[PC agent](../agent/README.md) |
 
 ## 資料與控制路徑
 
@@ -31,7 +31,8 @@
 家人 ─ Apple 家庭／Siri ─> HA 的 HomeKit 橋接器
 HA 本地自動化 ─> HA 的設備整合
 SwitchBot 雲端 webhook ─> 家中主機的 Tailscale Funnel（只放行 HA 的 webhook 路徑）─> HA
-電腦監控 ─> HB（只能回報指標）
+家中主機的監控 <─ HA 讀取 ─> HB（附在快照裡）
+Windows 電腦監控 ─> HB（只能回報指標；淘汰時移除）
 ```
 
 - HB 從不直接連設備；HA 斷線、或超過 90 秒沒有新資料，所有設備狀態顯示「未知」，指令一律拒絕。

@@ -110,6 +110,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None, she
     from homebutler.jobs import devices as device_jobs
     jobs.add("devices", 60, lambda: device_jobs.sync_registry(store, link, settings.default_household))
     jobs.add("history", 300, lambda: device_jobs.sample_history(store, link))
+    jobs.add("computers", 30, lambda: device_jobs.record_computers(store, link))
 
     app = FastAPI(title="HomeButler", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings, app.state.store, app.state.jobs = settings, store, jobs

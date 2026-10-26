@@ -52,7 +52,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, environment=None, hue_commands=None, theater_commands=None, automations=None,
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, environment=None, hue_commands=None, theater_commands=None, automations=None, computers=None,
                  path="/api/home-assistant", protocol=PROTOCOL, place=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + path + "/ws"
@@ -71,6 +71,10 @@ class OutboundLink:
         # block an AC command, and a concurrent relay call must never tear down the
         # link the way the shared command guard below does.
         self.theater_commands = theater_commands
+        # Machines HA reads on the home network (computers.py); like the automation report, sent only
+        # to a backend that accepts it.
+        self.computers = computers
+        self._computers_enabled = False
         # Optional display-only report; sent only to a backend that says it accepts it,
         # because an older one rejects unknown snapshot fields and would drop the link.
         self.automations = automations
@@ -140,6 +144,8 @@ class OutboundLink:
                     frame["ir_buttons"] = place(self.ir_buttons())
                 if self._automations_enabled:
                     frame["automations"] = self.automations()
+                if self._computers_enabled:
+                    frame["computers"] = self.computers()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
                     raise LinkError("Snapshot too large")
                 await ws.send_json(frame)
@@ -171,11 +177,13 @@ class OutboundLink:
                                                     timeout=aiohttp.ClientWSTimeout(ws_receive=45)) as ws:
                     await ws.send_json({"type": "hello", "protocol": self.protocol, "token": self.key,
                                         "climate_control": self.commands is not None, "ir_control": self.ir_commands is not None, "hue_control": self.hue_commands is not None,
-                                        "theater_relay": self.theater_commands is not None})
+                                        "theater_relay": self.theater_commands is not None,
+                                        "computer_reports": self.computers is not None})
                     hello = await asyncio.wait_for(ws.receive_json(), 15)
                     if not isinstance(hello, dict) or hello.get("type") != "hello_ack" or hello.get("protocol") != self.protocol:
                         raise LinkError("Invalid handshake")
                     self._automations_enabled = self.automations is not None and "automation_log" in hello.get("capabilities", [])
+                    self._computers_enabled = self.computers is not None and "computer_reports" in hello.get("capabilities", [])
                     self.connected = True
                     if failed:
                         _LOGGER.info("HomeButler local link recovered")
@@ -209,6 +217,8 @@ class OutboundLink:
                         frame = {"type": "snapshot", "sequence": sequence, "observations": (self.place or (lambda i: i))(self.snapshot())}
                         if self._automations_enabled:
                             frame["automations"] = self.automations()
+                        if self._computers_enabled:
+                            frame["computers"] = self.computers()
                         if len(json.dumps(frame).encode("utf-8")) > 131072:
                             raise LinkError("Snapshot too large")
                         await ws.send_json(frame)

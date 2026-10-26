@@ -49,6 +49,7 @@ class Link:
     ir_buttons: list = field(default_factory=list)
     environment: list = field(default_factory=list)
     automations: dict | None = None
+    computers: list = field(default_factory=list)       # reports HA passed on, newest per machine
     uncertain: set = field(default_factory=set)
     device_lane: dict = field(default_factory=dict)
     theater_lane: dict = field(default_factory=dict)
@@ -112,10 +113,16 @@ class Link:
             self.environment = [i.model_dump() for i in snapshot.environment]
             # Every snapshot carries the whole report; one without it means sharing was turned off.
             self.automations = snapshot.automations.model_dump() if snapshot.automations else None
+            self.computers = list(snapshot.computers or [])
             listeners = list(self.listeners)
         for listener in listeners:
             listener(self)
         return True
+
+    def computer_reports(self) -> list:
+        """The latest machine reports HA passed on; none while HA is away (they would only repeat)."""
+        with self.lock:
+            return list(self.computers) if self.online() else []
 
     def state(self) -> dict:
         """What is known now; values read as unknown while offline."""

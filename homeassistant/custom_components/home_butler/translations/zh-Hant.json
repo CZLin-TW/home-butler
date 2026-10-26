@@ -42,7 +42,8 @@
           "theater_url": "舊版劇院直連位址（選本地整合後會清除）",
           "theater_key": "舊版劇院直連金鑰",
           "theater_entry": "本地 Theater Agent 整合（建議）",
-          "automation_log": "分享自動化清單與最近的執行記錄（唯讀）"
+          "automation_log": "分享自動化清單與最近的執行記錄（唯讀）",
+          "computers": "要轉給 HomeButler 的區網電腦（一行一台：`名稱=http://<位址>:<埠>/metrics`）"
         }
       }
     },

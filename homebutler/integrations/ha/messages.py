@@ -4,10 +4,12 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from homebutler.domain.computers import Report as ComputerReport
+
 PROTOCOLS = (1, 2)
 MAX_BYTES = 131072
 # What this service offers; HA turns on what it supports in its hello.
-CAPABILITIES = ["observations", "climate_control", "ir_control", "environment", "hue_control",
+CAPABILITIES = ["observations", "climate_control", "ir_control", "environment", "hue_control", "computer_reports",
                 "theater_relay", "automation_log"]
 
 
@@ -170,6 +172,8 @@ class Snapshot(BaseModel):
 
     # Absent unless the household opted in on the HA side.
     automations: Optional[AutomationReport] = None
+    # Machines HA reads on the home network (the Mac mini); absent unless configured there.
+    computers: Optional[list[ComputerReport]] = Field(default=None, max_length=8)
 
     @model_validator(mode="after")
     def unique_entities(self):

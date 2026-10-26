@@ -14,6 +14,7 @@ from . import environment
 from .hue import HueCommands
 from .theater import LocalTheaterRelay, TheaterRelay
 from .automations import AutomationLog
+from .computers import ComputerReader
 from .placement import placer
 
 
@@ -40,6 +41,8 @@ async def async_setup_entry(hass, entry):
     else:
         theater = TheaterRelay(session, theater_url, theater_key) if theater_url and theater_key else None
     automation_log = AutomationLog(hass) if entry.options.get("automation_log") else None
+    machines = entry.options.get("computers", [])
+    reader = ComputerReader(session, machines, lambda: link.notify()) if machines else None
     link = OutboundLink(session, entry.data[CONF_URL], entry.data[CONF_KEY], lambda: snapshot(hass, sources),
                         climates=(lambda: climate_snapshot(hass, climates)) if climates else None,
                         commands=ClimateCommands(hass, climates) if climates or buttons else None,
@@ -49,6 +52,7 @@ async def async_setup_entry(hass, entry):
                         hue_commands=HueCommands(hass, groups) if groups else None,
                         theater_commands=theater,
                         automations=automation_log.snapshot if automation_log else None,
+                        computers=reader.snapshot if reader else None,
                         path=path, protocol=protocol, place=placer(hass))
 
     @callback
@@ -77,6 +81,9 @@ async def async_setup_entry(hass, entry):
     for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):
         entry.async_on_unload(hass.bus.async_listen(event_type, changed))
     task = hass.async_create_background_task(link.run(), "HomeButler outbound link")
+    if reader:
+        reading = hass.async_create_background_task(reader.run(), "HomeButler computer reader")
+        entry.async_on_unload(reading.cancel)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = (link, task)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
