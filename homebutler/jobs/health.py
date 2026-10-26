@@ -5,6 +5,9 @@ Checks (each on its own; one failing never skips the others):
 - Home Assistant's connection to this service: down for more than 15 minutes (new: HA is now the only
   way to the devices, so its absence matters more than any one computer);
 - the theater relay: 3 failed status reads in a row, checked only while HA is online and offers it;
+- presence: any occupancy sensor HA shares (the camera zones, the room groups) unavailable for more than
+  15 minutes while HA itself is connected (2026-10-26: the camera sat waiting for a manual reconnect for
+  19 hours and no one knew; the living room's automations were idle all that time);
 - the daily backup: no success for 30 hours.
 
 Only a change between fine and not fine is announced (LINE's free plan allows 200 pushes a month, and
@@ -24,6 +27,7 @@ from homebutler.store.models import Computer
 
 log = logging.getLogger("homebutler.jobs.health")
 HA_GRACE = timedelta(minutes=15)
+PRESENCE_GRACE = timedelta(minutes=15)
 THEATER_STREAK = 3
 
 
@@ -48,6 +52,7 @@ class Health:
         self.backup, self.theater = backup, theater
         self.theater_failures = 0
         self.ha_lost_at: datetime | None = None
+        self.presence_lost: dict[str, datetime] = {}     # sensor name -> first seen unavailable
 
     def _report(self, key: str, bad: bool, bad_text: str, ok_text) -> None:
         now = self.clock()
@@ -104,6 +109,22 @@ class Health:
                          "這段期間看不到也控制不了家電，排程會等到恢復（超過兩小時的會過期）。\n"
                          "處理：確認家裡的網路與 Mac mini、HA 是否正常", lambda outage: "")
 
+    def presence(self) -> None:
+        if not self.link.online():
+            self.presence_lost = {}        # HA's own alert covers this, and no sensor can be judged
+            return
+        now = self.clock()
+        down = [o["name"] for o in self.link.state().get("observations", [])
+                if o.get("kind") == "occupancy" and not o.get("available")]
+        self.presence_lost = {name: self.presence_lost.get(name, now) for name in down}
+        long = [name for name, since in self.presence_lost.items() if now - since >= PRESENCE_GRACE]
+        if long:
+            self._report("presence", True,
+                         f"🔴 空間感測無法使用\n\n{'、'.join(long)}\n已超過 15 分鐘沒有資料，這段期間依它動作的自動化（開關燈、冷氣）不會觸發。\n\n"
+                         "處理：打開 Floor Presence 頁面看主相機；顯示需要手動連線時，按「使用已儲存帳密連線」", lambda outage: "")
+        elif not down:
+            self._report("presence", False, "", lambda outage: f"🟢 空間感測恢復\n\n中斷約 {humanize(outage)}")
+
     def theater_relay(self) -> None:
         if self.theater is None or not self.link.can("theater_relay"):
             self.theater_failures = 0
@@ -129,7 +150,7 @@ class Health:
                      lambda outage: "✅ HomeButler 的資料庫備份恢復正常。")
 
     def run(self) -> None:
-        for check in (self.computers, self.home_assistant, self.theater_relay, self.backups):
+        for check in (self.computers, self.home_assistant, self.presence, self.theater_relay, self.backups):
             try:
                 check()
             except Exception:

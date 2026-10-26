@@ -56,6 +56,7 @@ class FakeWeather:
 class FakeLink:
     def __init__(self):
         self.up = True
+        self.observations = []
 
     def online(self):
         return self.up
@@ -64,7 +65,7 @@ class FakeLink:
         return self.up
 
     def state(self):
-        return {"online": self.up, "climates": [], "environment": []}
+        return {"online": self.up, "climates": [], "environment": [], "observations": self.observations}
 
 
 class Base(StoreTest):
@@ -152,6 +153,38 @@ class HealthTests(Base):
         self.link.up = True
         health.run()
         self.assertIn("🟢 Home Assistant 已重新連上", self.push.sent[-1][1])
+
+    def test_presence_unavailable_for_15_minutes_is_announced_and_its_recovery(self):
+        health = self.make()
+        zone = lambda name, available: {"name": name, "kind": "occupancy", "value": None, "available": available}
+        self.link.observations = [zone("客廳", False), zone("廚房", True), {"name": "光照", "kind": "illuminance", "available": False}]
+        health.run()
+        self.clock.advance(minutes=14)
+        health.run()
+        self.assertEqual(self.push.sent, [])
+        self.link.observations[1] = zone("廚房", False)          # a second one goes later
+        self.clock.advance(minutes=2)
+        health.run()
+        self.assertEqual(len(self.push.sent), 1)
+        self.assertIn("🔴 空間感測無法使用", self.push.sent[0][1])
+        self.assertIn("客廳", self.push.sent[0][1])
+        self.assertNotIn("廚房", self.push.sent[0][1])            # not yet 15 minutes
+        self.assertNotIn("光照", self.push.sent[0][1])            # only presence counts
+        self.link.observations = [zone("客廳", True), zone("廚房", False)]
+        health.run()
+        self.assertEqual(len(self.push.sent), 1)                  # still one down: no recovery yet
+        self.link.observations = [zone("客廳", True), zone("廚房", True)]
+        health.run()
+        self.assertIn("🟢 空間感測恢復", self.push.sent[-1][1])
+
+    def test_presence_is_not_judged_while_ha_is_away(self):
+        health = self.make()
+        self.link.observations = [{"name": "客廳", "kind": "occupancy", "value": None, "available": False}]
+        self.link.up = False
+        health.run()
+        self.clock.advance(minutes=16)
+        health.run()
+        self.assertTrue(all("空間感測" not in text for _, text in self.push.sent))
 
     def test_theater_needs_three_failures(self):
         health = self.make()
