@@ -73,7 +73,7 @@ main.py              進入點（Render 執行 uvicorn main:app）
 - 新系統：`venv/bin/python -m homebutler.tests.run`（本機用 SQLite；CI 另用真的 PostgreSQL 跑同一套）。
 - HA 整合：CI 的 HA job（`homeassistant/`，pytest，HA 版本與家裡相同）。
 - 舊系統的測試仍在 `tests/`，切換完成並收尾後移除。
-- Mac 監控程式：`python agent/macos_daemon/build.py --config agent/macos_daemon/config.example.json --output <新資料夾> --tests-only`。
+- Mac 監控（給 HA 讀的小服務）：`venv/bin/python -m unittest tests.test_mac_metrics_server`；HA 那端的讀取在 HA job 的 `homeassistant/tests/test_computers.py`。舊的 `agent/macos_daemon/` 已停用，移除時連同 `tests/test_macos_*` 一起刪。
 
 ## 試跑
 

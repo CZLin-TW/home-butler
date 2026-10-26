@@ -1,5 +1,8 @@
 # macOS telemetry daemon 原始碼
 
+> **2026-10-27 起停用**：Mac mini 的監控改由 HA 讀取家中主機上的只讀小服務（[`agent/mac_metrics_server.py`](../mac_metrics_server.py)），經 HA 的連線轉給 HomeButler，不再需要這裡的金鑰、簽章程式與自動更新程式。
+> 家中主機上的舊系統服務已暫停，移除後這個資料夾與 `tests/test_macos_*` 一併刪除。以下是停用前的說明。
+
 獨立於 Windows agent、vision、theater 及家電控制。Swift sender 在採樣完成後才讀自己的
 System Keychain item，直接送既有 `/api/computers/heartbeat`；Python collector 不接觸 key。
 LaunchDaemon 使用明確指定的非 root 使用者，每 60 秒採樣一次，成功後退出。舊版安裝器維持手動更新；完整自動更新使用下述獨立入口。
