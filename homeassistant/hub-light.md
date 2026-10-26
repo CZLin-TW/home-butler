@@ -38,7 +38,7 @@ Hub 2 原生溫度實體，例如客廳、主臥、次臥。選溫度只是識�
 SwitchBot 的變化通知由 HA 內建的 SwitchBot Cloud 整合直接接收：HA 設了對外網址後，它自己向 SwitchBot 註冊
 webhook，收到 Hub 2 的通知就更新溫度、濕度與光照（本整合讀同一份資料，所以光照同一秒更新）。
 對外入口是家中主機的 Tailscale Funnel，只放行 HA 的 webhook 路徑；安裝、退路與注意事項在家中主機的
-`~/Services/ha-webhook-relay/README.md`（不在 repo）。
+`~/Services/watchdogs/ha-webhook-relay/README.md`（不在 repo；家中主機的這類小服務集中在 `~/Services/watchdogs/`）。
 
 v1.50.0～2026-10-25 曾經走 SwitchBot → HomeButler → HA 的「去重讀」提示；1.3.0 起本整合不再接收提示，
 `home_butler` 1.10.0 也不再訂閱 Hub。本整合只剩下面的備援定時讀取，用來補漏接的通知，建議設 600 秒
