@@ -100,3 +100,39 @@ async def test_service_failure_or_missing_state_confirmation_is_unknown(hass):
         pass
     hass.services.async_register("climate", "turn_off", noop)
     assert (await controller.execute(command(source, {"power": "off"})))["status"] == "unknown"
+
+
+def pairing(hass, native):
+    entry = er.async_get(hass).async_get_or_create("climate", "ac_room_temperature", "living-room")
+    hass.states.async_set(entry.entity_id, "cool", {"source_climate": native.entity_id})
+    return entry
+
+
+async def test_auto_goes_to_the_room_temperature_pairing_and_accepts_its_choice(hass):
+    entry = ac(hass)
+    hass.states.async_set(entry.entity_id, "off", {**hass.states.get(entry.entity_id).attributes})
+    paired = pairing(hass, entry)
+    source = select_climates(hass, [entry.entity_id])[0]
+    controller = ClimateCommands(hass, [source])
+    calls = []
+    async def service(call):                      # the pairing picks heat and relays it to the AC
+        calls.append(call)
+        state = hass.states.get(entry.entity_id)
+        hass.states.async_set(entry.entity_id, "heat", {**state.attributes, "temperature": call.data["temperature"]})
+    hass.services.async_register("climate", "set_temperature", service)
+    result = await controller.execute(command(source, {"power": "on", "mode": "heat_cool", "temperature": 25}))
+    assert [c.data for c in calls] == [{"entity_id": paired.entity_id, "temperature": 25, "hvac_mode": "heat_cool"}]
+    assert result["status"] == "success" and result["state"]["hvac_mode"] == "heat"
+
+
+async def test_auto_without_a_pairing_sends_nothing(hass):
+    entry = ac(hass)
+    source = select_climates(hass, [entry.entity_id])[0]
+    controller = ClimateCommands(hass, [source])
+    calls = []
+    async def service(call):
+        calls.append(call)
+    for name in ("set_temperature", "set_hvac_mode"):
+        hass.services.async_register("climate", name, service)
+    assert (await controller.execute(command(source, {"power": "on", "mode": "heat_cool"})))["status"] == "failed"
+    assert not calls

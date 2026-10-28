@@ -13,6 +13,12 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 MODES = [HVACMode.OFF, HVACMode.COOL, HVACMode.HEAT, HVACMode.DRY, HVACMode.FAN_ONLY, HVACMode.HEAT_COOL]
+# Auto (HEAT_COOL) is ours, not the AC's: SwitchBot's IR code set has no auto mode (its API answers
+# "not match mode"), and the real remote's auto takes a +/- offset that SwitchBot's command cannot
+# express. So auto picks cooling or heating once, when the AC is turned on, from the paired room
+# sensor; the AC then runs and shows that mode. Already cooling or heating stays as it is.
+# Siri sends auto for a plain "turn on". The user's rule (2026-10-29): at or above this, cool.
+AUTO_COOL_FROM_C = 22
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -142,6 +148,10 @@ class RoomTemperatureClimate(ClimateEntity):
         self._refresh()
         if not self._source or self._source.state not in MODES:
             raise HomeAssistantError("原生空調目前無法使用")
+        if (data or {}).get("hvac_mode") == HVACMode.HEAT_COOL:
+            # Decided here, after the lock: a set_temperature queued behind the set_hvac_mode that
+            # HomeKit sends with it then sees the mode just chosen and keeps it.
+            data = {**data, "hvac_mode": self._auto_mode()}
         turning_off = service == "turn_off" or (data or {}).get("hvac_mode") == HVACMode.OFF
         needs_auto = self._auto_fan and not turning_off and self._attr("fan_mode") != "auto"
         if needs_auto and "auto" not in (self._attr("fan_modes") or []):
@@ -165,6 +175,17 @@ class RoomTemperatureClimate(ClimateEntity):
         self._refresh()
         self.async_write_ha_state()
 
+    def _auto_mode(self):
+        if self.hvac_mode in (HVACMode.COOL, HVACMode.HEAT):
+            return self.hvac_mode
+        if self._temperature is None:
+            raise HomeAssistantError("沒有室溫，無法決定開冷氣或暖氣")
+        celsius = TemperatureConverter.convert(self._temperature, self.temperature_unit, "°C")
+        mode = HVACMode.COOL if celsius >= AUTO_COOL_FROM_C else HVACMode.HEAT
+        if mode not in self._attr("hvac_modes", MODES):
+            raise HomeAssistantError("原生空調不支援冷氣或暖氣，未送出指令")
+        return mode
+
     async def async_set_hvac_mode(self, hvac_mode):
         if hvac_mode not in self.hvac_modes:
             raise HomeAssistantError("空調模式不支援")
@@ -180,6 +201,10 @@ class RoomTemperatureClimate(ClimateEntity):
             if kwargs["hvac_mode"] not in self.hvac_modes:
                 raise HomeAssistantError("空調模式不支援")
             data["hvac_mode"] = kwargs["hvac_mode"]
+        elif self.hvac_mode == HVACMode.OFF:
+            # Every SwitchBot command carries power too, so a temperature alone on an AC that is off
+            # goes out as an IR "off" signal, which the AC answers with a beep. Send nothing instead.
+            raise HomeAssistantError("空調關機中，只改溫度不會送出；請連同模式一起設定")
         await self._call("set_temperature", data)
 
     async def async_set_fan_mode(self, fan_mode):

@@ -287,3 +287,82 @@ async def test_fixed_auto_serializes_fan_and_target_with_other_paired_commands(h
         release.set()
         await asyncio.gather(first, second)
         assert [call.args[1] for call in calls.call_args_list] == ["set_fan_mode", "set_temperature", "turn_off"]
+
+
+def set_native(hass, ac, state, **attributes):
+    hass.states.async_set(ac.entity_id, state, {**hass.states.get(ac.entity_id).attributes, **attributes})
+
+
+def set_room(hass, sensor, value):
+    hass.states.async_set(sensor.entity_id, str(value), {"device_class": "temperature", "unit_of_measurement": "°C"})
+
+
+@pytest.mark.parametrize(("room", "chosen"), [(26.7, "cool"), (22, "cool"), (21.9, "heat"), (15, "heat")])
+async def test_auto_turning_on_picks_cool_from_22_and_heat_below(hass, room, chosen):
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, "off")
+    set_room(hass, sensor, room)
+    await hass.async_block_till_done()
+    assert "heat_cool" in hass.states.get(entity.entity_id).attributes["hvac_modes"]
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
+        await entity.async_set_hvac_mode("heat_cool")
+        assert calls.call_args.args == ("climate", "set_hvac_mode", {"entity_id": ac.entity_id, "hvac_mode": chosen})
+        await entity.async_set_temperature(temperature=28, hvac_mode="heat_cool")
+        assert calls.call_args.args == ("climate", "set_temperature",
+                                        {"entity_id": ac.entity_id, "temperature": 28, "hvac_mode": chosen})
+        assert all(call.args[2].get("hvac_mode") != "heat_cool" for call in calls.call_args_list)
+
+
+@pytest.mark.parametrize("running", ["cool", "heat"])
+async def test_auto_keeps_a_running_cool_or_heat(hass, running):
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, running)
+    set_room(hass, sensor, 30 if running == "heat" else 10)
+    await hass.async_block_till_done()
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
+        await entity.async_set_temperature(temperature=25, hvac_mode="heat_cool")
+        assert calls.call_args.args[2]["hvac_mode"] == running
+
+
+async def test_homekit_pair_of_auto_commands_sends_one_decision(hass):
+    """HomeKit sends set_hvac_mode and set_temperature together; the second follows the first's choice."""
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, "off")
+    set_room(hass, sensor, 23)
+    await hass.async_block_till_done()
+    sent = []
+    async def native(domain, service, data, **kwargs):
+        sent.append((service, data.get("hvac_mode")))
+        await asyncio.sleep(0)
+        if data.get("hvac_mode"):
+            set_native(hass, ac, data["hvac_mode"])
+        set_room(hass, sensor, 21)          # the room cools down meanwhile: the choice must not flip
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock(side_effect=native)):
+        await asyncio.gather(entity.async_set_hvac_mode("heat_cool"),
+                             entity.async_set_temperature(temperature=28, hvac_mode="heat_cool"))
+    assert sent == [("set_hvac_mode", "cool"), ("set_temperature", "cool")]
+
+
+async def test_auto_without_a_room_reading_sends_nothing(hass):
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, "off")
+    set_room(hass, sensor, "unavailable")
+    await hass.async_block_till_done()
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
+        with pytest.raises(HomeAssistantError, match="沒有室溫"):
+            await entity.async_set_hvac_mode("heat_cool")
+        calls.assert_not_called()
+
+
+async def test_temperature_alone_while_off_sends_nothing(hass):
+    """Every SwitchBot command carries power, so this would go out as an IR "off" and make the AC beep."""
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, "off")
+    await hass.async_block_till_done()
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
+        with pytest.raises(HomeAssistantError, match="只改溫度不會送出"):
+            await entity.async_set_temperature(temperature=28)
+        calls.assert_not_called()
+        await entity.async_set_temperature(temperature=28, hvac_mode="cool")
+        assert calls.call_args.args == ("climate", "set_temperature",
+                                        {"entity_id": ac.entity_id, "temperature": 28, "hvac_mode": "cool"})

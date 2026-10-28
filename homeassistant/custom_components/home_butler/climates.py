@@ -49,6 +49,19 @@ def snapshot(hass, sources):
     return states
 
 
+def auto_target(hass, native_entity_id):
+    """The room-temperature pairing of this AC. Auto is not the AC's own mode (SwitchBot cannot send
+    it): the pairing decides cooling or heating from its room sensor, so the rule lives in one place
+    for Siri, the Dashboard and LINE alike."""
+    registry = er.async_get(hass)
+    for state in hass.states.async_all("climate"):
+        entry = registry.async_get(state.entity_id)
+        if (entry and entry.platform == "ac_room_temperature"
+                and state.attributes.get("source_climate") == native_entity_id):
+            return state.entity_id
+    return None
+
+
 class ClimateCommands:
     def __init__(self, hass, sources):
         self.hass, self.sources = hass, sources
@@ -95,12 +108,18 @@ class ClimateCommands:
                 return result
             if patch["power"] == "off" and patch != {"power": "off"}:
                 return result
+            # Mode-setting calls for auto go to the room-temperature pairing, which picks cool or heat.
+            target = entry.entity_id
+            if mode == "heat_cool":
+                target = auto_target(self.hass, entry.entity_id)
+                if target is None:
+                    return result
             # All fields validated before the first side effect. Multiple native
             # service calls can partially succeed, hence failure becomes unknown.
             result["status"] = "unknown"
-            async def call(service, data=None):
+            async def call(service, data=None, entity_id=None):
                 await self.hass.services.async_call("climate", service,
-                    {"entity_id": entry.entity_id, **(data or {})}, blocking=True)
+                    {"entity_id": entity_id or entry.entity_id, **(data or {})}, blocking=True)
             try:
                 async with asyncio.timeout(20):
                     if patch["power"] == "off":
@@ -109,9 +128,9 @@ class ClimateCommands:
                         if mode is None and temp is not None and state.state == "off":
                             await call("turn_on")
                         if temp is not None:
-                            await call("set_temperature", {"temperature": temp, **({"hvac_mode": mode} if mode else {})})
+                            await call("set_temperature", {"temperature": temp, **({"hvac_mode": mode} if mode else {})}, target)
                         elif mode is not None:
-                            await call("set_hvac_mode", {"hvac_mode": mode})
+                            await call("set_hvac_mode", {"hvac_mode": mode}, target)
                         elif state.state == "off":
                             await call("turn_on")
                         if fan is not None and fan != state.attributes.get("fan_mode"):
@@ -119,7 +138,8 @@ class ClimateCommands:
                 result["state"] = snapshot(self.hass, [source])[0]
                 final = result["state"]
                 matched = (final["hvac_mode"] == "off") if patch["power"] == "off" else (
-                    final["hvac_mode"] != "off" and (mode is None or final["hvac_mode"] == mode)
+                    final["hvac_mode"] != "off"
+                    and (mode is None or final["hvac_mode"] == mode or (mode == "heat_cool" and final["hvac_mode"] in ("cool", "heat")))
                     and (temp is None or final["temperature"] == temp) and (fan is None or final["fan_mode"] == fan))
                 if final["available"] and matched:
                     result["status"] = "success"
