@@ -79,4 +79,4 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 - 確認每日備份有寫入雲端硬碟。
 - 刪掉試算表裡不再使用的分頁（只留家庭成員、遙控器、智能居家）。
 - 移除舊系統的程式與測試、CI 裡的 `v2` 觸發、`public.history` 表。
-- Mac mini 監控程式改成從設定檔讀鑰匙（見計畫 §8d）。
+- ~~Mac mini 監控程式改成從設定檔讀鑰匙~~：不必做了。Mac mini 改由 HA 讀取（不用鑰匙），舊程式與 `TELEMETRY_KEY_MAC_MINI` 已於 2026-10-28 移除。
