@@ -366,3 +366,20 @@ async def test_temperature_alone_while_off_sends_nothing(hass):
         await entity.async_set_temperature(temperature=28, hvac_mode="cool")
         assert calls.call_args.args == ("climate", "set_temperature",
                                         {"entity_id": ac.entity_id, "temperature": 28, "hvac_mode": "cool"})
+
+
+async def test_siri_mode_then_separate_temperature_turns_on_and_sets_it(hass):
+    """Siri sends auto and the temperature as two commands 50 ms apart (seen 2026-10-29): the temperature
+    waits for the mode, finds the AC on and is sent, instead of being refused as "temperature while off"."""
+    ac, sensor, entry, entity = await setup_pair(hass)
+    set_native(hass, ac, "off", temperature=27)
+    set_room(hass, sensor, 26)
+    await hass.async_block_till_done()
+    sent = []
+    async def native(domain, service, data, **kwargs):
+        sent.append((service, data.get("hvac_mode"), data.get("temperature")))
+        await asyncio.sleep(0)
+        set_native(hass, ac, data.get("hvac_mode", hass.states.get(ac.entity_id).state))
+    with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock(side_effect=native)):
+        await asyncio.gather(entity.async_set_hvac_mode("heat_cool"), entity.async_set_temperature(temperature=28))
+    assert sent == [("set_hvac_mode", "cool", None), ("set_temperature", None, 28)]

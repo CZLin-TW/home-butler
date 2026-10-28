@@ -148,6 +148,12 @@ class RoomTemperatureClimate(ClimateEntity):
         self._refresh()
         if not self._source or self._source.state not in MODES:
             raise HomeAssistantError("原生空調目前無法使用")
+        if service == "set_temperature" and "hvac_mode" not in data and self.hvac_mode == HVACMode.OFF:
+            # Every SwitchBot command carries power too, so a temperature alone on an AC that is off
+            # goes out as an IR "off" signal, which the AC answers with a beep. Send nothing instead.
+            # Checked here, after the lock: Siri sends the mode and the temperature as two separate
+            # commands 50 ms apart, and the temperature must see the AC the mode just turned on.
+            raise HomeAssistantError("空調關機中，只改溫度不會送出；請連同模式一起設定")
         if (data or {}).get("hvac_mode") == HVACMode.HEAT_COOL:
             # Decided here, after the lock: a set_temperature queued behind the set_hvac_mode that
             # HomeKit sends with it then sees the mode just chosen and keeps it.
@@ -201,10 +207,6 @@ class RoomTemperatureClimate(ClimateEntity):
             if kwargs["hvac_mode"] not in self.hvac_modes:
                 raise HomeAssistantError("空調模式不支援")
             data["hvac_mode"] = kwargs["hvac_mode"]
-        elif self.hvac_mode == HVACMode.OFF:
-            # Every SwitchBot command carries power too, so a temperature alone on an AC that is off
-            # goes out as an IR "off" signal, which the AC answers with a beep. Send nothing instead.
-            raise HomeAssistantError("空調關機中，只改溫度不會送出；請連同模式一起設定")
         await self._call("set_temperature", data)
 
     async def async_set_fan_mode(self, fan_mode):
