@@ -1,4 +1,10 @@
+import importlib.util
+import sys
+import types
+import unittest
 from datetime import timedelta
+from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -105,3 +111,26 @@ class ThroughHomeAssistantTests(StoreTest):
         self.assertEqual(device_jobs.record_computers(self.store, link), 0)       # the next snapshot repeats it
         link.disconnect(socket)
         self.assertEqual(link.computer_reports(), [])                                # HA away: nothing to record
+
+
+class MacCollectorContractTests(unittest.TestCase):
+    """What agent/macos_metrics.py collects is what HA passes on: it must fit the Heartbeat here as it is."""
+
+    def test_collector_output_is_a_valid_heartbeat_and_report(self):
+        spec = importlib.util.spec_from_file_location("macos_metrics", Path(__file__).parents[2] / "agent/macos_metrics.py")
+        metrics = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {"psutil": types.SimpleNamespace()}):
+            spec.loader.exec_module(metrics)
+        fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
+        with patch.object(metrics, "psutil", fake), patch.object(metrics.platform, "system", return_value="Darwin"), \
+                patch.object(metrics, "cpu_model", return_value="Apple M6"), \
+                patch.object(metrics, "read_smc", return_value=({"tcmb_c": 44.5, "tcmz_c": None}, 6.25)), \
+                patch.object(metrics, "read_memory_pressure", return_value={"level": "normal", "pct": 37}), \
+                patch.object(metrics, "read_gpu", return_value=None):
+            payload = metrics.collect("192.0.2.20", "Mac mini")
+        beat = computers.Heartbeat(**payload)
+        self.assertEqual((beat.hostname, beat.cpu_pct, beat.gpu_pct, beat.system_power_w), ("Mac mini", 12, None, 6.25))
+        self.assertEqual((beat.smc_temperature.tcmb_c, beat.memory_pressure.pct), (44.5, 37))
+        report = computers.Report(source="mac-mini", sampled_at=1, heartbeat=payload,
+                                  watchdogs=[{"name": "funnel", "healthy": True, "last_line": "ok", "paused": False}])
+        self.assertEqual(report.heartbeat, beat)

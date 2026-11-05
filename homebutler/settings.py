@@ -83,8 +83,6 @@ class Settings:
     home_assistant_api_key: str = field(default="", repr=False)
     admin_api_key: str = field(default="", repr=False)
     telemetry_keys: dict = field(default_factory=dict, repr=False)     # {"Mac mini": key, ...}
-    # The switch-over: bring the old system's data in once, at start, when this is "1" (see migration.py).
-    migrate_from_old: bool = False
     old_database_url: str = field(default="", repr=False)    # where the old history is; default: DATABASE_URL
     default_light_area: str = ""                              # the lighting area to-do reminders use by default
     # A trial copy sets SCHEDULES=0: no automatic shutdowns are made and nothing due is sent.
@@ -126,7 +124,6 @@ class Settings:
             telemetry_keys={**_keys(env, "TELEMETRY_KEYS"),
                             **{name[len("TELEMETRY_KEY_"):].replace("_", " ").title(): value.strip()
                                for name, value in env.items() if name.startswith("TELEMETRY_KEY_") and value.strip()}},
-            migrate_from_old=_text(env, "MIGRATE_FROM_OLD") == "1",
             old_database_url=_text(env, "OLD_DATABASE_URL"),
             default_light_area=_text(env, "DEFAULT_LIGHT_AREA"),
             schedules_enabled=_text(env, "SCHEDULES", "1") != "0",
@@ -140,8 +137,6 @@ class Settings:
         lengths = [value for _, _, value in settings.keys()]
         if any(not 24 <= len(value) <= 200 for value in lengths) or len(set(lengths)) != len(lengths):
             raise SettingsError("Every key must be 24 to 200 characters and different from the others")
-        if settings.migrate_from_old and not settings.spreadsheet_id:
-            raise SettingsError("MIGRATE_FROM_OLD needs SPREADSHEET_ID and GOOGLE_CREDENTIALS")
         if settings.backup_folder and not settings.google_credentials:
             raise SettingsError("BACKUP_FOLDER needs GOOGLE_CREDENTIALS")
         if bool(settings.spreadsheet_id) != bool(settings.google_credentials):

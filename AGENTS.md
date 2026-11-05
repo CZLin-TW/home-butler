@@ -2,7 +2,7 @@
 
 這份是**現況**與**不可違反的約束**。HomeButler 在 2026-10 整個重寫（分支 `v2`，`homebutler/` 套件）；
 設計與每一項決定的理由在 [重構計畫](docs/refactor-plan.md)，切換步驟在 [切換清單](docs/cutover.md)。
-2026-10-21 已切換上線（`main` 就是新系統）。重寫前的系統說明保留在 [舊系統說明](docs/legacy-agents.md)，歷次版本的決定在 [版本變更紀錄](docs/agents-history.md)；
+2026-10-21 已切換上線（`main` 就是新系統）；2026-11-05 收尾時舊程式已從 repo 刪除，要看舊程式就看 git 歷史（最後還有舊程式的提交是 `a5b8350`）。重寫前的系統說明保留在 [舊系統說明](docs/legacy-agents.md)，歷次版本的決定在 [版本變更紀錄](docs/agents-history.md)；
 那兩份描述的是舊程式，遇到矛盾以本檔與重構計畫為準。
 
 **加新行為時改本檔對應的段落，不要在開頭追加新章節。**動手簡化架構之前先讀
@@ -34,7 +34,6 @@ homebutler/
   api/               路由：Dashboard 的 /v2、HA 的 WebSocket、LINE webhook、監控回報
   jobs/              背景工作（排程、提醒、Notion、每日推播、告警、備份、設定同步）
   dehumidifier/      除濕機隔離模組；modules.py 列出可選模組，核心不直接 import 它們
-  migration.py       從舊系統搬資料（切換時一次）
 main.py              進入點（Render 執行 uvicorn main:app）
 ```
 
@@ -64,7 +63,7 @@ main.py              進入點（Render 執行 uvicorn main:app）
 | 對象 | 什麼變動會觸發 |
 | --- | --- |
 | Render 後端 | 後端程式與相依檔（Render 後台的 Build Filters 排除了文件、`agent/`、`homeassistant/`、`tests/` 等）。Auto-Deploy 設為 CI 通過後才部署 |
-| Mac mini 監控程式 | 舊的 `agent/macos_daemon/` 自動更新只看 `auto_update/update.py` 的 `FILES` 清單（2026-10-27 起改由 HA 讀取，舊機制停用後移除）。新的 `agent/mac_metrics_server.py` 不會自動安裝，由對話在家中主機手動套用 |
+| Mac mini 監控程式 | 不會自動安裝：`agent/mac_metrics_server.py`（給 HA 讀的小服務）由對話在家中主機手動套用。舊的自己回報、會自動更新的版本 2026-10-28 已從家中主機拆除，原始碼 2026-11-05 刪除 |
 | Windows 代理程式 | 任何變動都可能讓它重啟一次（那台預定淘汰） |
 | HA 自訂整合 | 不會自動安裝，要手動裝並重啟 HA |
 
@@ -72,13 +71,12 @@ main.py              進入點（Render 執行 uvicorn main:app）
 
 - 新系統：`venv/bin/python -m homebutler.tests.run`（本機用 SQLite；CI 另用真的 PostgreSQL 跑同一套）。
 - HA 整合：CI 的 HA job（`homeassistant/`，pytest，HA 版本與家裡相同）。
-- 舊系統的測試仍在 `tests/`，切換完成並收尾後移除。
-- Mac 監控（給 HA 讀的小服務）：`venv/bin/python -m unittest tests.test_mac_metrics_server`；HA 那端的讀取在 HA job 的 `homeassistant/tests/test_computers.py`。舊的 `agent/macos_daemon/` 已停用，移除時連同 `tests/test_macos_*` 一起刪。
+- Mac 監控（給 HA 讀的小服務）：`venv/bin/python -m unittest discover -s agent/tests`（只用標準函式庫，CI 不另裝套件）；採樣結果符合 HB 的 `Heartbeat` 由 `homebutler/tests/test_computers.py` 檢查；HA 那端的讀取在 HA job 的 `homeassistant/tests/test_computers.py`。
 
 ## 試跑
 
-Mac mini 上的試跑環境在 `~/Services/hb-trial/`（不在 repo）：讀真實的試算表與舊歷史（唯讀，憑證在鑰匙圈），
-資料放本機 SQLite，`SCHEDULES=0`、不接 LINE、不備份、不連 HA。用法寫在那裡的 `run.sh`。
+切換用的試跑環境 `~/Services/hb-trial/`（不在 repo）2026-11-05 起已不能用：它的 `run.sh migrate` 靠的搬資料程式已刪除。
+要在本機看新系統，直接用 `homebutler.tests` 的做法或另建一個空的 SQLite 試跑；不要用真實資料。
 
 ## Git push 環境差異
 

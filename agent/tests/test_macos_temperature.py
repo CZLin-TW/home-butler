@@ -3,7 +3,7 @@ from pathlib import Path
 import struct
 import unittest
 
-spec = importlib.util.spec_from_file_location('temperature', Path(__file__).parents[1] / 'agent/macos_temperature.py')
+spec = importlib.util.spec_from_file_location('temperature', Path(__file__).parents[1] / 'macos_temperature.py')
 t = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(t)
 

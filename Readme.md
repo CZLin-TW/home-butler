@@ -4,6 +4,8 @@
 HomeButler 負責家庭資料與 AI 理解；目前推薦搭配 Home Assistant（HA），
 由 HA 管理設備整合、本地自動化及 Apple Home 配件。
 
+> 本頁有些段落（Sheets、Siri 捷徑、`/api/assistant`）描述的是 2026-10 重寫前的系統；現況以 [AGENTS.md](AGENTS.md) 為準。
+
 這是持續開發的自架專案，各設備需自行設定帳號、配對與控制權限，並非安裝後就能操作所有品牌。
 本專案由使用者規劃需求、透過 AI 協作開發。
 
@@ -85,7 +87,7 @@ HA／Hue／FP2 的本地互動不需經 Render；Hub 2 快速刷新提示目前�
 | 本 repo：HomeButler | LINE／Siri 意圖、家庭權限、待辦庫存、Sheets、提醒、設備 API 及選定 HA 能力轉送 |
 | [Dashboard](https://github.com/CZLin-TW/Dashboard) | UI、配對登入、Session、使用者身分驗證與後端 API 代理；不是直接持有家電金鑰的純靜態頁面 |
 | [HA 自訂整合](homeassistant/README.md) | 主動連接 HB，同步選定觀測／狀態，執行有限的空調、IR 按鈕及 Hue 控制 |
-| [PC Agent](agent/README.md) | Windows PC 健康指標與舊劇院／Hue 中繼；[macOS collector](agent/macos.md) 獨立只讀指標，預設不外送；可選 [macOS daemon](agent/macos_daemon/README.md) 提供原生 Keychain sender 與使用者操作的部署工具 |
+| [PC Agent](agent/README.md) | Windows PC 健康指標與舊劇院／Hue 中繼；Mac 的指標由 [給 HA 讀的小服務](agent/mac_metrics_server.py) 提供（只讀、沒有金鑰，經 HA 轉給 HB） |
 | [Theater Agent](https://github.com/CZLin-TW/theater-agent)（私人 repo、選配） | AVR／KEF／電視／Apple TV 的專用連動；不需要劇院功能就不需存取此 repo |
 | Homebridge（舊路徑、選配） | 讓未遷移 HA 的 HB 空調進 Apple Home；新 HA 配置使用 HA HomeKit Bridge，無需同時安裝 |
 
@@ -179,7 +181,7 @@ Claude API、LINE 推播、主機與其他服務依使用量及方案計費，�
 僅查看介面可在 Dashboard 獨立 checkout 執行 `npm ci`、`npm run demo`；
 它使用合成資料，不需要 LINE 配對或真實家電。[Demo 說明](https://github.com/CZLin-TW/Dashboard/blob/main/docs/demo-mode.md)
 
-後端離線測試為 `python -m unittest discover -s tests -v`；HA framework 測試另在 Linux 執行，
+後端離線測試為 `python -m homebutler.tests.run`；HA framework 測試另在 Linux 執行，
 方法見 [驗證文件](docs/verification.md)。不要用會呼叫真實家電的診斷腳本代替離線測試。
 
 目前家庭配置已完成感測器與 Hue 路徑切換及 Dashboard 唯讀驗證；
@@ -194,7 +196,6 @@ Hub 2 物理按鈕的 Matter 自動化與本地相機分析尚未在本專案部
 | [家庭中樞架構](docs/local-hub-architecture.md)／[遷移盤點](docs/ha-migration-audit.md) | 現有 HA 分工、仍待處理的項目 |
 | [HA 安裝](homeassistant/README.md) | 安裝整合、配對與逐台遷移 |
 | [PC Agent](agent/README.md)／[舊 Homebridge](homebridge/README.md) | 各自獨立部署與更新 |
-| [語音計時](docs/voice-timing.md)／[模型評估](evals/README.md) | 真實耗時與離線／模型測試的範圍 |
 | [AGENTS.md](AGENTS.md) | 新開發者與 AI Session 的維護規則 |
 
 文件與實作一起維護；純文件變更不調整系統顯示版本，也不代表設備或 HA 套件重新部署。

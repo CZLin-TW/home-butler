@@ -74,9 +74,11 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ## 切換後兩週內的收尾
 
-- 刪掉 Render 的 `HOME_BUTLER_API_KEY`、`MIGRATE_FROM_OLD`（過了退回期限）。
+2026-11-05 收尾（之後再也不能退回舊系統）：
 
-- 確認每日備份有寫入雲端硬碟。
-- 刪掉試算表裡不再使用的分頁（只留家庭成員、遙控器、智能居家）。
-- 移除舊系統的程式與測試、CI 裡的 `v2` 觸發、`public.history` 表。
+- ✅ 刪掉 Render 的 `HOME_BUTLER_API_KEY`、`MIGRATE_FROM_OLD`；Vercel 的 `HOME_BUTLER_API_KEY` 也刪了（Dashboard 早已不讀，用的是 `HOME_BUTLER_DASHBOARD_KEY` 與 `DASHBOARD_ASSERTION_KEY`）。
+- ✅ 每日備份有寫入雲端硬碟（使用者確認檔案是當天清晨）。
+- 試算表裡不再使用的分頁：不刪也不影響（新系統只按名稱讀家庭成員、遙控器、智能居家），使用者有空再刪。
+- ✅ 移除舊系統的程式與測試、搬資料程式（`homebutler/migration.py`、`MIGRATE_FROM_OLD`）、CI 的 `v2` 觸發與舊系統／舊 Mac 監控的測試。
+- `public.history` 表：程式刪除推上去之後，由使用者在 Supabase 刪除。
 - ~~Mac mini 監控程式改成從設定檔讀鑰匙~~：不必做了。Mac mini 改由 HA 讀取（不用鑰匙），舊程式與 `TELEMETRY_KEY_MAC_MINI` 已於 2026-10-28 移除。

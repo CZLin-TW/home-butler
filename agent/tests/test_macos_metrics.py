@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
 
 # No host telemetry or optional psutil installation needed in backend CI.
-spec = importlib.util.spec_from_file_location('macos_metrics', Path(__file__).parents[1] / 'agent/macos_metrics.py')
+spec = importlib.util.spec_from_file_location('macos_metrics', Path(__file__).parents[1] / 'macos_metrics.py')
 metrics = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {'psutil': types.SimpleNamespace()}):
     spec.loader.exec_module(metrics)
@@ -130,62 +130,6 @@ class MetricsTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
-
-
-class ExistingContractTests(unittest.TestCase):
-    def test_collector_fits_real_request_and_state_without_sheets(self):
-        import ast
-        from typing import Optional, Literal
-        from pydantic import BaseModel, Field
-        root = Path(__file__).parents[1]
-        tree = ast.parse((root / 'web_api.py').read_text())
-        classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
-                   and node.name in ('FAHStatus', 'SMCTemperature', 'MemoryPressure', 'PCHeartbeatRequest')]
-        namespace = {'BaseModel': BaseModel, 'Optional': Optional, 'Literal': Literal, 'Field': Field}
-        exec(compile(ast.Module(body=classes, type_ignores=[]), 'web_api.py', 'exec'), namespace)
-        state_spec = importlib.util.spec_from_file_location('isolated_pc_state', root / 'pc_state.py')
-        state = importlib.util.module_from_spec(state_spec)
-        with patch.dict(sys.modules, {'gspread': types.SimpleNamespace(),
-                                     'sheets': types.SimpleNamespace(_get_spreadsheet=lambda: None, ensure_columns=None)}):
-            state_spec.loader.exec_module(state)
-        fake = types.SimpleNamespace(cpu_percent=lambda interval: 12, virtual_memory=lambda: types.SimpleNamespace(percent=40))
-        with patch.object(metrics, 'psutil', fake), patch.object(metrics.platform, 'system', return_value='Darwin'), patch.object(metrics, 'cpu_model', return_value='Apple M6'), patch.object(metrics, 'read_smc', return_value=({'tcmb_c': 44.5, 'tcmz_c': None}, 6.25)), patch.object(metrics, 'read_memory_pressure', return_value={'level': 'normal', 'pct': 37}), patch.object(metrics, 'read_gpu', return_value=None):
-            payload = metrics.collect('192.0.2.20', 'Mac mini')
-        request = namespace['PCHeartbeatRequest'](**payload)
-        # Real record/snapshot; prevent spawning the Sheet writer entirely.
-        with patch.object(state.threading, 'Thread') as thread:
-            state.record_heartbeat(request.model_dump())
-            self.assertTrue(thread.called)
-        pc = state.snapshot()['192.0.2.20']
-        self.assertTrue(pc['online'])
-        self.assertEqual(pc['hostname'], 'Mac mini')
-        self.assertEqual(pc['current']['memory_pressure'], {'level': 'normal', 'pct': 37})
-        self.assertEqual(pc['history'][0]['memory_pressure'], {'level': 'normal', 'pct': 37})
-        for pct in [0, 37, 100, None]:
-            self.assertEqual(namespace['MemoryPressure'](level='normal', pct=pct).pct, pct)
-        for pct in [True, -1, 101, 37.5, '37', float('nan'), float('inf')]:
-            with self.assertRaises(ValueError):
-                namespace['MemoryPressure'](pct=pct)
-        self.assertIsNone(namespace['PCHeartbeatRequest'](**{k: v for k, v in payload.items() if k != 'memory_pressure'}).memory_pressure)
-        for invalid in [True, 0, 1, 2, 4, 'green', '50', 'unknown']:
-            with self.assertRaises(ValueError):
-                namespace['MemoryPressure'](level=invalid)
-        with self.assertRaises(ValueError):
-            namespace['MemoryPressure'](level='normal', percent=50)
-        self.assertEqual(pc['current']['cpu_pct'], 12)
-        self.assertIsNone(pc['current']['gpu_pct'])
-        self.assertIsNone(pc['history'][0]['cpu_temp_c'])
-        self.assertEqual(pc['history'][0]['smc_temperature'], {'tcmb_c': 44.5, 'tcmz_c': None})
-        self.assertEqual((pc['current']['system_power_w'], pc['history'][0]['system_power_w']), (6.25, 6.25))
-        for invalid in [0, -1, 501, True, '6', float('nan'), float('inf')]:
-            with self.assertRaises(ValueError):
-                namespace['PCHeartbeatRequest'](**dict(payload, system_power_w=invalid))
-        self.assertIsNone(namespace['PCHeartbeatRequest'](**{k: v for k, v in payload.items() if k != 'system_power_w'}).system_power_w)
-        for invalid in [0, -1, 151, True, '44', float('nan'), float('inf')]:
-            with self.assertRaises(ValueError):
-                namespace['SMCTemperature'](tcmb_c=invalid)
-        with self.assertRaises(ValueError):
-            namespace['SMCTemperature'](other=40)
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-spec = importlib.util.spec_from_file_location("mac_metrics_server", Path(__file__).parents[1] / "agent/mac_metrics_server.py")
+spec = importlib.util.spec_from_file_location("mac_metrics_server", Path(__file__).parents[1] / "mac_metrics_server.py")
 server_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server_module)
 

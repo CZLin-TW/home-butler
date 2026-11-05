@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, v2]   # v2: the rebuild branch (docs/refactor-plan.md); remove when it is merged
+    branches: [main]
   pull_request:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install matching real HA test framework
-        run: pip install "homeassistant==2026.10.2" pytest-homeassistant-custom-component "switchbot-api==2.13.0"
+        run: pip install "homeassistant==2026.10.4" pytest-homeassistant-custom-component "switchbot-api==2.13.0"
       - name: Test registry, flows and lifecycle without home hardware
         run: pytest -q
         working-directory: homeassistant
@@ -32,11 +32,8 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q .
 
-      - name: Install HTTP boundary test dependencies
-        run: pip install -c requirements.lock fastapi httpx uvicorn websockets SQLAlchemy
-
-      - name: Run offline behavior tests
-        run: python -m unittest discover -s tests -v
+      - name: Test the computer agents (Mac metrics service, with fakes)
+        run: python -m unittest discover -s agent/tests -v
 
   homebutler:
     # The rebuilt service (homebutler/, docs/refactor-plan.md): SQLite here, PostgreSQL in the next job.
@@ -52,7 +49,7 @@ jobs:
         run: python -m homebutler.tests.run
 
   postgres:
-    # The optional database copy (history_store.py) on real PostgreSQL; the other tests use SQLite.
+    # The service's tests again on real PostgreSQL (Supabase in production); the job above uses SQLite.
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -69,10 +66,6 @@ jobs:
           python-version: "3.11"
       - name: Install database dependencies
         run: pip install -r requirements.lock
-      - name: Run store tests against PostgreSQL
-        env:
-          TEST_DATABASE_URL: postgresql://postgres:ci-only@localhost:5432/postgres
-        run: python -m unittest tests.test_history_store tests.test_db_backup -v
       - name: Run the rebuilt service's tests against PostgreSQL
         env:
           TEST_DATABASE_URL: postgresql://postgres:ci-only@localhost:5432/postgres
@@ -91,22 +84,3 @@ jobs:
         working-directory: homebridge
       - run: npm test
         working-directory: homebridge
-
-  macos-telemetry:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Test daemon lifecycle with fake operating-system calls
-        run: python -m unittest discover -s tests -p test_macos_daemon.py -v
-      - name: Compile and run native fake tests (no Keychain or network)
-        run: >-
-          python agent/macos_daemon/build.py
-          --config agent/macos_daemon/config.example.json
-          --output "$RUNNER_TEMP/telemetry-fake-tests" --tests-only
-      - name: Test automatic-update sender policy and compile local signer (no Keychain or network)
-        run: >-
-          python agent/macos_daemon/auto_update/check_native.py
-          --output "$RUNNER_TEMP/telemetry-update-fake-tests"
