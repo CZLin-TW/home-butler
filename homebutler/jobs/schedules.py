@@ -1,13 +1,16 @@
 """The schedule job, every minute: look at the ACs for the automatic shutdown, then send what is due.
 
 Each schedule: checked and marked claimed in one transaction, sent outside it, its result written in
-another. A send that raises is "unknown". People's edits lock the same row, so a schedule is never sent
+another. Schedules due together go out SEND_GAP_SECONDS apart: from 2026-10-29 every automatic shutdown
+fell on 07:00 and the three IR commands went out about a second apart; twice in nine days the last one
+(the bedroom AC) was reported sent but the AC stayed on, which never happened while the times were spread. A send that raises is "unknown". People's edits lock the same row, so a schedule is never sent
 with settings older than the last edit.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import tzinfo
 
 from homebutler.domain import schedules
@@ -15,11 +18,12 @@ from homebutler.store.db import Store
 from homebutler.store.models import utcnow
 
 log = logging.getLogger("homebutler.jobs.schedules")
+SEND_GAP_SECONDS = 10
 
 
 class Scheduler:
-    def __init__(self, store: Store, link, targets: dict, zone: tzinfo, clock=utcnow):
-        self.store, self.link, self.targets, self.zone, self.clock = store, link, targets, zone, clock
+    def __init__(self, store: Store, link, targets: dict, zone: tzinfo, clock=utcnow, sleep=time.sleep):
+        self.store, self.link, self.targets, self.zone, self.clock, self.sleep = store, link, targets, zone, clock, sleep
         self.lock = threading.Lock()
         self.recovered = False
 
@@ -44,6 +48,8 @@ class Scheduler:
                     claimed = schedules.claim(session, self.targets, schedule_id, state, now)
                 if claimed is None:
                     continue
+                if sent:
+                    self.sleep(SEND_GAP_SECONDS)
                 try:
                     outcome = self.targets[claimed.kind].run(claimed.name, claimed.params)
                 except Exception:

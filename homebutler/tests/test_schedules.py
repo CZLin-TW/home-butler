@@ -9,7 +9,7 @@ from homebutler.api.auth import sign_assertion
 from homebutler.app import create_app
 from homebutler.domain import households, schedules, tokens
 from homebutler.domain.device_targets import ACTarget, IRTarget
-from homebutler.jobs.schedules import Scheduler
+from homebutler.jobs.schedules import SEND_GAP_SECONDS, Scheduler
 from homebutler.settings import Settings
 from homebutler.store.models import AutoOffCycle, Device, DeviceEntity, DeviceSetting, Member, Schedule
 from homebutler.tests.helpers import StoreTest
@@ -230,6 +230,18 @@ class SchedulerTests(StoreTest):
         with self.store.transaction() as s:
             return schedules.add(s, self.targets, kind, name, params or {"power": "off"}, local(self.clock() + timedelta(minutes=minutes)),
                                  ZONE, self.clock(), "爸").id
+
+    def test_schedules_due_together_go_out_apart(self):
+        self.set_cells(hours="0")
+        naps = []
+        self.scheduler.sleep = naps.append
+        self.add(1, params={"power": "off"})
+        self.add(1, kind="ir", name="電扇一", params={"button": "電源"})
+        self.tick(1)
+        self.assertEqual(len(self.commands.sent), 2)
+        self.assertEqual(naps, [SEND_GAP_SECONDS])          # between the two, not before the first
+        self.tick(1)
+        self.assertEqual(naps, [SEND_GAP_SECONDS])          # nothing due, no waiting
 
     def test_unknown_and_failed_are_kept_never_resent_and_can_be_dismissed(self):
         self.set_cells(hours="0")
