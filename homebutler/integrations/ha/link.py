@@ -50,6 +50,7 @@ class Link:
     environment: list = field(default_factory=list)
     automations: dict | None = None
     computers: list = field(default_factory=list)       # reports HA passed on, newest per machine
+    unhealthy: list | None = None                        # Supervisor's reasons; None from an HA that does not say
     uncertain: set = field(default_factory=set)
     device_lane: dict = field(default_factory=dict)
     theater_lane: dict = field(default_factory=dict)
@@ -114,6 +115,7 @@ class Link:
             # Every snapshot carries the whole report; one without it means sharing was turned off.
             self.automations = snapshot.automations.model_dump() if snapshot.automations else None
             self.computers = list(snapshot.computers or [])
+            self.unhealthy = list(snapshot.unhealthy) if snapshot.unhealthy is not None else None
             listeners = list(self.listeners)
         for listener in listeners:
             listener(self)
@@ -123,6 +125,11 @@ class Link:
         """The latest machine reports HA passed on; none while HA is away (they would only repeat)."""
         with self.lock:
             return list(self.computers) if self.online() else []
+
+    def system_unhealthy(self) -> list | None:
+        """Why HA's Supervisor says it is unhealthy ([] when healthy); None while HA is away or does not say."""
+        with self.lock:
+            return list(self.unhealthy) if self.online() and self.unhealthy is not None else None
 
     def state(self) -> dict:
         """What is known now; values read as unknown while offline."""

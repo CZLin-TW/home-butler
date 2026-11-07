@@ -15,6 +15,7 @@ from .hue import HueCommands
 from .theater import LocalTheaterRelay, TheaterRelay
 from .automations import AutomationLog
 from .computers import ComputerReader
+from . import system_health
 from .placement import placer
 
 
@@ -53,6 +54,7 @@ async def async_setup_entry(hass, entry):
                         theater_commands=theater,
                         automations=automation_log.snapshot if automation_log else None,
                         computers=reader.snapshot if reader else None,
+                        system_health=lambda: system_health.unhealthy(hass),
                         path=path, protocol=protocol, place=placer(hass))
 
     @callback
@@ -78,7 +80,8 @@ async def async_setup_entry(hass, entry):
     if automation_log:
         entry.async_on_unload(hass.bus.async_listen("automation_triggered", automation_ran))
 
-    for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated"):
+    for event_type in ("state_changed", "entity_registry_updated", "area_registry_updated", "device_registry_updated",
+                       "repairs_issue_registry_updated"):
         entry.async_on_unload(hass.bus.async_listen(event_type, changed))
     task = hass.async_create_background_task(link.run(), "HomeButler outbound link")
     if reader:

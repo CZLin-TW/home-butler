@@ -52,7 +52,7 @@ async def validate_connection(session, url, key):
 
 
 class OutboundLink:
-    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, environment=None, hue_commands=None, theater_commands=None, automations=None, computers=None,
+    def __init__(self, session, url, key, snapshot, climates=None, commands=None, ir_buttons=None, ir_commands=None, environment=None, hue_commands=None, theater_commands=None, automations=None, computers=None, system_health=None,
                  path="/api/home-assistant", protocol=PROTOCOL, place=None):
         self.session = session
         self.url = normalize_url(url).replace("https://", "wss://", 1) + path + "/ws"
@@ -75,6 +75,9 @@ class OutboundLink:
         # to a backend that accepts it.
         self.computers = computers
         self._computers_enabled = False
+        # Supervisor's unhealthy reasons (system_health.py); sent only to a backend that accepts them.
+        self.system_health = system_health
+        self._health_enabled = False
         # Optional display-only report; sent only to a backend that says it accepts it,
         # because an older one rejects unknown snapshot fields and would drop the link.
         self.automations = automations
@@ -146,6 +149,8 @@ class OutboundLink:
                     frame["automations"] = self.automations()
                 if self._computers_enabled:
                     frame["computers"] = self.computers()
+                if self._health_enabled:
+                    frame["unhealthy"] = self.system_health()
                 if len(json.dumps(frame).encode("utf-8")) > 131072:
                     raise LinkError("Snapshot too large")
                 await ws.send_json(frame)
@@ -184,6 +189,7 @@ class OutboundLink:
                         raise LinkError("Invalid handshake")
                     self._automations_enabled = self.automations is not None and "automation_log" in hello.get("capabilities", [])
                     self._computers_enabled = self.computers is not None and "computer_reports" in hello.get("capabilities", [])
+                    self._health_enabled = self.system_health is not None and "system_health" in hello.get("capabilities", [])
                     self.connected = True
                     if failed:
                         _LOGGER.info("HomeButler local link recovered")
@@ -219,6 +225,8 @@ class OutboundLink:
                             frame["automations"] = self.automations()
                         if self._computers_enabled:
                             frame["computers"] = self.computers()
+                        if self._health_enabled:
+                            frame["unhealthy"] = self.system_health()
                         if len(json.dumps(frame).encode("utf-8")) > 131072:
                             raise LinkError("Snapshot too large")
                         await ws.send_json(frame)

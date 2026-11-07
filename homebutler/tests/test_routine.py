@@ -57,6 +57,10 @@ class FakeLink:
     def __init__(self):
         self.up = True
         self.observations = []
+        self.unhealthy = None
+
+    def system_unhealthy(self):
+        return self.unhealthy if self.up else None
 
     def online(self):
         return self.up
@@ -185,6 +189,40 @@ class HealthTests(Base):
         self.clock.advance(minutes=16)
         health.run()
         self.assertTrue(all("空間感測" not in text for _, text in self.push.sent))
+
+    def test_ha_unhealthy_for_30_minutes_is_announced_and_its_recovery(self):
+        health = self.make()
+        self.link.unhealthy = []
+        health.run()
+        self.link.unhealthy = ["update_rollback", "something_new"]
+        health.run()
+        self.clock.advance(minutes=29)
+        health.run()
+        self.assertEqual(self.push.sent, [])
+        self.clock.advance(minutes=2)
+        health.run()
+        health.run()
+        self.assertEqual(len(self.push.sent), 1)
+        self.assertIn("系統「不健康」", self.push.sent[0][1])
+        self.assertIn("上次的更新失敗、已退回舊版、something_new", self.push.sent[0][1])
+        self.link.unhealthy = []
+        health.run()
+        self.assertIn("🟢 Home Assistant 系統恢復健康", self.push.sent[-1][1])
+
+    def test_ha_health_is_not_judged_while_ha_is_away_or_silent(self):
+        health = self.make()
+        self.link.unhealthy = ["supervisor"]
+        health.run()
+        self.link.up = False                       # away: the grace starts over
+        self.clock.advance(minutes=31)
+        health.run()
+        self.link.up = True
+        health.run()
+        self.assertTrue(all("不健康" not in text for _, text in self.push.sent))
+        self.link.unhealthy = None                 # an older HA says nothing
+        self.clock.advance(minutes=31)
+        health.run()
+        self.assertTrue(all("不健康" not in text for _, text in self.push.sent))
 
     def test_theater_needs_three_failures(self):
         health = self.make()

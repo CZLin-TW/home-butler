@@ -46,6 +46,18 @@ class LinkTests(unittest.TestCase):
         self.assertFalse(self.link.online())
         self.assertFalse(self.link.state()["climates"][0]["available"])
 
+    def test_system_health_is_kept_only_from_an_ha_that_says_and_only_while_online(self):
+        frame = {"type": "snapshot", "sequence": 1, "observations": []}
+        self.link.receive(self.socket, Snapshot.model_validate(frame))
+        self.assertIsNone(self.link.system_unhealthy())                  # an older HA says nothing
+        self.link.receive(self.socket, Snapshot.model_validate({**frame, "sequence": 2, "unhealthy": ["update_rollback"]}))
+        self.assertEqual(self.link.system_unhealthy(), ["update_rollback"])
+        self.now[0] += STALE_SECONDS + 1
+        self.assertIsNone(self.link.system_unhealthy())
+        for bad in (["Bad Reason"], ["x" * 65], ["a"] * 21):
+            with self.assertRaises(ValueError):
+                Snapshot.model_validate({**frame, "unhealthy": bad})
+
     def test_old_sockets_and_old_sequences_are_ignored(self):
         self.link.receive(self.socket, snapshot(2))
         self.assertFalse(self.link.receive(self.socket, snapshot(1)))

@@ -1,8 +1,8 @@
 """The messages HA and this service exchange. Every field is checked; anything unexpected is refused and
 the connection dropped (HA reconnects), so a malformed frame can never become device state."""
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from homebutler.domain.computers import Report as ComputerReport
 
@@ -10,7 +10,7 @@ PROTOCOLS = (1, 2)
 MAX_BYTES = 131072
 # What this service offers; HA turns on what it supports in its hello.
 CAPABILITIES = ["observations", "climate_control", "ir_control", "environment", "hue_control", "computer_reports",
-                "theater_relay", "automation_log"]
+                "theater_relay", "automation_log", "system_health"]
 
 
 class Observation(BaseModel):
@@ -174,6 +174,9 @@ class Snapshot(BaseModel):
     automations: Optional[AutomationReport] = None
     # Machines HA reads on the home network (the Mac mini); absent unless configured there.
     computers: Optional[list[ComputerReport]] = Field(default=None, max_length=8)
+    # Why HA's Supervisor calls the system unhealthy (its Repairs list); empty when healthy, absent from
+    # an older HA. While unhealthy, HA keeps running but blocks every automatic update.
+    unhealthy: Optional[list[Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{1,64}$")]]] = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def unique_entities(self):

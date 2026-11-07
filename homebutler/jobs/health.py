@@ -9,6 +9,9 @@ Checks (each on its own; one failing never skips the others):
 - presence: any occupancy sensor HA shares (the camera zones, the room groups) unavailable for more than
   15 minutes while HA itself is connected (2026-10-26: the camera sat waiting for a manual reconnect for
   19 hours and no one knew; the living room's automations were idle all that time);
+- HA's own system health: its Supervisor calls the system unhealthy for more than 30 minutes (2026-11: an
+  update rolled back on 10/29 and every automatic update stayed blocked for nine days; HA otherwise ran
+  normally, so no one noticed). Judged only while HA is connected and says (home_butler 1.13.0 and later);
 - the daily backup: no success for 30 hours.
 
 Only a change between fine and not fine is announced (LINE's free plan allows 200 pushes a month, and
@@ -30,6 +33,17 @@ log = logging.getLogger("homebutler.jobs.health")
 HA_GRACE = timedelta(minutes=15)
 PRESENCE_GRACE = timedelta(minutes=15)
 THEATER_STREAK = 3
+UNHEALTHY_GRACE = timedelta(minutes=30)
+# Supervisor's reasons, in words; others are shown as HA names them.
+UNHEALTHY_REASONS = {
+    "update_rollback": "上次的更新失敗、已退回舊版",
+    "supervisor": "管理程式（Supervisor）更新失敗",
+    "data_filesystem_check_error": "資料磁碟的檔案系統檢查失敗（多半是斷電留下的）",
+    "os_filesystem_check_error": "系統磁碟的檔案系統檢查失敗",
+    "oserror_bad_message": "磁碟讀寫錯誤",
+    "docker": "Docker 設定不對",
+    "setup": "啟動設定失敗",
+}
 
 
 def humanize(seconds) -> str:
@@ -54,6 +68,7 @@ class Health:
         self.theater_failures = 0
         self.ha_lost_at: datetime | None = None
         self.presence_lost: dict[str, datetime] = {}     # sensor name -> first seen unavailable
+        self.unhealthy_since: datetime | None = None
 
     def _report(self, key: str, bad: bool, bad_text: str, ok_text) -> None:
         now = self.clock()
@@ -127,6 +142,25 @@ class Health:
         elif not down:
             self._report("presence", False, "", lambda outage: f"🟢 空間感測恢復\n\n中斷約 {humanize(outage)}")
 
+    def ha_system(self) -> None:
+        reasons = self.link.system_unhealthy()
+        if reasons is None:
+            self.unhealthy_since = None    # HA away (its own alert covers that) or an HA that does not say
+            return
+        if not reasons:
+            self.unhealthy_since = None
+            self._report("ha_system", False, "", lambda outage: f"🟢 Home Assistant 系統恢復健康\n\n從通知起約 {humanize(outage)}")
+            return
+        now = self.clock()
+        self.unhealthy_since = self.unhealthy_since or now
+        if now - self.unhealthy_since >= UNHEALTHY_GRACE:
+            words = "、".join(UNHEALTHY_REASONS.get(r, r) for r in reasons)
+            self._report("ha_system", True,
+                         f"⚠️ Home Assistant 回報系統「不健康」\n\n原因：{words}\n"
+                         "HA 和自動化照常運作，但它的自動更新（系統、應用程式、核心）會全部停住。\n\n"
+                         "處理：請 Claude 查看（ha resolution info）；更新失敗退回的，通常手動更新一次就好",
+                         lambda outage: "")
+
     def theater_relay(self) -> None:
         if self.theater is None or not self.link.can("theater_relay"):
             self.theater_failures = 0
@@ -152,7 +186,7 @@ class Health:
                      lambda outage: "✅ HomeButler 的資料庫備份恢復正常。")
 
     def run(self) -> None:
-        for check in (self.computers, self.home_assistant, self.presence, self.theater_relay, self.backups):
+        for check in (self.computers, self.home_assistant, self.presence, self.ha_system, self.theater_relay, self.backups):
             try:
                 check()
             except Exception:
