@@ -7,6 +7,7 @@ import asyncio
 import math
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACMode
+from homeassistant.components.climate.const import DATA_COMPONENT
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -33,6 +34,32 @@ def finite(value):
         return number if not isinstance(value, bool) and math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
+
+def native_ac(hass, entity_id):
+    """HA's own SwitchBot Cloud AC object, or None when HA no longer has the one staged_fan relies on."""
+    component = hass.data.get(DATA_COMPONENT)
+    entity = component.get_entity(entity_id) if component else None
+    if type(entity).__name__ != "SwitchBotCloudAirConditioner" or not isinstance(getattr(entity, "_attr_fan_mode", None), str):
+        return None
+    return entity
+
+
+def staged_fan(hass, entity_id, fan):
+    """Puts the fan speed on the native AC without sending it, so the next command carries it.
+    Every SwitchBot command sends power, mode, temperature and fan together, but HA has no service that
+    sets them all: a separate fan command is a second IR signal, and the AC beeps twice. Returns the
+    undo for a command that fails, or None when HA's AC is not as expected (send the fan apart then).
+    The same function is in home_butler/climates.py; the two integrations are installed separately."""
+    entity = native_ac(hass, entity_id)
+    if entity is None:
+        return None
+    old = entity._attr_fan_mode
+    entity._attr_fan_mode = fan
+    def undo():
+        if entity._attr_fan_mode == fan:
+            entity._attr_fan_mode = old
+    return undo
 
 
 class RoomTemperatureClimate(ClimateEntity):
@@ -168,11 +195,13 @@ class RoomTemperatureClimate(ClimateEntity):
         needs_auto = self._auto_fan and not turning_off and self._attr("fan_mode") != "auto"
         if needs_auto and "auto" not in (self._attr("fan_modes") or []):
             raise HomeAssistantError("原生空調不支援自動風速，未送出指令")
+        # Auto fan rides on this command; only when HA's AC is not as expected does it go first, apart.
+        undo = staged_fan(self.hass, self._source_entity_id, "auto") if needs_auto else None
         try:
             async with asyncio.timeout(25):
                 # This presentation entity only: native HA/Dashboard control stays
                 # unrestricted. No commands on setup, options or sensor events.
-                if needs_auto:
+                if needs_auto and undo is None:
                     await self.hass.services.async_call("climate", "set_fan_mode",
                         {"entity_id": self._source_entity_id, "fan_mode": "auto"},
                         blocking=True, context=self._context)
@@ -183,6 +212,8 @@ class RoomTemperatureClimate(ClimateEntity):
                 await self.hass.services.async_call("climate", service,
                     {"entity_id": self._source_entity_id, **(data or {})}, blocking=True, context=self._context)
         except Exception:
+            if undo is not None:
+                undo()
             raise HomeAssistantError("空調指令結果未確認，請查看設備；不會自動重送") from None
         self._refresh()
         self.async_write_ha_state()

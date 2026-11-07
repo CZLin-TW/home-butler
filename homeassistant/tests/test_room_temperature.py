@@ -289,6 +289,34 @@ async def test_fixed_auto_serializes_fan_and_target_with_other_paired_commands(h
         assert [call.args[1] for call in calls.call_args_list] == ["set_fan_mode", "set_temperature", "turn_off"]
 
 
+class Native:
+    """Stands in for HA's SwitchBot AC: each command sends the fan speed it holds."""
+    def __init__(self, fan):
+        self._attr_fan_mode = fan
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_fixed_auto_fan_rides_on_the_paired_command(hass, fails):
+    ac, sensor, entry, entity = await setup_pair(hass, fixed_auto_fan=True)
+    state = hass.states.get(ac.entity_id)
+    hass.states.async_set(ac.entity_id, "cool", {**state.attributes, "fan_mode": "low"})
+    await hass.async_block_till_done()
+    native, sent = Native("low"), []
+    async def relay(domain, service, data, **kwargs):
+        sent.append((service, native._attr_fan_mode))
+        if fails:
+            raise RuntimeError("failed")
+    with (patch("custom_components.ac_room_temperature.climate.native_ac", return_value=native),
+          patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock(side_effect=relay))):
+        if fails:
+            with pytest.raises(HomeAssistantError, match="不會自動重送"):
+                await entity.async_set_temperature(temperature=27)
+        else:
+            await entity.async_set_temperature(temperature=27)
+    assert sent == [("set_temperature", "auto")]
+    assert native._attr_fan_mode == ("low" if fails else "auto")
+
+
 def set_native(hass, ac, state, **attributes):
     hass.states.async_set(ac.entity_id, state, {**hass.states.get(ac.entity_id).attributes, **attributes})
 

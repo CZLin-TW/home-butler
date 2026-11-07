@@ -4,6 +4,7 @@ import math
 import re
 import time
 
+from homeassistant.components.climate.const import DATA_COMPONENT
 from homeassistant.const import UnitOfTemperature
 from homeassistant.helpers import entity_registry as er
 
@@ -60,6 +61,31 @@ def auto_target(hass, native_entity_id):
                 and state.attributes.get("source_climate") == native_entity_id):
             return state.entity_id
     return None
+
+
+def native_ac(hass, entity_id):
+    """HA's own SwitchBot Cloud AC object, or None when HA no longer has the one staged_fan relies on."""
+    component = hass.data.get(DATA_COMPONENT)
+    entity = component.get_entity(entity_id) if component else None
+    if type(entity).__name__ != "SwitchBotCloudAirConditioner" or not isinstance(getattr(entity, "_attr_fan_mode", None), str):
+        return None
+    return entity
+
+
+def staged_fan(hass, entity_id, fan):
+    """Puts the fan speed on the native AC without sending it, so the next command carries it.
+    Every SwitchBot command sends power, mode, temperature and fan together, but HA has no service that
+    sets them all: a separate fan command is a second IR signal, and the AC beeps twice. Returns the
+    undo for a command that fails, or None when HA's AC is not as expected (send the fan apart then)."""
+    entity = native_ac(hass, entity_id)
+    if entity is None:
+        return None
+    old = entity._attr_fan_mode
+    entity._attr_fan_mode = fan
+    def undo():
+        if entity._attr_fan_mode == fan:
+            entity._attr_fan_mode = old
+    return undo
 
 
 class ClimateCommands:
@@ -120,6 +146,11 @@ class ClimateCommands:
             async def call(service, data=None, entity_id=None):
                 await self.hass.services.async_call("climate", service,
                     {"entity_id": entity_id or entry.entity_id, **(data or {})}, blocking=True)
+            new_fan = fan is not None and fan != state.attributes.get("fan_mode")
+            # The Dashboard sends every setting each time; the fan rides on the command for the rest.
+            # Auto goes through the pairing, which decides the mode, so its fan still goes apart.
+            carries = target == entry.entity_id and (temp is not None or mode is not None or state.state == "off")
+            undo = staged_fan(self.hass, entry.entity_id, fan) if new_fan and carries else None
             try:
                 async with asyncio.timeout(20):
                     if patch["power"] == "off":
@@ -133,7 +164,7 @@ class ClimateCommands:
                             await call("set_hvac_mode", {"hvac_mode": mode}, target)
                         elif state.state == "off":
                             await call("turn_on")
-                        if fan is not None and fan != state.attributes.get("fan_mode"):
+                        if new_fan and undo is None:
                             await call("set_fan_mode", {"fan_mode": fan})
                 result["state"] = snapshot(self.hass, [source])[0]
                 final = result["state"]
@@ -144,5 +175,7 @@ class ClimateCommands:
                 if final["available"] and matched:
                     result["status"] = "success"
             except Exception:
-                pass  # Do not replay partially executed commands or expose exception data.
+                if undo is not None:
+                    undo()
+                # Do not replay partially executed commands or expose exception data.
             return result

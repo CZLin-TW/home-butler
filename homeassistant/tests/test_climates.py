@@ -1,5 +1,6 @@
 """Real HA registry/services; SwitchBot network traffic is replaced by a service."""
 import time
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -136,3 +137,60 @@ async def test_auto_without_a_pairing_sends_nothing(hass):
         hass.services.async_register("climate", name, service)
     assert (await controller.execute(command(source, {"power": "on", "mode": "heat_cool"})))["status"] == "failed"
     assert not calls
+
+
+class Native:
+    """Stands in for HA's SwitchBot AC: each command sends the fan speed it holds."""
+    def __init__(self, fan):
+        self._attr_fan_mode = fan
+
+
+def native_ac_service(hass, entry, native, calls, fail=False):
+    async def service(call):
+        calls.append((call.service, dict(call.data), native._attr_fan_mode))
+        if fail:
+            raise RuntimeError("failed")
+        state = hass.states.get(entry.entity_id)
+        hass.states.async_set(entry.entity_id, call.data.get("hvac_mode", state.state),
+                              {**state.attributes, "temperature": call.data["temperature"], "fan_mode": native._attr_fan_mode})
+    for name in ("set_temperature", "set_fan_mode"):
+        hass.services.async_register("climate", name, service)
+
+
+async def test_dashboard_fan_change_goes_out_as_one_command(hass):
+    entry = ac(hass)
+    source = select_climates(hass, [entry.entity_id])[0]
+    controller = ClimateCommands(hass, [source])
+    native, calls = Native("auto"), []
+    native_ac_service(hass, entry, native, calls)
+    with patch("custom_components.home_butler.climates.native_ac", return_value=native):
+        result = await controller.execute(command(source, {"power": "on", "mode": "cool", "temperature": 26, "fan_speed": "low"}))
+    assert calls == [("set_temperature", {"entity_id": entry.entity_id, "temperature": 26, "hvac_mode": "cool"}, "low")]
+    assert result["status"] == "success" and result["state"]["fan_mode"] == "low"
+
+
+async def test_fan_goes_apart_when_the_native_ac_is_not_as_expected(hass):
+    entry = ac(hass)
+    source = select_climates(hass, [entry.entity_id])[0]
+    controller = ClimateCommands(hass, [source])
+    calls = []
+    async def service(call):
+        calls.append(call.service)
+        state = hass.states.get(entry.entity_id)
+        hass.states.async_set(entry.entity_id, "cool", {**state.attributes, **{k: v for k, v in call.data.items() if k != "entity_id"}})
+    for name in ("set_temperature", "set_fan_mode"):
+        hass.services.async_register("climate", name, service)
+    result = await controller.execute(command(source, {"power": "on", "mode": "cool", "temperature": 26, "fan_speed": "low"}))
+    assert calls == ["set_temperature", "set_fan_mode"] and result["status"] == "success"
+
+
+async def test_failed_command_puts_the_fan_back(hass):
+    entry = ac(hass)
+    source = select_climates(hass, [entry.entity_id])[0]
+    controller = ClimateCommands(hass, [source])
+    native, calls = Native("auto"), []
+    native_ac_service(hass, entry, native, calls, fail=True)
+    with patch("custom_components.home_butler.climates.native_ac", return_value=native):
+        result = await controller.execute(command(source, {"power": "on", "mode": "cool", "temperature": 26, "fan_speed": "high"}))
+    assert result["status"] == "unknown" and len(calls) == 1
+    assert native._attr_fan_mode == "auto"
