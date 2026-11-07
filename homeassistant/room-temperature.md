@@ -1,6 +1,6 @@
 # 空調室溫配對
 
-`ac_room_temperature` 1.2.0 是獨立 HA 本機整合，將一台原生 SwitchBot Cloud
+`ac_room_temperature` 1.2.2 是獨立 HA 本機整合，將一台原生 SwitchBot Cloud
 空調與一個溫度感測器合成 climate，供 HomeKit Bridge 顯示及控制。
 SwitchBot 紅外線空調不提供 current_temperature；HA 2026.9.2 HomeKit Bridge 缺值時保留 21°C 初始值。
 本功能提供實際感測器讀值，不做自動調溫、回饋補償、重試或覆寫原生實體狀態；唯一的規則是下面的「自動」模式。
@@ -98,6 +98,9 @@ iPhone 同步與自動風速效果待驗。若需回復合併卡片，可於配�
 - 資料新鮮度依原感測整合的可用性，不以 last_changed 猜測斷線，因穩定溫度可長時間不變。
 - 室溫不是冷氣內部量測；IR 電源與壓縮機仍無實體回讀，HomeKit 的冷暖運轉顯示只是推定。
 - 原生來源只限 switchbot_cloud，不能指向配對實體本身或 HomeKit 匯入實體形成迴圈。
+- 溫度用 HA 2026.11 的 `native_temperature_unit`／`native_current_temperature`／`native_target_temperature`（1.2.2）；
+  舊名稱 2027.11 停用，2026.11 起會在記錄裡警告。舊名稱暫時留成別名，因為 CI 的 HA 測試框架還停在 2026.10.4，
+  而 2026.10 只讀舊名稱；類別同時提供兩種時 2026.11 用新的、不警告。測試框架到 2026.11 後刪掉別名、CI 換版本。
 
 離線驗證見 `homeassistant/tests/test_room_temperature.py`，使用真實 HA 框架搭配假的 native service。
 需覆蓋平台生命週期、換 sensor 保留 ID、感測事件不控制、失聯與恢復、攝華氏轉換、來源改名／刪除、

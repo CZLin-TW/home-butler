@@ -60,7 +60,7 @@ async def test_unavailable_nan_wrong_units_and_registry_removal_never_display_21
         hass.states.async_set(sensor.entity_id, value, {"device_class": "temperature", "unit_of_measurement": unit})
         await hass.async_block_till_done()
         assert hass.states.get(entity.entity_id).state == "unavailable"
-        assert entity.current_temperature is None
+        assert entity.native_current_temperature is None
     hass.states.async_set(sensor.entity_id, "77", {"device_class": "temperature", "unit_of_measurement": "°F"})
     await hass.async_block_till_done()
     assert hass.states.get(entity.entity_id).attributes["current_temperature"] == 25
@@ -74,7 +74,7 @@ async def test_commands_only_relay_to_native_id_without_optimistic_state_or_retr
     with patch("homeassistant.core.ServiceRegistry.async_call", new=AsyncMock()) as calls:
         await entity.async_set_temperature(temperature=26.5, hvac_mode="heat")
         assert calls.call_args.args == ("climate", "set_temperature", {"entity_id": ac.entity_id, "temperature": 27, "hvac_mode": "heat"})
-        assert entity.target_temperature == 28 and entity.hvac_mode == "cool"
+        assert entity.native_target_temperature == 28 and entity.hvac_mode == "cool"
         for method, value, service, payload in [
             (entity.async_set_hvac_mode, "dry", "set_hvac_mode", {"hvac_mode": "dry"}),
             (entity.async_set_fan_mode, "low", "set_fan_mode", {"fan_mode": "low"}),
@@ -199,7 +199,7 @@ async def test_fixed_auto_restores_native_fan_before_paired_command(hass, operat
         assert [call.args for call in calls.call_args_list] == [
             ("climate", "set_fan_mode", {"entity_id": ac.entity_id, "fan_mode": "auto"}),
             ("climate", service, {"entity_id": ac.entity_id, **data})]
-        assert entity.target_temperature == 28  # No optimistic target write.
+        assert entity.native_target_temperature == 28  # No optimistic target write.
 
 
 async def test_fixed_auto_does_not_add_commands_when_already_auto_or_turning_off(hass):
@@ -233,7 +233,7 @@ async def test_fixed_auto_failure_stops_without_retry_or_optimistic_state(hass, 
         with pytest.raises(HomeAssistantError, match="不會自動重送"):
             await entity.async_set_temperature(temperature=27)
         assert calls.call_count == failed_call
-        assert entity.target_temperature == 28
+        assert entity.native_target_temperature == 28
 
 
 @pytest.mark.parametrize("fan_modes", [["low"], None])

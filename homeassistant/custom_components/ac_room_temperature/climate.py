@@ -73,7 +73,7 @@ class RoomTemperatureClimate(ClimateEntity):
             if value is not None and unit in ("°C", "°F"):
                 celsius = TemperatureConverter.convert(value, unit, "°C")
                 if -50 <= celsius <= 100:
-                    self._temperature = TemperatureConverter.convert(value, unit, self.temperature_unit)
+                    self._temperature = TemperatureConverter.convert(value, unit, self.native_temperature_unit)
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -94,11 +94,11 @@ class RoomTemperatureClimate(ClimateEntity):
         return bool(self._source and self._source.state in MODES and self._temperature is not None)
 
     @property
-    def temperature_unit(self):
+    def native_temperature_unit(self):
         return self.hass.config.units.temperature_unit
 
     @property
-    def current_temperature(self):
+    def native_current_temperature(self):
         return self._temperature
 
     @property
@@ -113,18 +113,24 @@ class RoomTemperatureClimate(ClimateEntity):
         return self._source.attributes.get(name, default) if self._source else default
 
     @property
-    def target_temperature(self):
+    def native_target_temperature(self):
         return finite(self._attr("temperature"))
+
+    # HA 2026.10 reads the old names; 2026.11 reads native_* and, when a class provides both, uses those
+    # without a deprecation warning. Drop these once CI's HA test framework is on 2026.11.
+    temperature_unit = native_temperature_unit
+    current_temperature = native_current_temperature
+    target_temperature = native_target_temperature
 
     @property
     def min_temp(self):
-        return max(self._attr("min_temp", TemperatureConverter.convert(16, "°C", self.temperature_unit)),
-                   TemperatureConverter.convert(16, "°C", self.temperature_unit))
+        return max(self._attr("min_temp", TemperatureConverter.convert(16, "°C", self.native_temperature_unit)),
+                   TemperatureConverter.convert(16, "°C", self.native_temperature_unit))
 
     @property
     def max_temp(self):
-        return min(self._attr("max_temp", TemperatureConverter.convert(30, "°C", self.temperature_unit)),
-                   TemperatureConverter.convert(30, "°C", self.temperature_unit))
+        return min(self._attr("max_temp", TemperatureConverter.convert(30, "°C", self.native_temperature_unit)),
+                   TemperatureConverter.convert(30, "°C", self.native_temperature_unit))
 
     @property
     def fan_mode(self):
@@ -186,7 +192,7 @@ class RoomTemperatureClimate(ClimateEntity):
             return self.hvac_mode
         if self._temperature is None:
             raise HomeAssistantError("沒有室溫，無法決定開冷氣或暖氣")
-        celsius = TemperatureConverter.convert(self._temperature, self.temperature_unit, "°C")
+        celsius = TemperatureConverter.convert(self._temperature, self.native_temperature_unit, "°C")
         mode = HVACMode.COOL if celsius >= AUTO_COOL_FROM_C else HVACMode.HEAT
         if mode not in self._attr("hvac_modes", MODES):
             raise HomeAssistantError("原生空調不支援冷氣或暖氣，未送出指令")
@@ -201,8 +207,8 @@ class RoomTemperatureClimate(ClimateEntity):
         value = finite(kwargs.get("temperature"))
         if value is None or not self.min_temp <= value <= self.max_temp:
             raise HomeAssistantError("目標溫度超出範圍")
-        celsius = TemperatureConverter.convert(value, self.temperature_unit, "°C")
-        data = {"temperature": TemperatureConverter.convert(math.floor(celsius + 0.5), "°C", self.temperature_unit)}
+        celsius = TemperatureConverter.convert(value, self.native_temperature_unit, "°C")
+        data = {"temperature": TemperatureConverter.convert(math.floor(celsius + 0.5), "°C", self.native_temperature_unit)}
         if "hvac_mode" in kwargs:
             if kwargs["hvac_mode"] not in self.hvac_modes:
                 raise HomeAssistantError("空調模式不支援")
