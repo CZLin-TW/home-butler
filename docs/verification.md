@@ -1,3 +1,14 @@
+## 2026-11-07 空調風速併進同一個紅外線（home_butler 1.12.1、ac_room_temperature 1.2.3）
+
+起因：使用者發現從 Dashboard 操作冷氣都嗶兩聲，只改風速也是。Dashboard 每次送整組設定，HA 端先送「溫度＋模式」再另送風速，
+而 SwitchBot 每個紅外線都帶整組狀態，所以是兩個訊號。HA 2026.11.0 的 SwitchBot Cloud 沒有一次設定全部的服務。
+室溫配對的固定自動風速同理（先送自動風速再送指令）；Apple 家庭／Siri 把模式與溫度拆成兩個指令是另一件事，這次沒動。
+
+改法：先把風速放到原生空調（`SwitchBotCloudAirConditioner._attr_fan_mode`）不送出，再送溫度＋模式；失敗就改回，找不到就退回分開送。
+CI 通過（`f633560`）；23:47 從這台以 SSH 安裝並重啟 HA，三個配對、home_butler、SwitchBot Cloud 都載入，無新錯誤。
+
+實機（使用者，主臥，Dashboard）：23:49:57 改成 27°C／弱風、23:50:05 改回 26°C／自動，原生空調狀態各一次到位，使用者確認「只有一聲」。
+
 ## 2026-10-29 空調「自動」與關機時的蜂鳴（ac_room_temperature 1.2.1、home_butler 1.12.0）
 
 起因：使用者叫 Siri「打開客廳冷氣 28 度」常失敗，冷氣還會發出錯誤的嗶聲。HA 記錄（2026-10-28 22:20–22:21）：Siri 四次都送 TargetHeatingCoolingState 3（自動）＋28°C；
