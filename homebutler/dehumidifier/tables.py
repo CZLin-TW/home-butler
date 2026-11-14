@@ -20,7 +20,7 @@ class Dehumidifier(Base):
     sensor_name: Mapped[str] = mapped_column(String(160), default="")
     duration_min: Mapped[int] = mapped_column(Integer, default=30)
     threshold: Mapped[int] = mapped_column(Integer, default=50)
-    threshold_source: Mapped[str] = mapped_column(String(10), default="fixed")      # fixed | custom
+    threshold_source: Mapped[str] = mapped_column(String(10), default="fixed")      # fixed | custom | dewpoint
     # where the rule stands (set by the checks)
     phase: Mapped[str] = mapped_column(String(24), default="disabled")
     countdown_min: Mapped[int | None] = mapped_column(Integer)

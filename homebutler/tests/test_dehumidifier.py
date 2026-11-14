@@ -34,11 +34,12 @@ class Clock:
 
 class FakeLink:
     def __init__(self):
-        self.online, self.humidity = True, {}
+        self.online, self.humidity, self.temperature = True, {}, {}
 
     def state(self):
-        return {"online": self.online, "environment": [{"name": n, "kind": "humidity", "value": v, "available": v is not None}
-                                                        for n, v in self.humidity.items()]}
+        readings = [("humidity", self.humidity), ("temperature", self.temperature)]
+        return {"online": self.online, "environment": [{"name": n, "kind": kind, "value": v, "available": v is not None}
+                                                        for kind, values in readings for n, v in values.items()]}
 
 
 class FakePanasonic:
@@ -92,12 +93,27 @@ class RuleTests(unittest.TestCase):
 
     def test_hysteresis_band(self):
         now = START
-        self.assertEqual(rules.steady(60, 30, 62, False, now, None, None).phase, "armed_above")
-        self.assertEqual(rules.steady(60, 30, 62, False, now, now - timedelta(minutes=30), None).fire, "on")
-        self.assertEqual(rules.steady(60, 30, 61.9, False, now, now - timedelta(hours=2), None).fire, None)
-        self.assertEqual(rules.steady(60, 30, 59, True, now, None, now - timedelta(minutes=30)).fire, "off")
-        self.assertEqual(rules.steady(60, 0, 62, False, now, None, None).fire, "on")
+        self.assertEqual(rules.steady(62, 59, 30, 62, False, now, None, None).phase, "armed_above")
+        self.assertEqual(rules.steady(62, 59, 30, 62, False, now, now - timedelta(minutes=30), None).fire, "on")
+        self.assertEqual(rules.steady(62, 59, 30, 61.9, False, now, now - timedelta(hours=2), None).fire, None)
+        self.assertEqual(rules.steady(62, 59, 30, 59, True, now, None, now - timedelta(minutes=30)).fire, "off")
+        self.assertEqual(rules.steady(62, 59, 0, 62, False, now, None, None).fire, "on")
         self.assertEqual((rules.toggle_on(60, 60, False), rules.toggle_on(60, 59.9, True), rules.toggle_on(60, 61, None)), ("on", "off", None))
+
+    def test_dew_point_target(self):
+        self.assertAlmostEqual(rules.dew_point(25, 61), 17.0, delta=0.1)
+        self.assertAlmostEqual(rules.dew_point(28, 63), 20.3, delta=0.1)
+        self.assertAlmostEqual(rules.humidity_at(25, 17), 61.0, delta=0.5)
+        self.assertAlmostEqual(rules.humidity_at(27, 17), 54.0, delta=0.5)
+        self.assertAlmostEqual(rules.dew_point(26, rules.humidity_at(26, 17)), 17.0, delta=0.05)
+        goal, warning = rules.target(55, "dewpoint", "7=55", 8)
+        self.assertEqual((goal.machine, goal.cut, goal.on_at, goal.off_at, goal.dew, warning), (50, 17.0, 17.5, 16.7, True, ""))
+        self.assertEqual(rules.target(55, "fixed", "", 8)[0], rules.Target(55, 55, 57, 54, False))
+        self.assertIsNone(rules.reading(goal, 60, None))         # a dew point needs the temperature too
+        self.assertEqual(rules.reading(goal, 61, 25), rules.dew_point(25, 61))
+        self.assertEqual(rules.reading(rules.target(55, "fixed", "", 8)[0], 61, None), 61.0)
+        # The lowest machine target stays below what 17°C means up to 30°C, so the machine never stops by itself.
+        self.assertLess(drivers.LGDriver(None, "x").auto_target(goal.machine), rules.humidity_at(30, 17))
 
     def test_takeover_is_power_or_mode_or_our_target(self):
         expected = {"power": True, "mode": "0", "target": None}
@@ -267,6 +283,33 @@ class ServiceTests(StoreTest):
         self.assertEqual((row.applied_threshold, row.phase, row.above_since), (60, "idle_dry", None))
         self.assertEqual(self.service.views()[0]["rule"]["curve"], [{"hour": 7, "threshold": 55}, {"hour": 23, "threshold": 60}])
 
+    def test_dew_point_mode_follows_the_room_temperature(self):
+        self.link.temperature["感測一"] = 27.0
+        self.link.humidity["感測一"] = 56.0          # 57 at 27°C: dew point 17.75
+        view = self.service.set_rule("除濕一", True, threshold_source="dewpoint", duration_min=10)
+        self.assertEqual(view["rule"]["last_event"], "toggled_immediate_on")
+        rule = view["rule"]
+        self.assertEqual((rule["measure"], rule["dew_point_target"], rule["on_at"], rule["off_at"]), ("dew_point", 17.0, 17.5, 16.7))
+        self.assertEqual(rule["effective_threshold"], 54)              # 17°C at 27°C
+        self.assertAlmostEqual(view["sensor_dew_point"], 17.75, delta=0.05)
+        self.assertEqual(self.row().applied_threshold, 50)
+        # Cooler room: the humidity reads higher than at the start, but the dew point is lower, inside the band.
+        self.link.temperature["感測一"] = 25.0
+        self.link.humidity["感測一"] = 62.0          # 63 at 25°C: dew point 17.5
+        self.every(5, 4)
+        self.assertTrue(self.unit.on)
+        self.assertEqual(self.service.views()[0]["rule"]["effective_threshold"], 61)
+        self.link.humidity["感測一"] = 58.0          # 59 at 25°C: dew point 16.4
+        self.every(5, 2)
+        self.assertTrue(self.unit.on)
+        self.every(5, 1)
+        self.assertFalse(self.unit.on)
+        self.assertEqual(self.row().last_event, "triggered_off")
+        # No temperature: the sensor counts as silent.
+        self.link.temperature["感測一"] = None
+        self.every(5, 6)
+        self.assertEqual(self.row().phase, "sensor_lost_warning")
+
     def test_unreadable_unit_changes_nothing(self):
         self.service.set_rule("除濕一", True, threshold=60)
         self.unit.readable = False
@@ -303,6 +346,9 @@ class ServiceTests(StoreTest):
             "✅ 除濕一 已開啟自動除濕模式，目標 55%，使用 感測一，持續 30 分鐘，目前濕度 53.0%"))
         self.assertIn("自動模式", act["control_dehumidifier"](None, {"power": "on"}))
         self.assertEqual(act["set_dehumidifier_auto"](None, {"device_name": "房間一", "auto_mode": "off"}), "✅ 除濕一 已關閉自動除濕模式")
+        self.service.set_rule("除濕一", False, threshold_source="dewpoint")
+        self.assertIn("目標 露點 17°C，", act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on"}))
+        self.service.set_rule("除濕一", False)
         self.assertEqual(act["control_dehumidifier"](None, {"mode": "目標濕度"}), "✅ 除濕一 指令已送出")
         self.assertTrue(act["query_dehumidifier"](None, {}).startswith("💧 除濕一：開啟｜模式：目標濕度｜目標濕度：55%"))
         self.assertIn("找不到", act["query_dehumidifier"](None, {"device_name": "車庫"}))

@@ -8,11 +8,17 @@ A dehumidifier in auto mode follows one room sensor:
   `7=55, 23=60`: 55% from 07:00, 60% from 23:00 until 07:00). A curve that does not parse falls back to the
   fixed target, with the reason shown; it is never guessed.
 - When the target changes (the curve passes a boundary), the waits start over.
+- Or the target is a dew point (`dewpoint`, 17°C: above it the air feels muggy). Then the rule compares the
+  room's dew point, not its relative humidity: the same air reads a higher humidity when the room is cooler,
+  and a dehumidifier warms the room, which lowers the humidity it reads without removing any water. The band
+  is 17.5 on / 16.7 off (°C), about the same as +2 % / −1 % at 25°C. The machine is told a fixed low target
+  (`DEW_MACHINE_THRESHOLD`), so it never stops by itself and a changing room temperature never re-aligns it.
 - Sensor silent for 6 checks (30 min): a warning; for 12 (60 min): auto mode ends and the machine is
   turned off.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +27,49 @@ ABOVE, BELOW = 2, 1
 WARNING_TICKS, DISABLE_TICKS = 6, 12
 THRESHOLD_MIN, THRESHOLD_MAX = 30, 80
 CUSTOM = "custom"
+DEWPOINT = "dewpoint"
+SOURCES = ("fixed", CUSTOM, DEWPOINT)
+DEW_TARGET, DEW_ABOVE, DEW_BELOW = 17.0, 0.5, 0.3
+DEW_MACHINE_THRESHOLD = 50          # LG's own target 40: below any humidity a 17°C dew point gives up to 30°C
+MAGNUS_A, MAGNUS_B = 17.62, 243.12
+
+
+def dew_point(temperature, humidity) -> float:
+    """The dew point (°C) of air at this temperature (°C) and relative humidity (%), Magnus formula."""
+    gamma = math.log(max(float(humidity), 0.1) / 100) + MAGNUS_A * float(temperature) / (MAGNUS_B + float(temperature))
+    return round(MAGNUS_B * gamma / (MAGNUS_A - gamma), 2)
+
+
+def humidity_at(temperature, dew) -> float:
+    """The relative humidity (%) that a dew point means at this temperature."""
+    t, d = float(temperature), float(dew)
+    return round(100 * math.exp(MAGNUS_A * d / (MAGNUS_B + d) - MAGNUS_A * t / (MAGNUS_B + t)), 1)
+
+
+@dataclass(frozen=True)
+class Target:
+    machine: int            # the threshold the machine is set by (and that a change of re-aligns it)
+    cut: float              # the plain comparison when auto mode is switched on
+    on_at: float
+    off_at: float
+    dew: bool               # compared with the dew point (°C) instead of the humidity (%)
+
+
+def target(fixed: int, source: str, curve_text, hour: int) -> tuple[Target, str]:
+    """The target in effect, and a warning when the curve is unusable."""
+    if source == DEWPOINT:
+        return Target(DEW_MACHINE_THRESHOLD, DEW_TARGET, DEW_TARGET + DEW_ABOVE, round(DEW_TARGET - DEW_BELOW, 1), True), ""
+    threshold, warning = effective_threshold(fixed, source, curve_text, hour)
+    return Target(threshold, threshold, threshold + ABOVE, threshold - BELOW, False), warning
+
+
+def reading(goal: Target, humidity, temperature) -> float | None:
+    """What the target is compared with; None when the sensor does not give it."""
+    if humidity is None:
+        return None
+    if goal.dew:
+        return None if temperature is None else dew_point(temperature, humidity)
+    return float(humidity)
 
 
 def parse_curve(text) -> tuple[list[tuple[int, int]] | None, str]:
@@ -70,9 +119,9 @@ def effective_threshold(fixed: int, source: str, curve_text, hour: int) -> tuple
     return at_hour(segments, hour), ""
 
 
-def toggle_on(threshold: int, humidity: float, power_on: bool | None) -> str | None:
+def toggle_on(cut: float, value: float, power_on: bool | None) -> str | None:
     """The immediate decision when auto mode is switched on: "on", "off" or None (already right)."""
-    if float(humidity) >= threshold:
+    if float(value) >= cut:
         return "on" if power_on is False else None
     return "off" if power_on else None
 
@@ -86,11 +135,11 @@ class Step:
     below_since: datetime | None
 
 
-def steady(threshold: int, duration_min: int, humidity: float, power_on: bool, now: datetime,
+def steady(on_at: float, off_at: float, duration_min: int, value: float, power_on: bool, now: datetime,
            above_since: datetime | None, below_since: datetime | None) -> Step:
     wait = duration_min * 60
-    value = float(humidity)
-    if value >= threshold + ABOVE:
+    value = float(value)
+    if value >= on_at:
         above_since = above_since or now
         if power_on:
             return Step(None, "idle_humid", None, above_since, None)
@@ -98,7 +147,7 @@ def steady(threshold: int, duration_min: int, humidity: float, power_on: bool, n
         if elapsed >= wait:
             return Step("on", "idle_humid", None, None, None)
         return Step(None, "armed_above", int((wait - elapsed) // 60), above_since, None)
-    if value <= threshold - BELOW:
+    if value <= off_at:
         below_since = below_since or now
         if not power_on:
             return Step(None, "idle_dry", None, None, below_since)
@@ -109,12 +158,12 @@ def steady(threshold: int, duration_min: int, humidity: float, power_on: bool, n
     return Step(None, "idle_humid" if power_on else "idle_dry", None, None, None)
 
 
-def phase_now(threshold: int, humidity: float | None, power_on: bool | None) -> str:
+def phase_now(on_at: float, off_at: float, value: float | None, power_on: bool | None) -> str:
     """A best guess right after a change of the rule; the next check sets the real one."""
-    if humidity is None:
+    if value is None:
         return "sensor_lost_warning"
-    if float(humidity) >= threshold + ABOVE:
+    if float(value) >= on_at:
         return "idle_humid" if power_on else "armed_above"
-    if float(humidity) <= threshold - BELOW:
+    if float(value) <= off_at:
         return "armed_below" if power_on else "idle_dry"
     return "idle_humid" if power_on else "idle_dry"

@@ -93,7 +93,7 @@ class Dehumidifiers:
         return row
 
     def sensors(self) -> dict[str, dict]:
-        """Enabled sensors from the tab: {name: {"location", "curve", "humidity"}}, humidity from HA (offset applied)."""
+        """Enabled sensors from the tab: {name: {"location", "curve", "humidity", "temperature"}}, readings from HA (offset applied)."""
         state = self.link.state()
         live = devices.sensor_values(state)
         with self.store.transaction() as session:
@@ -102,7 +102,7 @@ class Dehumidifiers:
             for setting in found:
                 values = devices.adjusted(live.get(setting.name, {}), setting) if state["online"] else {}
                 out[setting.name] = {"location": setting.location, "curve": setting.humidity_rule_text, "enabled": setting.enabled,
-                                     "humidity": values.get("humidity")}
+                                     "humidity": values.get("humidity"), "temperature": values.get("temperature")}
             return out
 
     def choose_sensor(self, unit: Unit, wanted: str = "") -> str:
@@ -167,7 +167,8 @@ class Dehumidifiers:
             if not row.auto_mode:
                 return "manual"
             sensor = sensors.get(row.sensor_name, {})
-            threshold, warning = rules.effective_threshold(row.threshold, row.threshold_source, sensor.get("curve"), hour)
+            goal, warning = rules.target(row.threshold, row.threshold_source, sensor.get("curve"), hour)
+            threshold = goal.machine
             if warning:
                 log.warning("%s: %s", unit.name, warning)
             expected, applied = row.expected, row.applied_threshold
@@ -187,8 +188,8 @@ class Dehumidifiers:
             above = below = None
             if power_on:
                 expected = driver.expected_on(threshold) if drivers.outcome(driver.align(threshold)) == "success" else None
-        humidity = sensor.get("humidity")
-        if humidity is None:
+        value = rules.reading(goal, sensor.get("humidity"), sensor.get("temperature"))
+        if value is None:
             missing += 1
             if missing >= rules.DISABLE_TICKS:
                 if power_on:
@@ -200,7 +201,7 @@ class Dehumidifiers:
                                                         if missing >= rules.WARNING_TICKS else {}))
             return "sensor_silent"
         row_duration = self._duration(unit.name)
-        step = rules.steady(threshold, row_duration, humidity, power_on, now, above, below)
+        step = rules.steady(goal.on_at, goal.off_at, row_duration, value, power_on, now, above, below)
         event = None
         if step.fire == "on":
             full = drivers.outcome(driver.fire_on(threshold)) == "success"
@@ -276,8 +277,8 @@ class Dehumidifiers:
             raise Refused(f"目標濕度需介於 {rules.THRESHOLD_MIN}%～{rules.THRESHOLD_MAX}%")
         if duration_min is not None and not 0 <= duration_min <= 24 * 60:
             raise Refused("等待時間需介於 0 至 1440 分鐘")
-        if threshold_source not in (None, "fixed", rules.CUSTOM):
-            raise Refused("目標濕度來源只能是 fixed 或 custom")
+        if threshold_source not in (None, *rules.SOURCES):
+            raise Refused("目標濕度來源只能是 fixed、custom 或 dewpoint")
         driver = self.driver(unit) if auto_mode else None
         if auto_mode and driver is None:
             raise Refused(f"{name} 缺少控制資訊（Device ID、帳號或憑證），無法開啟自動模式")
@@ -301,13 +302,14 @@ class Dehumidifiers:
                 fixed, source = row.threshold, row.threshold_source
             info = self.sensors().get(sensor, {})
             now = self.clock()
-            effective, _ = rules.effective_threshold(fixed, source, info.get("curve"), now.astimezone(self.zone).hour)
-            humidity, power_on, event = info.get("humidity"), None, None
+            goal, _ = rules.target(fixed, source, info.get("curve"), now.astimezone(self.zone).hour)
+            effective = goal.machine
+            value, power_on, event = rules.reading(goal, info.get("humidity"), info.get("temperature")), None, None
             if auto_mode and not was_on:
                 read = self._read(unit, driver, now)
                 power_on = read[1]["power"] if read else None
-                if humidity is not None and power_on is not None:
-                    decision = rules.toggle_on(effective, humidity, power_on)
+                if value is not None and power_on is not None:
+                    decision = rules.toggle_on(goal.cut, value, power_on)
                     if decision == "on":
                         full = drivers.outcome(driver.fire_on(effective)) == "success"
                         self._save(name, expected=driver.expected_on(effective) if full else None, applied_threshold=effective)
@@ -316,7 +318,7 @@ class Dehumidifiers:
                         driver.fire_off()
                         self._save(name, expected=driver.expected_off(), applied_threshold=effective)
                         event, power_on = "toggled_immediate_off", False
-            changes = {"phase": rules.phase_now(effective, humidity, power_on) if auto_mode else "disabled"}
+            changes = {"phase": rules.phase_now(goal.on_at, goal.off_at, value, power_on) if auto_mode else "disabled"}
             if event:
                 changes.update(last_event=event, last_event_at=now)
             self._save(name, **changes)
@@ -336,9 +338,14 @@ class Dehumidifiers:
             for unit in units:
                 row = self._row(session, unit.name)
                 sensor = sensors.get(row.sensor_name, {})
-                effective = row.applied_threshold
-                if effective is None:
-                    effective, _ = rules.effective_threshold(row.threshold, row.threshold_source, sensor.get("curve"), hour)
+                goal, _ = rules.target(row.threshold, row.threshold_source, sensor.get("curve"), hour)
+                humidity, temperature = sensor.get("humidity"), sensor.get("temperature")
+                if goal.dew:
+                    # What the dew point means in % at the room's temperature now; None without a temperature.
+                    effective = round(rules.humidity_at(temperature, goal.cut)) if temperature is not None else None
+                else:
+                    effective = goal.machine if row.applied_threshold is None else row.applied_threshold
+                on_at, off_at = (goal.on_at, goal.off_at) if goal.dew else (effective + rules.ABOVE, effective - rules.BELOW)
                 segments, error = rules.parse_curve(sensor.get("curve")) if row.sensor_name else (None, "未選感測器")
                 out.append({
                     "name": unit.name, "location": unit.location, "brand": unit.brand, "controllable": self.driver(unit) is not None,
@@ -347,11 +354,14 @@ class Dehumidifiers:
                                "error": row.status_error},
                     "rule": {"auto_mode": row.auto_mode, "sensor_name": row.sensor_name, "duration_min": row.duration_min,
                              "threshold": row.threshold, "threshold_source": row.threshold_source,
-                             "effective_threshold": effective, "on_at": effective + rules.ABOVE, "off_at": effective - rules.BELOW,
+                             # on_at/off_at are in the unit compared: % for a humidity target, °C for a dew point.
+                             "effective_threshold": effective, "measure": "dew_point" if goal.dew else "humidity",
+                             "dew_point_target": goal.cut if goal.dew else None, "on_at": on_at, "off_at": off_at,
                              "phase": row.phase, "countdown_min": row.countdown_min, "last_event": row.last_event,
                              "last_event_at": row.last_event_at,
                              "curve": [{"hour": h, "threshold": v} for h, v in segments or []], "curve_error": "" if segments else error},
-                    "sensor_humidity": sensor.get("humidity"),
+                    "sensor_humidity": humidity, "sensor_temperature": temperature,
+                    "sensor_dew_point": rules.dew_point(temperature, humidity) if humidity is not None and temperature is not None else None,
                 })
         return out
 

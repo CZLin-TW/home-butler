@@ -76,7 +76,8 @@ def actions(service: Dehumidifiers) -> dict:
                 continue
             rule = view["rule"]
             wait = "立即" if rule["duration_min"] == 0 else f"持續 {rule['duration_min']} 分鐘"
-            line = f"✅ {unit.name} 已開啟自動除濕模式，目標 {rule['threshold']}%，使用 {rule['sensor_name']}，{wait}"
+            goal = f"露點 {rule['dew_point_target']:g}°C" if rule["measure"] == "dew_point" else f"{rule['threshold']}%"
+            line = f"✅ {unit.name} 已開啟自動除濕模式，目標 {goal}，使用 {rule['sensor_name']}，{wait}"
             line += (f"，目前濕度 {view['sensor_humidity']}%" if view["sensor_humidity"] is not None
                      else "；感測器目前沒有即時濕度，會等下一次回報後開始判斷")
             good.append(line)
