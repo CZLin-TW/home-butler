@@ -1,36 +1,40 @@
 """The auto rule, as plain functions (no database, no network).
 
-A dehumidifier in auto mode follows one room sensor:
+A dehumidifier in auto mode follows one room sensor against a target humidity (%), which is either:
+- fixed: one number chosen on the card; or
+- dewpoint: the lower of two lines, one for how the air feels and one for what grows on the walls.
+  * A dew point (°C), one for the day and one for the night (the night one may be None: no dew-point line
+    at night, e.g. for quiet), turned into the humidity it means at the room's temperature now. Relative
+    humidity moves with the temperature (the same air reads higher in a cooler room, and a running
+    dehumidifier warms the room and lowers the reading without removing water); the dew point is the
+    water itself, which is what feels muggy.
+  * A humidity ceiling against mould and dust mites, whatever the hour. Walls colder than the room hold
+    a higher humidity than the room's air, so in winter this is the line that acts.
+  Without a temperature only the ceiling applies.
 - While running, asymmetric hysteresis around the target: on when humidity ≥ target+2 for the whole
   wait, off when ≤ target−1 for the whole wait, and in between nothing changes (target 60 → 59…62).
 - At the moment auto mode is switched on, one plain comparison decides at once: ≥ target on, below off.
-- The target is fixed, or follows the sensor's time-of-day curve (智能居家「濕度控制規則」, e.g.
-  `7=55, 23=60`: 55% from 07:00, 60% from 23:00 until 07:00). A curve that does not parse falls back to the
-  fixed target, with the reason shown; it is never guessed.
-- When the target changes (the curve passes a boundary), the waits start over.
-- Or the target is a dew point (`dewpoint`, 17°C: above it the air feels muggy). Then the rule compares the
-  room's dew point, not its relative humidity: the same air reads a higher humidity when the room is cooler,
-  and a dehumidifier warms the room, which lowers the humidity it reads without removing any water. The band
-  is 17.5 on / 16.7 off (°C), about the same as +2 % / −1 % at 25°C. The machine is told a fixed low target
-  (`DEW_MACHINE_THRESHOLD`), so it never stops by itself and a changing room temperature never re-aligns it.
+- A new fixed target restarts the waits. A dew-point target moves with the temperature and the hour and
+  restarts nothing; the machine is then told a fixed low target (`DEW_MACHINE_THRESHOLD`), so it never
+  stops by itself and is never re-aligned.
 - Sensor silent for 6 checks (30 min): a warning; for 12 (60 min): auto mode ends and the machine is
   turned off.
 """
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from datetime import datetime
 
 ABOVE, BELOW = 2, 1
 WARNING_TICKS, DISABLE_TICKS = 6, 12
 THRESHOLD_MIN, THRESHOLD_MAX = 30, 80
-CUSTOM = "custom"
-DEWPOINT = "dewpoint"
-SOURCES = ("fixed", CUSTOM, DEWPOINT)
-DEW_TARGET, DEW_ABOVE, DEW_BELOW = 17.0, 0.5, 0.3
-DEW_MACHINE_THRESHOLD = 50          # LG's own target 40: below any humidity a 17°C dew point gives up to 30°C
+FIXED, DEWPOINT = "fixed", "dewpoint"
+SOURCES = (FIXED, DEWPOINT)
+DEW_MIN, DEW_MAX = 15, 21
+CAP_MIN, CAP_MAX = 50, 80
+DEFAULTS = {"dew_day": 18, "dew_night": 19, "night_start": 23, "night_end": 7, "rh_cap": 65}
+DEW_MACHINE_THRESHOLD = 50          # LG's own target 40: below any target the dew-point mode can give up to 30°C
 MAGNUS_A, MAGNUS_B = 17.62, 243.12
 
 
@@ -46,77 +50,41 @@ def humidity_at(temperature, dew) -> float:
     return round(100 * math.exp(MAGNUS_A * d / (MAGNUS_B + d) - MAGNUS_A * t / (MAGNUS_B + t)), 1)
 
 
+def is_night(hour: int, start: int, end: int) -> bool:
+    """From `start` o'clock up to (not including) `end`, across midnight when start > end; never when equal."""
+    if start == end:
+        return False
+    return start <= hour < end if start < end else hour >= start or hour < end
+
+
 @dataclass(frozen=True)
-class Target:
-    machine: int            # the threshold the machine is set by (and that a change of re-aligns it)
-    cut: float              # the plain comparison when auto mode is switched on
-    on_at: float
-    off_at: float
-    dew: bool               # compared with the dew point (°C) instead of the humidity (%)
+class DewRule:
+    dew_day: int
+    dew_night: int | None
+    night_start: int
+    night_end: int
+    rh_cap: int
 
 
-def target(fixed: int, source: str, curve_text, hour: int) -> tuple[Target, str]:
-    """The target in effect, and a warning when the curve is unusable."""
-    if source == DEWPOINT:
-        return Target(DEW_MACHINE_THRESHOLD, DEW_TARGET, DEW_TARGET + DEW_ABOVE, round(DEW_TARGET - DEW_BELOW, 1), True), ""
-    threshold, warning = effective_threshold(fixed, source, curve_text, hour)
-    return Target(threshold, threshold, threshold + ABOVE, threshold - BELOW, False), warning
+@dataclass(frozen=True)
+class Goal:
+    humidity: float         # the target (%) now
+    basis: str              # fixed | day | night | cap: which line sets it
+    dew: int | None         # the dew point in effect (dew-point mode), even when the ceiling is lower
+    machine: int            # the threshold the machine is set by (a change of it re-aligns the machine)
+    no_temperature: bool = False
 
 
-def reading(goal: Target, humidity, temperature) -> float | None:
-    """What the target is compared with; None when the sensor does not give it."""
-    if humidity is None:
-        return None
-    if goal.dew:
-        return None if temperature is None else dew_point(temperature, humidity)
-    return float(humidity)
-
-
-def parse_curve(text) -> tuple[list[tuple[int, int]] | None, str]:
-    """`7=55, 23=60` → ([(7, 55), (23, 60)], ""); anything wrong → (None, why)."""
-    raw = str(text or "").strip()
-    if not raw:
-        return None, "未設定"
-    segments, seen = [], set()
-    for part in re.split(r"[,，]", raw):
-        part = part.strip()
-        if not part:
-            continue
-        match = re.fullmatch(r"(\d{1,2})\s*=\s*(\d{1,3})", part)
-        if not match:
-            return None, f"片段格式錯誤「{part}」（應為「小時=濕度」，例如 7=55）"
-        hour, value = int(match.group(1)), int(match.group(2))
-        if not 0 <= hour <= 23:
-            return None, f"小時超出範圍：{hour}（需 0~23）"
-        if not THRESHOLD_MIN <= value <= THRESHOLD_MAX:
-            return None, f"濕度超出範圍：{value}（需 {THRESHOLD_MIN}~{THRESHOLD_MAX}）"
-        if hour in seen:
-            return None, f"小時重複：{hour}"
-        seen.add(hour)
-        segments.append((hour, value))
-    if not segments:
-        return None, "未設定"
-    return sorted(segments), ""
-
-
-def at_hour(segments: list[tuple[int, int]], hour: int) -> int:
-    """Before the first segment the last one still applies (it runs past midnight)."""
-    chosen = segments[-1][1]
-    for start, value in segments:
-        if start > hour:
-            break
-        chosen = value
-    return chosen
-
-
-def effective_threshold(fixed: int, source: str, curve_text, hour: int) -> tuple[int, str]:
-    """(target now, warning). A warning means the curve is unusable and the fixed target is used."""
-    if source != CUSTOM:
-        return fixed, ""
-    segments, error = parse_curve(curve_text)
-    if not segments:
-        return fixed, f"自訂濕度曲線無效（{error}），暫用固定 {fixed}%"
-    return at_hour(segments, hour), ""
+def goal(source: str, fixed: int, dew_rule: DewRule, temperature, hour: int) -> Goal:
+    if source != DEWPOINT:
+        return Goal(float(fixed), "fixed", None, fixed)
+    night = is_night(hour, dew_rule.night_start, dew_rule.night_end)
+    dew = dew_rule.dew_night if night else dew_rule.dew_day
+    cap = Goal(float(dew_rule.rh_cap), "cap", dew, DEW_MACHINE_THRESHOLD, no_temperature=dew is not None and temperature is None)
+    if dew is None or temperature is None:
+        return cap
+    humidity = humidity_at(temperature, dew)
+    return Goal(humidity, "night" if night else "day", dew, DEW_MACHINE_THRESHOLD) if humidity < dew_rule.rh_cap else cap
 
 
 def toggle_on(cut: float, value: float, power_on: bool | None) -> str | None:

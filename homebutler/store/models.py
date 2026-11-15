@@ -312,7 +312,6 @@ class DeviceSetting(Base):
     humidity_offset: Mapped[float] = mapped_column(default=0.0)
     auto_off_hours_text: Mapped[str] = mapped_column(String(40), default="")
     auto_off_hold_text: Mapped[str] = mapped_column(String(40), default="")
-    humidity_rule_text: Mapped[str] = mapped_column(Text, default="")
     removed_at: Mapped[datetime | None] = mapped_column()
 
 

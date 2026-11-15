@@ -31,6 +31,15 @@ class Rule(BaseModel):
     duration_min: int | None = Field(default=None, ge=0, le=1440)
     threshold: int | None = Field(default=None, ge=30, le=80)
     threshold_source: str | None = None
+    # dew-point mode; a field left out is unchanged, dew_night null means no dew-point line at night
+    dew_day: int | None = None
+    dew_night: int | None = None
+    night_start: int | None = None
+    night_end: int | None = None
+    rh_cap: int | None = None
+
+
+DEW_FIELDS = ("dew_day", "dew_night", "night_start", "night_end", "rh_cap")
 
 
 @router.get("")
@@ -65,5 +74,6 @@ def control(name: str, body: Control, request: Request, user: DashboardUser = De
 
 @router.put("/{name}/rule")
 def set_rule(name: str, body: Rule, request: Request, user: DashboardUser = Depends(dashboard_user)):
+    dew = {key: getattr(body, key) for key in DEW_FIELDS if key in body.model_fields_set}
     return _call(lambda: _service(request).set_rule(name, body.auto_mode, body.sensor_name, body.duration_min, body.threshold,
-                                                    body.threshold_source))
+                                                    body.threshold_source, dew))

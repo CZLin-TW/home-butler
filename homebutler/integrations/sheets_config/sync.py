@@ -149,7 +149,6 @@ def apply_device_settings(session: Session, rows: list[dict], default_household:
         setting.humidity_offset = _offset(row.get("濕度補償"), name, number, problems)
         setting.auto_off_hours_text = row.get("自動關機小時數", "")[:40]
         setting.auto_off_hold_text = row.get("自動關機暫緩時段", "")[:40]
-        setting.humidity_rule_text = row.get("濕度控制規則", "")
         setting.removed_at = None
     for name, setting in existing.items():
         if name not in seen and setting.removed_at is None:

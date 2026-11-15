@@ -74,22 +74,10 @@ class FakePanasonic:
 
 
 class RuleTests(unittest.TestCase):
-    def test_curve_parsing_is_strict(self):
-        self.assertEqual(rules.parse_curve("7=55, 23=60"), ([(7, 55), (23, 60)], ""))
-        self.assertEqual(rules.parse_curve("23=60，7=55")[0], [(7, 55), (23, 60)])
-        for bad in ("", "7:55", "24=50", "7=90", "7=55, 7=60"):
-            segments, error = rules.parse_curve(bad)
-            self.assertIsNone(segments)
-            self.assertTrue(error)
-
-    def test_curve_wraps_past_midnight_and_bad_curve_falls_back(self):
-        segments = [(7, 55), (23, 60)]
-        self.assertEqual([rules.at_hour(segments, h) for h in (0, 6, 7, 22, 23)], [60, 60, 55, 55, 60])
-        self.assertEqual(rules.effective_threshold(50, "custom", "7=55, 23=60", 8), (55, ""))
-        value, warning = rules.effective_threshold(50, "custom", "7=", 8)
-        self.assertEqual(value, 50)
-        self.assertIn("暫用固定 50%", warning)
-        self.assertEqual(rules.effective_threshold(50, "fixed", "7=55", 8), (50, ""))
+    def test_night_hours_wrap_past_midnight(self):
+        self.assertEqual([rules.is_night(h, 23, 7) for h in (22, 23, 0, 6, 7)], [False, True, True, True, False])
+        self.assertEqual([rules.is_night(h, 13, 15) for h in (12, 13, 14, 15)], [False, True, True, False])
+        self.assertFalse(rules.is_night(5, 7, 7))
 
     def test_hysteresis_band(self):
         now = START
@@ -104,16 +92,22 @@ class RuleTests(unittest.TestCase):
         self.assertAlmostEqual(rules.dew_point(25, 61), 17.0, delta=0.1)
         self.assertAlmostEqual(rules.dew_point(28, 63), 20.3, delta=0.1)
         self.assertAlmostEqual(rules.humidity_at(25, 17), 61.0, delta=0.5)
-        self.assertAlmostEqual(rules.humidity_at(27, 17), 54.0, delta=0.5)
+        self.assertAlmostEqual(rules.humidity_at(27, 18), 57.9, delta=0.1)
         self.assertAlmostEqual(rules.dew_point(26, rules.humidity_at(26, 17)), 17.0, delta=0.05)
-        goal, warning = rules.target(55, "dewpoint", "7=55", 8)
-        self.assertEqual((goal.machine, goal.cut, goal.on_at, goal.off_at, goal.dew, warning), (50, 17.0, 17.5, 16.7, True, ""))
-        self.assertEqual(rules.target(55, "fixed", "", 8)[0], rules.Target(55, 55, 57, 54, False))
-        self.assertIsNone(rules.reading(goal, 60, None))         # a dew point needs the temperature too
-        self.assertEqual(rules.reading(goal, 61, 25), rules.dew_point(25, 61))
-        self.assertEqual(rules.reading(rules.target(55, "fixed", "", 8)[0], 61, None), 61.0)
-        # The lowest machine target stays below what 17°C means up to 30°C, so the machine never stops by itself.
-        self.assertLess(drivers.LGDriver(None, "x").auto_target(goal.machine), rules.humidity_at(30, 17))
+        dew = rules.DewRule(18, 19, 23, 7, 65)
+        day = rules.goal("dewpoint", 55, dew, 27, 14)
+        self.assertEqual((day.basis, day.dew, day.machine), ("day", 18, 50))
+        self.assertAlmostEqual(day.humidity, rules.humidity_at(27, 18))
+        night = rules.goal("dewpoint", 55, dew, 27, 1)
+        self.assertEqual((night.basis, night.dew), ("night", 19))
+        # Cool room: the dew point would allow more than the ceiling, so the ceiling sets it.
+        self.assertEqual(rules.goal("dewpoint", 55, dew, 20, 14), rules.Goal(65.0, "cap", 18, 50))
+        # No dew-point line at night, or no temperature: only the ceiling.
+        self.assertEqual(rules.goal("dewpoint", 55, rules.DewRule(18, None, 23, 7, 65), 27, 1), rules.Goal(65.0, "cap", None, 50))
+        self.assertEqual(rules.goal("dewpoint", 55, dew, None, 14), rules.Goal(65.0, "cap", 18, 50, no_temperature=True))
+        self.assertEqual(rules.goal("fixed", 55, dew, 27, 14), rules.Goal(55.0, "fixed", None, 55))
+        # The machine's own target stays below anything the dew-point mode can ask for up to 30°C.
+        self.assertLess(drivers.LGDriver(None, "x").auto_target(rules.DEW_MACHINE_THRESHOLD), rules.humidity_at(30, rules.DEW_MIN))
 
     def test_takeover_is_power_or_mode_or_our_target(self):
         expected = {"power": True, "mode": "0", "target": None}
@@ -180,7 +174,7 @@ class ServiceTests(StoreTest):
         self.service = Dehumidifiers(self.store, self.link, self.unit, lg_client, {"G1": "secret"}, ZONE, clock=self.clock)
         with self.store.transaction() as s:
             s.add(DeviceSetting(name="除濕一", kind="dehumidifier", location="房間一", external_id="G1", brand="Panasonic"))
-            s.add(DeviceSetting(name="感測一", kind="sensor", location="房間一", humidity_offset=1.0, humidity_rule_text="7=55, 23=60"))
+            s.add(DeviceSetting(name="感測一", kind="sensor", location="房間一", humidity_offset=1.0))
         self.link.humidity["感測一"] = 52.0
 
     def row(self):
@@ -270,45 +264,57 @@ class ServiceTests(StoreTest):
         self.assertEqual((self.row().auto_mode, self.row().last_event), (False, "auto_disabled_sensor_lost"))
         self.assertFalse(self.unit.on)
 
-    def test_custom_curve_and_a_new_target_restart_the_wait(self):
-        self.clock.at = datetime(2026, 10, 21, 22, 30, tzinfo=ZONE).astimezone(timezone.utc)
+    def test_a_new_fixed_target_restarts_the_wait(self):
         self.link.humidity["感測一"] = None          # silent while switching on: no immediate decision
-        self.service.set_rule("除濕一", True, threshold=50, threshold_source="custom", duration_min=60)
+        self.service.set_rule("除濕一", True, threshold=55, duration_min=60)
         self.link.humidity["感測一"] = 56.0          # 57 ≥ 55+2
         self.every(5, 1)
-        self.assertEqual(self.row().phase, "armed_above")
-        self.assertEqual(self.row().applied_threshold, 55)
-        self.every(30, 1)                                 # 23:05: target 60, the wait starts over
+        self.assertEqual((self.row().phase, self.row().applied_threshold), ("armed_above", 55))
+        self.service.set_rule("除濕一", True, threshold=60)
+        self.every(5, 1)
         row = self.row()
         self.assertEqual((row.applied_threshold, row.phase, row.above_since), (60, "idle_dry", None))
-        self.assertEqual(self.service.views()[0]["rule"]["curve"], [{"hour": 7, "threshold": 55}, {"hour": 23, "threshold": 60}])
 
-    def test_dew_point_mode_follows_the_room_temperature(self):
+    def test_dew_point_mode_follows_the_room_temperature_and_the_night(self):
         self.link.temperature["感測一"] = 27.0
-        self.link.humidity["感測一"] = 56.0          # 57 at 27°C: dew point 17.75
+        self.link.humidity["感測一"] = 58.0          # 59 at 27°C: above 18°C's 57.9
         view = self.service.set_rule("除濕一", True, threshold_source="dewpoint", duration_min=10)
-        self.assertEqual(view["rule"]["last_event"], "toggled_immediate_on")
         rule = view["rule"]
-        self.assertEqual((rule["measure"], rule["dew_point_target"], rule["on_at"], rule["off_at"]), ("dew_point", 17.0, 17.5, 16.7))
-        self.assertEqual(rule["effective_threshold"], 54)              # 17°C at 27°C
-        self.assertAlmostEqual(view["sensor_dew_point"], 17.75, delta=0.05)
+        self.assertEqual(rule["last_event"], "toggled_immediate_on")
+        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap"]), (18, 19, 23, 7, 65))
+        self.assertEqual((rule["basis"], rule["dew_in_effect"]), ("day", 18))
+        self.assertAlmostEqual(rule["effective_threshold"], 57.9, delta=0.1)
         self.assertEqual(self.row().applied_threshold, 50)
-        # Cooler room: the humidity reads higher than at the start, but the dew point is lower, inside the band.
-        self.link.temperature["感測一"] = 25.0
-        self.link.humidity["感測一"] = 62.0          # 63 at 25°C: dew point 17.5
+        # Cooler room, same air: the humidity reads higher, and so does the target; nothing changes.
+        self.link.temperature["感測一"] = 26.0
+        self.link.humidity["感測一"] = 61.0          # 62 at 26°C; target 61.4, in the band
         self.every(5, 4)
         self.assertTrue(self.unit.on)
-        self.assertEqual(self.service.views()[0]["rule"]["effective_threshold"], 61)
-        self.link.humidity["感測一"] = 58.0          # 59 at 25°C: dew point 16.4
-        self.every(5, 2)
-        self.assertTrue(self.unit.on)
-        self.every(5, 1)
+        self.link.humidity["感測一"] = 59.0          # 60 ≤ 61.4−1
+        self.every(5, 3)
         self.assertFalse(self.unit.on)
         self.assertEqual(self.row().last_event, "triggered_off")
-        # No temperature: the sensor counts as silent.
+        # Night (23:00): 19°C at 26°C is 65.4%, above the 65% ceiling, so the ceiling rules.
+        self.clock.at = datetime(2026, 10, 21, 23, 30, tzinfo=ZONE).astimezone(timezone.utc)
+        view = self.service.views()[0]
+        self.assertEqual((view["rule"]["basis"], view["rule"]["effective_threshold"], view["rule"]["dew_in_effect"]), ("cap", 65.0, 19))
+        # No temperature: only the ceiling, and it keeps running rather than counting the sensor as silent.
         self.link.temperature["感測一"] = None
-        self.every(5, 6)
-        self.assertEqual(self.row().phase, "sensor_lost_warning")
+        self.link.humidity["感測一"] = 66.0          # 67 ≥ 65+2
+        self.every(5, 3)
+        self.assertTrue(self.unit.on)
+        self.assertTrue(self.service.views()[0]["rule"]["no_temperature"])
+
+    def test_dew_point_settings_are_checked(self):
+        view = self.service.set_rule("除濕一", False, threshold_source="dewpoint",
+                                     dew={"dew_day": 17, "dew_night": None, "night_start": 22, "night_end": 6, "rh_cap": 60})
+        rule = view["rule"]
+        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap"]), (17, None, 22, 6, 60))
+        for bad in ({"dew_day": 30}, {"dew_day": None}, {"night_start": 24}, {"rh_cap": 90}, {"curve": "7=55"}):
+            with self.assertRaises(Refused):
+                self.service.set_rule("除濕一", False, dew=bad)
+        with self.assertRaises(Refused):
+            self.service.set_rule("除濕一", False, threshold_source="custom")
 
     def test_unreadable_unit_changes_nothing(self):
         self.service.set_rule("除濕一", True, threshold=60)
@@ -347,7 +353,7 @@ class ServiceTests(StoreTest):
         self.assertIn("自動模式", act["control_dehumidifier"](None, {"power": "on"}))
         self.assertEqual(act["set_dehumidifier_auto"](None, {"device_name": "房間一", "auto_mode": "off"}), "✅ 除濕一 已關閉自動除濕模式")
         self.service.set_rule("除濕一", False, threshold_source="dewpoint")
-        self.assertIn("目標 露點 17°C，", act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on"}))
+        self.assertIn("目標 露點 日間 18°C／夜間 19°C（23–7 時），濕度上限 65%，", act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on"}))
         self.service.set_rule("除濕一", False)
         self.assertEqual(act["control_dehumidifier"](None, {"mode": "目標濕度"}), "✅ 除濕一 指令已送出")
         self.assertTrue(act["query_dehumidifier"](None, {}).startswith("💧 除濕一：開啟｜模式：目標濕度｜目標濕度：55%"))
@@ -387,3 +393,8 @@ class RouteTests(StoreTest):
         self.assertEqual(self.client.put("/v2/dehumidifiers/除濕機/rule", json={"auto_mode": True, "threshold": 99},
                                          headers=self.headers()).status_code, 422)
         self.assertEqual(self.client.get("/v2/dehumidifiers/history", headers=self.headers()).status_code, 200)
+        rule = self.client.put("/v2/dehumidifiers/除濕機/rule", json={"auto_mode": False, "threshold_source": "dewpoint", "dew_night": None,
+                                                                    "rh_cap": 60}, headers=self.headers()).json()["rule"]
+        self.assertEqual((rule["threshold_source"], rule["dew_day"], rule["dew_night"], rule["rh_cap"]), ("dewpoint", 18, None, 60))
+        self.assertEqual(self.client.put("/v2/dehumidifiers/除濕機/rule", json={"auto_mode": False, "dew_day": 40},
+                                         headers=self.headers()).status_code, 409)
