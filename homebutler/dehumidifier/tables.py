@@ -22,12 +22,13 @@ class Dehumidifier(Base):
     threshold: Mapped[int] = mapped_column(Integer, default=50)
     threshold_source: Mapped[str] = mapped_column(String(10), default="fixed")      # fixed | dewpoint
     # dew-point mode (rules.py): °C by day and by night (None: no dew-point line at night), the night's
-    # hours, and the humidity ceiling (%) against mould
+    # hours, and the humidity ceiling (%) against mould by day and by night
     dew_day: Mapped[int] = mapped_column(Integer, default=18)
     dew_night: Mapped[int | None] = mapped_column(Integer, default=19)
     night_start: Mapped[int] = mapped_column(Integer, default=23)
     night_end: Mapped[int] = mapped_column(Integer, default=7)
-    rh_cap: Mapped[int] = mapped_column(Integer, default=65)
+    rh_cap_day: Mapped[int] = mapped_column(Integer, default=60)
+    rh_cap_night: Mapped[int] = mapped_column(Integer, default=65)
     # where the rule stands (set by the checks)
     phase: Mapped[str] = mapped_column(String(24), default="disabled")
     countdown_min: Mapped[int | None] = mapped_column(Integer)

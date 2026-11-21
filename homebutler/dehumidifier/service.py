@@ -352,7 +352,7 @@ class Dehumidifiers:
                     "rule": {"auto_mode": row.auto_mode, "sensor_name": row.sensor_name, "duration_min": row.duration_min,
                              "threshold": row.threshold, "threshold_source": row.threshold_source,
                              "dew_day": row.dew_day, "dew_night": row.dew_night, "night_start": row.night_start,
-                             "night_end": row.night_end, "rh_cap": row.rh_cap,
+                             "night_end": row.night_end, "rh_cap_day": row.rh_cap_day, "rh_cap_night": row.rh_cap_night,
                              # The target now and which line sets it (fixed | day | night | cap).
                              "effective_threshold": goal.humidity, "basis": goal.basis, "dew_in_effect": goal.dew,
                              "no_temperature": goal.no_temperature,
@@ -410,7 +410,7 @@ class ScheduleTarget:
 
 
 def _dew_rule(row: Dehumidifier) -> rules.DewRule:
-    return rules.DewRule(row.dew_day, row.dew_night, row.night_start, row.night_end, row.rh_cap)
+    return rules.DewRule(row.dew_day, row.dew_night, row.night_start, row.night_end, row.rh_cap_day, row.rh_cap_night)
 
 
 def _check_dew(dew: dict) -> None:
@@ -426,5 +426,6 @@ def _check_dew(dew: dict) -> None:
     for key in ("night_start", "night_end"):
         if key in dew and (dew[key] is None or not 0 <= dew[key] <= 23):
             raise Refused("夜間起迄需為 0～23 時")
-    if "rh_cap" in dew and (dew["rh_cap"] is None or not rules.CAP_MIN <= dew["rh_cap"] <= rules.CAP_MAX):
-        raise Refused(f"濕度上限需介於 {rules.CAP_MIN}%～{rules.CAP_MAX}%")
+    for key in ("rh_cap_day", "rh_cap_night"):
+        if key in dew and (dew[key] is None or not rules.CAP_MIN <= dew[key] <= rules.CAP_MAX):
+            raise Refused(f"濕度上限需介於 {rules.CAP_MIN}%～{rules.CAP_MAX}%")

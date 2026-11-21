@@ -94,4 +94,4 @@ def actions(service: Dehumidifiers) -> dict:
 def _dew_text(rule: dict) -> str:
     night = f"夜間 {rule['dew_night']}°C" if rule["dew_night"] is not None else "夜間不依露點"
     return (f"露點 日間 {rule['dew_day']}°C／{night}（{rule['night_start']}–{rule['night_end']} 時），"
-            f"濕度上限 {rule['rh_cap']}%")
+            f"濕度上限 日間 {rule['rh_cap_day']}%／夜間 {rule['rh_cap_night']}%")

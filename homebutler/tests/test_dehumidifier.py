@@ -94,7 +94,7 @@ class RuleTests(unittest.TestCase):
         self.assertAlmostEqual(rules.humidity_at(25, 17), 61.0, delta=0.5)
         self.assertAlmostEqual(rules.humidity_at(27, 18), 57.9, delta=0.1)
         self.assertAlmostEqual(rules.dew_point(26, rules.humidity_at(26, 17)), 17.0, delta=0.05)
-        dew = rules.DewRule(18, 19, 23, 7, 65)
+        dew = rules.DewRule(18, 19, 23, 7, 65, 65)
         day = rules.goal("dewpoint", 55, dew, 27, 14)
         self.assertEqual((day.basis, day.dew, day.machine), ("day", 18, 50))
         self.assertAlmostEqual(day.humidity, rules.humidity_at(27, 18))
@@ -103,9 +103,12 @@ class RuleTests(unittest.TestCase):
         # Cool room: the dew point would allow more than the ceiling, so the ceiling sets it.
         self.assertEqual(rules.goal("dewpoint", 55, dew, 20, 14), rules.Goal(65.0, "cap", 18, 50))
         # No dew-point line at night, or no temperature: only the ceiling.
-        self.assertEqual(rules.goal("dewpoint", 55, rules.DewRule(18, None, 23, 7, 65), 27, 1), rules.Goal(65.0, "cap", None, 50))
+        self.assertEqual(rules.goal("dewpoint", 55, rules.DewRule(18, None, 23, 7, 65, 65), 27, 1), rules.Goal(65.0, "cap", None, 50))
         self.assertEqual(rules.goal("dewpoint", 55, dew, None, 14), rules.Goal(65.0, "cap", 18, 50, no_temperature=True))
         self.assertEqual(rules.goal("fixed", 55, dew, 27, 14), rules.Goal(55.0, "fixed", None, 55))
+        # The ceiling also has a day and a night value.
+        split = rules.DewRule(18, 19, 23, 7, 60, 65)
+        self.assertEqual((rules.goal("dewpoint", 55, split, 22, 14).humidity, rules.goal("dewpoint", 55, split, 22, 1).humidity), (60.0, 65.0))
         # The machine's own target stays below anything the dew-point mode can ask for up to 30°C.
         self.assertLess(drivers.LGDriver(None, "x").auto_target(rules.DEW_MACHINE_THRESHOLD), rules.humidity_at(30, rules.DEW_MIN))
 
@@ -281,16 +284,17 @@ class ServiceTests(StoreTest):
         view = self.service.set_rule("除濕一", True, threshold_source="dewpoint", duration_min=10)
         rule = view["rule"]
         self.assertEqual(rule["last_event"], "toggled_immediate_on")
-        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap"]), (18, 19, 23, 7, 65))
+        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap_day"], rule["rh_cap_night"]),
+                         (18, 19, 23, 7, 60, 65))
         self.assertEqual((rule["basis"], rule["dew_in_effect"]), ("day", 18))
         self.assertAlmostEqual(rule["effective_threshold"], 57.9, delta=0.1)
         self.assertEqual(self.row().applied_threshold, 50)
         # Cooler room, same air: the humidity reads higher, and so does the target; nothing changes.
         self.link.temperature["感測一"] = 26.0
-        self.link.humidity["感測一"] = 61.0          # 62 at 26°C; target 61.4, in the band
+        self.link.humidity["感測一"] = 61.0          # 62 at 26°C; 18°C means 61.4 there, so the day's 60 % ceiling sets it
         self.every(5, 4)
         self.assertTrue(self.unit.on)
-        self.link.humidity["感測一"] = 59.0          # 60 ≤ 61.4−1
+        self.link.humidity["感測一"] = 57.0          # 58 ≤ 60−1
         self.every(5, 3)
         self.assertFalse(self.unit.on)
         self.assertEqual(self.row().last_event, "triggered_off")
@@ -307,10 +311,12 @@ class ServiceTests(StoreTest):
 
     def test_dew_point_settings_are_checked(self):
         view = self.service.set_rule("除濕一", False, threshold_source="dewpoint",
-                                     dew={"dew_day": 17, "dew_night": None, "night_start": 22, "night_end": 6, "rh_cap": 60})
+                                     dew={"dew_day": 17, "dew_night": None, "night_start": 22, "night_end": 6, "rh_cap_day": 55,
+                                          "rh_cap_night": 70})
         rule = view["rule"]
-        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap"]), (17, None, 22, 6, 60))
-        for bad in ({"dew_day": 30}, {"dew_day": None}, {"night_start": 24}, {"rh_cap": 90}, {"curve": "7=55"}):
+        self.assertEqual((rule["dew_day"], rule["dew_night"], rule["night_start"], rule["night_end"], rule["rh_cap_day"], rule["rh_cap_night"]),
+                         (17, None, 22, 6, 55, 70))
+        for bad in ({"dew_day": 30}, {"dew_day": None}, {"night_start": 24}, {"rh_cap_day": 90}, {"rh_cap_night": 40}, {"rh_cap": 60}):
             with self.assertRaises(Refused):
                 self.service.set_rule("除濕一", False, dew=bad)
         with self.assertRaises(Refused):
@@ -353,7 +359,7 @@ class ServiceTests(StoreTest):
         self.assertIn("自動模式", act["control_dehumidifier"](None, {"power": "on"}))
         self.assertEqual(act["set_dehumidifier_auto"](None, {"device_name": "房間一", "auto_mode": "off"}), "✅ 除濕一 已關閉自動除濕模式")
         self.service.set_rule("除濕一", False, threshold_source="dewpoint")
-        self.assertIn("目標 露點 日間 18°C／夜間 19°C（23–7 時），濕度上限 65%，", act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on"}))
+        self.assertIn("目標 露點 日間 18°C／夜間 19°C（23–7 時），濕度上限 日間 60%／夜間 65%，", act["set_dehumidifier_auto"](None, {"scope": "all", "auto_mode": "on"}))
         self.service.set_rule("除濕一", False)
         self.assertEqual(act["control_dehumidifier"](None, {"mode": "目標濕度"}), "✅ 除濕一 指令已送出")
         self.assertTrue(act["query_dehumidifier"](None, {}).startswith("💧 除濕一：開啟｜模式：目標濕度｜目標濕度：55%"))
@@ -394,7 +400,8 @@ class RouteTests(StoreTest):
                                          headers=self.headers()).status_code, 422)
         self.assertEqual(self.client.get("/v2/dehumidifiers/history", headers=self.headers()).status_code, 200)
         rule = self.client.put("/v2/dehumidifiers/除濕機/rule", json={"auto_mode": False, "threshold_source": "dewpoint", "dew_night": None,
-                                                                    "rh_cap": 60}, headers=self.headers()).json()["rule"]
-        self.assertEqual((rule["threshold_source"], rule["dew_day"], rule["dew_night"], rule["rh_cap"]), ("dewpoint", 18, None, 60))
+                                                                    "rh_cap_night": 60}, headers=self.headers()).json()["rule"]
+        self.assertEqual((rule["threshold_source"], rule["dew_day"], rule["dew_night"], rule["rh_cap_day"], rule["rh_cap_night"]),
+                         ("dewpoint", 18, None, 60, 60))
         self.assertEqual(self.client.put("/v2/dehumidifiers/除濕機/rule", json={"auto_mode": False, "dew_day": 40},
                                          headers=self.headers()).status_code, 409)

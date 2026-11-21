@@ -8,8 +8,9 @@ A dehumidifier in auto mode follows one room sensor against a target humidity (%
     humidity moves with the temperature (the same air reads higher in a cooler room, and a running
     dehumidifier warms the room and lowers the reading without removing water); the dew point is the
     water itself, which is what feels muggy.
-  * A humidity ceiling against mould and dust mites, whatever the hour. Walls colder than the room hold
-    a higher humidity than the room's air, so in winter this is the line that acts.
+  * A humidity ceiling against mould and dust mites, also one for the day and one for the night (the
+    night's usually looser, for quiet). Walls colder than the room hold a higher humidity than the room's
+    air, so in winter this is the line that acts.
   Without a temperature only the ceiling applies.
 - While running, asymmetric hysteresis around the target: on when humidity ≥ target+2 for the whole
   wait, off when ≤ target−1 for the whole wait, and in between nothing changes (target 60 → 59…62).
@@ -33,7 +34,7 @@ FIXED, DEWPOINT = "fixed", "dewpoint"
 SOURCES = (FIXED, DEWPOINT)
 DEW_MIN, DEW_MAX = 15, 21
 CAP_MIN, CAP_MAX = 50, 80
-DEFAULTS = {"dew_day": 18, "dew_night": 19, "night_start": 23, "night_end": 7, "rh_cap": 65}
+DEFAULTS = {"dew_day": 18, "dew_night": 19, "night_start": 23, "night_end": 7, "rh_cap_day": 60, "rh_cap_night": 65}
 DEW_MACHINE_THRESHOLD = 50          # LG's own target 40: below any target the dew-point mode can give up to 30°C
 MAGNUS_A, MAGNUS_B = 17.62, 243.12
 
@@ -63,7 +64,8 @@ class DewRule:
     dew_night: int | None
     night_start: int
     night_end: int
-    rh_cap: int
+    rh_cap_day: int
+    rh_cap_night: int
 
 
 @dataclass(frozen=True)
@@ -80,11 +82,12 @@ def goal(source: str, fixed: int, dew_rule: DewRule, temperature, hour: int) -> 
         return Goal(float(fixed), "fixed", None, fixed)
     night = is_night(hour, dew_rule.night_start, dew_rule.night_end)
     dew = dew_rule.dew_night if night else dew_rule.dew_day
-    cap = Goal(float(dew_rule.rh_cap), "cap", dew, DEW_MACHINE_THRESHOLD, no_temperature=dew is not None and temperature is None)
+    ceiling = dew_rule.rh_cap_night if night else dew_rule.rh_cap_day
+    cap = Goal(float(ceiling), "cap", dew, DEW_MACHINE_THRESHOLD, no_temperature=dew is not None and temperature is None)
     if dew is None or temperature is None:
         return cap
     humidity = humidity_at(temperature, dew)
-    return Goal(humidity, "night" if night else "day", dew, DEW_MACHINE_THRESHOLD) if humidity < dew_rule.rh_cap else cap
+    return Goal(humidity, "night" if night else "day", dew, DEW_MACHINE_THRESHOLD) if humidity < ceiling else cap
 
 
 def toggle_on(cut: float, value: float, power_on: bool | None) -> str | None:

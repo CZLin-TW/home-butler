@@ -36,10 +36,11 @@ class Rule(BaseModel):
     dew_night: int | None = None
     night_start: int | None = None
     night_end: int | None = None
-    rh_cap: int | None = None
+    rh_cap_day: int | None = None
+    rh_cap_night: int | None = None
 
 
-DEW_FIELDS = ("dew_day", "dew_night", "night_start", "night_end", "rh_cap")
+DEW_FIELDS = ("dew_day", "dew_night", "night_start", "night_end", "rh_cap_day", "rh_cap_night")
 
 
 @router.get("")
